@@ -40,7 +40,7 @@ public:
 
   std::map<std::string, double> data;  //卡方检验数据
   std::deque<int> recent_nis_failures{0};
-  size_t window_size = 100;
+  size_t window_size = 10000;
   double last_nis;
 
 private:

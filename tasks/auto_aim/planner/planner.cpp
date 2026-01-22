@@ -76,11 +76,15 @@ Plan Planner::plan(Target target, double bullet_speed)
   plan.target_yaw = tools::limit_rad(traj(0, HALF_HORIZON) + yaw0);
   plan.target_pitch = traj(2, HALF_HORIZON);
 
-  plan.yaw = tools::limit_rad(yaw_solver_->work->x(0, HALF_HORIZON) + yaw0);
+  plan.yaw = yaw_solver_->work->x(0, HALF_HORIZON) + yaw0;
+  plan.yaw *= 180/M_PI;
+  std::cout << plan.yaw << std::endl;
   plan.yaw_vel = yaw_solver_->work->x(1, HALF_HORIZON);
   plan.yaw_acc = yaw_solver_->work->u(0, HALF_HORIZON);
 
   plan.pitch = pitch_solver_->work->x(0, HALF_HORIZON);
+  plan.pitch *= -180/M_PI;
+
   plan.pitch_vel = pitch_solver_->work->x(1, HALF_HORIZON);
   plan.pitch_acc = pitch_solver_->work->u(0, HALF_HORIZON);
 

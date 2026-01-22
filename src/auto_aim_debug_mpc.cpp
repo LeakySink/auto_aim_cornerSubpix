@@ -23,7 +23,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -47,7 +47,7 @@ int main(int argc, char * argv[])
 
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
-
+  std::list<auto_aim::Armor> armors;
   std::atomic<bool> quit = false;
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
@@ -57,6 +57,12 @@ int main(int argc, char * argv[])
       auto target = target_queue.front();
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
+      //
+      // printf("=== Plan Info ===\n");
+      // printf("target_pitch=%.2f°, plan.pitch=%.2f°\n", plan.target_pitch, plan.pitch);
+      // printf("gimbal_pitch=%.2f°, bullet_speed=%.1f\n", gs.pitch, gs.bullet_speed);
+      // printf("Sending: pitch=%.2f°\n", plan.pitch);
+      // printf("================\n");
 
       gimbal.send(
         plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
@@ -73,8 +79,8 @@ int main(int argc, char * argv[])
       data["gimbal_pitch"] = gs.pitch;
       data["gimbal_pitch_vel"] = gs.pitch_vel;
 
-      data["target_yaw"] = plan.target_yaw;
-      data["target_pitch"] = plan.target_pitch;
+      //data["target_yaw"] = plan.target_yaw;
+      //data["target_pitch"] = plan.target_pitch;
 
       data["plan_yaw"] = plan.yaw;
       data["plan_yaw_vel"] = plan.yaw_vel;
@@ -90,6 +96,8 @@ int main(int argc, char * argv[])
       if (target.has_value()) {
         data["target_z"] = target->ekf_x()[4];   //z
         data["target_vz"] = target->ekf_x()[5];  //vz
+        data["target_yaw"] = target->ekf_x()[6];
+        data["target_yaw_vel"] = target->ekf_x()[7];
       }
 
       if (target.has_value()) {
@@ -97,7 +105,10 @@ int main(int argc, char * argv[])
       } else {
         data["w"] = 0.0;
       }
-
+      if (!armors.empty()) {
+        auto armor = armors.front();
+        data["measure_yaw"] = armor.yaw_raw;
+      }
       plotter.plot(data);
 
       std::this_thread::sleep_for(10ms);
@@ -110,9 +121,8 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     camera.read(img, t);
     auto q = gimbal.q(t);
-
     solver.set_R_gimbal2world(q);
-    auto armors = yolo.detect(img);
+    armors = yolo.detect(img);
     auto targets = tracker.track(armors, t);
     if (!targets.empty())
       target_queue.push(targets.front());

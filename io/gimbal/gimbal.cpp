@@ -122,7 +122,6 @@ bool Gimbal::read(uint8_t * buffer, size_t size)
   try {
     return serial_.read(buffer, size) == size;
   } catch (const std::exception & e) {
-    // tools::logger()->warn("[Gimbal] Failed to read serial: {}", e.what());
     return false;
   }
 }
@@ -145,7 +144,10 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') continue;
+    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') {
+      std::cout<<"head er"<<std::endl;
+      continue;
+    }
 
     auto t = std::chrono::steady_clock::now();
 

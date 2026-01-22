@@ -27,6 +27,8 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <time.h>
+
+#include <iostream>
 #ifdef __MACH__
 #include <AvailabilityMacros.h>
 #include <mach/clock.h>
@@ -608,6 +610,7 @@ size_t Serial::SerialImpl::read(uint8_t * buf, size_t size)
   // Calculate total timeout in milliseconds t_c + (t_m * N)
   long total_timeout_ms = timeout_.read_timeout_constant;
   total_timeout_ms += timeout_.read_timeout_multiplier * static_cast<long>(size);
+  total_timeout_ms = 5;
   MillisecondTimer total_timeout(total_timeout_ms);
 
   // Pre-fill buffer with available bytes
@@ -621,6 +624,7 @@ size_t Serial::SerialImpl::read(uint8_t * buf, size_t size)
   while (bytes_read < size) {
     int64_t timeout_remaining_ms = total_timeout.remaining();
     if (timeout_remaining_ms <= 0) {
+      //std::cout << "timeout_remaining_ms=" << timeout_remaining_ms << std::endl;
       // Timed out
       break;
     }

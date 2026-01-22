@@ -67,6 +67,8 @@ int main(int argc, char * argv[])
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
 
+  nlohmann::json data;
+
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
     uint16_t last_bullet_count = 0;
@@ -75,12 +77,15 @@ int main(int argc, char * argv[])
       if (!target_queue.empty() && mode == io::GimbalMode::AUTO_AIM) {
         auto target = target_queue.front();
         auto gs = gimbal.state();
+
         auto plan = planner.plan(target, gs.bullet_speed);
 
+        data["plan_yaw"] = plan.yaw;
+        data["plan_pitch"] = plan.pitch;
         gimbal.send(
           plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);
-
+        plotter.plot(data);
         std::this_thread::sleep_for(10ms);
       } else
         std::this_thread::sleep_for(200ms);
@@ -88,6 +93,7 @@ int main(int argc, char * argv[])
   });
 
   while (!exiter.exit()) {
+
     mode = gimbal.mode();
 
     if (last_mode != mode) {
@@ -105,8 +111,11 @@ int main(int argc, char * argv[])
     if (mode.load() == io::GimbalMode::AUTO_AIM) {
       auto armors = yolo.detect(img);
       auto targets = tracker.track(armors, t);
-      if (!targets.empty())
+      if (!targets.empty()) {
         target_queue.push(targets.front());
+        Eigen::VectorXd x = targets.front().ekf_x();
+        data["yaw"] = x[6];
+      }
       else
         target_queue.push(std::nullopt);
     }
