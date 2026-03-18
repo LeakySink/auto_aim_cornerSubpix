@@ -14,6 +14,7 @@ Gimbal::Gimbal(const std::string & config_path)
 
   try {
     serial_.setPort(com_port);
+    serial_.setBaudrate(115200);
     serial_.open();
   } catch (const std::exception & e) {
     tools::logger()->error("[Gimbal] Failed to open serial: {}", e.what());
@@ -63,6 +64,7 @@ std::string Gimbal::str(GimbalMode mode) const
 
 Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 {
+
   while (true) {
     auto [q_a, t_a] = queue_.pop();
     auto [q_b, t_b] = queue_.front();
@@ -79,16 +81,19 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 
 void Gimbal::send(io::VisionToGimbal VisionToGimbal)
 {
-  tx_data_.mode = VisionToGimbal.mode;
-  tx_data_.yaw = VisionToGimbal.yaw;
-  tx_data_.yaw_vel = VisionToGimbal.yaw_vel;
-  tx_data_.yaw_acc = VisionToGimbal.yaw_acc;
+  tx_data_.header = 0xff;
+  tx_data_.length = 30;
+  tx_data_.id = 0x81;
+  tx_data_.fire_advice = VisionToGimbal.fire_advice;
   tx_data_.pitch = VisionToGimbal.pitch;
-  tx_data_.pitch_vel = VisionToGimbal.pitch_vel;
-  tx_data_.pitch_acc = VisionToGimbal.pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
-
+  tx_data_.yaw = VisionToGimbal.yaw;
+  tx_data_.distance = 1.0;
+  tx_data_.top_freq = VisionToGimbal.top_freq;
+  tx_data_.top_ampl = VisionToGimbal.top_ampl;
+  tx_data_.jump_time = VisionToGimbal.jump_time;
+  tx_data_.shoot_freq = 10;
+  tx_data_.id_ = 0;
+  tx_data_.tail = 0x0d;
   try {
     serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
   } catch (const std::exception & e) {
@@ -100,15 +105,25 @@ void Gimbal::send(
   bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
   float pitch_acc)
 {
-  tx_data_.mode = control ? (fire ? 2 : 1) : 0;
+  tx_data_.header = 0xff;
+  tx_data_.length = 30;
+  tx_data_.id = 0x81;
+  if (control) {
+    tx_data_.fire_advice = fire;
+  }
+  else {
+    tx_data_.fire_advice = 0;
+  }
+
   tx_data_.yaw = yaw;
-  tx_data_.yaw_vel = yaw_vel;
-  tx_data_.yaw_acc = yaw_acc;
   tx_data_.pitch = pitch;
-  tx_data_.pitch_vel = pitch_vel;
-  tx_data_.pitch_acc = pitch_acc;
-  tx_data_.crc16 = tools::get_crc16(
-    reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
+
+  tx_data_.distance = 1.0;
+  tx_data_.top_freq = 0;
+  tx_data_.top_ampl = 0;
+  tx_data_.jump_time = 0;
+  tx_data_.shoot_freq = 10;
+  tx_data_.tail = 0x0d;
 
   try {
     serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
@@ -139,42 +154,52 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.head))) {
+    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.header))) {
       error_count++;
       continue;
     }
 
-    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') {
-      std::cout<<"head er"<<std::endl;
+    if (rx_data_.header != 0xff) {
+      //std::cout<<"head er"<<std::endl;
       continue;
     }
 
     auto t = std::chrono::steady_clock::now();
 
     if (!read(
-          reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.head),
-          sizeof(rx_data_) - sizeof(rx_data_.head))) {
+          reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.header),
+          sizeof(rx_data_) - sizeof(rx_data_.header))) {
       error_count++;
       continue;
     }
 
-    if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_))) {
-      tools::logger()->debug("[Gimbal] CRC16 check failed.");
+    // if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_))) {
+    //   tools::logger()->debug("[Gimbal] CRC16 check failed.");
+    //   continue;
+    // }
+    if (rx_data_.tail!=0x0d) {
+      //std::cout <<"t er"<<std::endl;
       continue;
     }
-
+    // std::cout<<std::endl;    for (int i=0;i<17;i++) {
+    //   std::cout<<std::hex<<(unsigned int)*(reinterpret_cast<unsigned  char*>(&rx_data_) + i)<<" ";
+    // }
     error_count = 0;
-    Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2], rx_data_.q[3]);
+    Eigen::Quaterniond q;
+    std::cout<<"yaw:"<<rx_data_.yaw<<"pitch"<<rx_data_.pitch<<std::endl;
+    q = Eigen::AngleAxisd(rx_data_.yaw*M_PI/180, Eigen::Vector3d::UnitZ())
+      * Eigen::AngleAxisd(-rx_data_.pitch*M_PI/180, Eigen::Vector3d::UnitY())
+      * Eigen::AngleAxisd(rx_data_.roll*M_PI/180, Eigen::Vector3d::UnitX());
     queue_.push({q, t});
 
     std::lock_guard<std::mutex> lock(mutex_);
 
     state_.yaw = rx_data_.yaw;
-    state_.yaw_vel = rx_data_.yaw_vel;
+    state_.yaw_vel = rx_data_.roll;
     state_.pitch = rx_data_.pitch;
-    state_.pitch_vel = rx_data_.pitch_vel;
-    state_.bullet_speed = rx_data_.bullet_speed;
-    state_.bullet_count = rx_data_.bullet_count;
+    state_.pitch_vel = 0;
+    state_.bullet_speed = 0;
+    state_.bullet_count = 0;
 
     switch (rx_data_.mode) {
       case 0:
@@ -190,8 +215,8 @@ void Gimbal::read_thread()
         mode_ = GimbalMode::BIG_BUFF;
         break;
       default:
-        mode_ = GimbalMode::IDLE;
-        tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
+        mode_ = GimbalMode::AUTO_AIM;
+        //tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
         break;
     }
   }

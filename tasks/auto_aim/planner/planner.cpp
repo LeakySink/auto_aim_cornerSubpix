@@ -78,13 +78,12 @@ Plan Planner::plan(Target target, double bullet_speed)
 
   plan.yaw = yaw_solver_->work->x(0, HALF_HORIZON) + yaw0;
   plan.yaw *= 180/M_PI;
-  std::cout << plan.yaw << std::endl;
   plan.yaw_vel = yaw_solver_->work->x(1, HALF_HORIZON);
   plan.yaw_acc = yaw_solver_->work->u(0, HALF_HORIZON);
 
   plan.pitch = pitch_solver_->work->x(0, HALF_HORIZON);
   plan.pitch *= -180/M_PI;
-
+  //std::cout <<"plan_pitch"<<plan.pitch <<"plan_yaw"<<plan.yaw<< std::endl;
   plan.pitch_vel = pitch_solver_->work->x(1, HALF_HORIZON);
   plan.pitch_acc = pitch_solver_->work->u(0, HALF_HORIZON);
 
@@ -94,6 +93,10 @@ Plan Planner::plan(Target target, double bullet_speed)
       traj(0, HALF_HORIZON + shoot_offset_) - yaw_solver_->work->x(0, HALF_HORIZON + shoot_offset_),
       traj(2, HALF_HORIZON + shoot_offset_) -
         pitch_solver_->work->x(0, HALF_HORIZON + shoot_offset_)) < fire_thresh_;
+  // std::cout << "min_dist:" << min_dist
+  //         << " traj_pitch:" << traj(2, HALF_HORIZON) * 57.3
+  //         << " xyz_z:" << xyz.z() << std::endl;
+
   return plan;
 }
 

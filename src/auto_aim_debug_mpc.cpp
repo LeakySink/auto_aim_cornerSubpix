@@ -23,7 +23,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -57,17 +57,11 @@ int main(int argc, char * argv[])
       auto target = target_queue.front();
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
-      //
-      // printf("=== Plan Info ===\n");
-      // printf("target_pitch=%.2f°, plan.pitch=%.2f°\n", plan.target_pitch, plan.pitch);
-      // printf("gimbal_pitch=%.2f°, bullet_speed=%.1f\n", gs.pitch, gs.bullet_speed);
-      // printf("Sending: pitch=%.2f°\n", plan.pitch);
-      // printf("================\n");
-
-      gimbal.send(
-        plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-        plan.pitch_acc);
-
+      if (plan.control) {
+        gimbal.send(
+       plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
+       plan.pitch_acc);
+      }
       auto fired = gs.bullet_count > last_bullet_count;
       last_bullet_count = gs.bullet_count;
 
@@ -94,6 +88,10 @@ int main(int argc, char * argv[])
       data["fired"] = fired ? 1 : 0;
 
       if (target.has_value()) {
+        data["target_x"] = target->ekf_x()[0];   //z
+        data["target_vx"] = target->ekf_x()[1];
+        data["target_y"] = target->ekf_x()[2];   //z
+        data["target_vy"] = target->ekf_x()[3];
         data["target_z"] = target->ekf_x()[4];   //z
         data["target_vz"] = target->ekf_x()[5];  //vz
         data["target_yaw"] = target->ekf_x()[6];

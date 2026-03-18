@@ -174,6 +174,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   if (state_ == "lost") return {switch_target, {}};  // 返回switch_target和空的targets
 
   std::list<Target> targets = {target_};
+
   return {switch_target, targets};
 }
 
@@ -235,17 +236,7 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   auto & armor = armors.front();
   solver_.solve(armor);
 
-  // 根据兵种优化初始化参数
-  auto is_balance = (armor.type == ArmorType::big) &&
-                    (armor.name == ArmorName::three || armor.name == ArmorName::four ||
-                     armor.name == ArmorName::five);
-
-  if (is_balance) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
-    target_ = Target(armor, t, 0.2, 2, P0_dig);
-  }
-
-  else if (armor.name == ArmorName::outpost) {
+  if (armor.name == ArmorName::outpost) {
     Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
     target_ = Target(armor, t, 0.2765, 3, P0_dig);
   }
@@ -256,7 +247,7 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   }
 
   else {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
+    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 400, 1e-5, 1, 1}};
     target_ = Target(armor, t, 0.2, 4, P0_dig);
   }
 

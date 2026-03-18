@@ -102,6 +102,11 @@ target_link_libraries(planner_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim too
 add_executable(planner_test_offline tests/planner_test_offline.cpp)
 target_link_libraries(planner_test_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
+add_executable(diagnose_hik_camera io/hikrobot/diagnose_camera.cpp)
+target_include_directories(diagnose_hik_camera PRIVATE io/hikrobot/include)
+target_link_directories(diagnose_hik_camera PRIVATE io/hikrobot/lib/amd64)
+target_link_libraries(diagnose_hik_camera ${OpenCV_LIBS} MvCameraControl usb-1.0)
+
 # 检查 ROS 环境
 find_package(ament_cmake QUIET)
 find_package(rclcpp QUIET)
