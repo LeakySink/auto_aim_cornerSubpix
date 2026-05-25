@@ -77,20 +77,11 @@ Plan Planner::plan(Target target, double bullet_speed)
   plan.target_pitch = traj(2, HALF_HORIZON);
 
   plan.yaw = yaw_solver_->work->x(0, HALF_HORIZON) + yaw0;
-  // [BUG_MARK_1] plan.yaw 此处单位为 rad，gimbal.send() 内部会再乘 RAD2DEG。
-  // 若在此处提前 *=180/M_PI 则发送值被放大57.3倍 → 云台乱甩。
-  // 当前保持 rad，与 buff_aimer 输出单位一致。
-  // plan.yaw *= 180/M_PI;  // 已注释：不要在这里转度，send()内部会转
   plan.yaw_vel = yaw_solver_->work->x(1, HALF_HORIZON);
   plan.yaw_acc = yaw_solver_->work->u(0, HALF_HORIZON);
 
   plan.pitch = pitch_solver_->work->x(0, HALF_HORIZON);
-  // [BUG_MARK_1] 同上，pitch 也不在此处转度，send()内部统一转换。
-  // plan.pitch *= -180/M_PI;  // 已注释：不要在这里转度
-  plan.pitch = -plan.pitch;  // 保留符号翻转（世界坐标系向上为负）
-  tools::logger()->info(
-    "[PLANNER_DEBUG] yaw_rad={:.4f} pitch_rad={:.4f} fire={} control={}",
-    plan.yaw, plan.pitch, plan.fire, plan.control);
+  plan.pitch = -plan.pitch;
   plan.pitch_vel = pitch_solver_->work->x(1, HALF_HORIZON);
   plan.pitch_acc = pitch_solver_->work->u(0, HALF_HORIZON);
 

@@ -197,7 +197,7 @@ void Gimbal::read_thread()
     double yaw_rad   = static_cast<double>(rx_data_.yaw)   * DEG2RAD;
 
     Eigen::AngleAxisd roll_aa(roll_rad,   Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitch_aa(pitch_rad, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd pitch_aa(-pitch_rad, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd yaw_aa(yaw_rad,     Eigen::Vector3d::UnitZ());
     Eigen::Quaterniond q = (yaw_aa * pitch_aa * roll_aa).normalized();
     queue_.push({q, t});
