@@ -30,6 +30,12 @@ public:
     std::chrono::steady_clock::time_point t, bool use_enemy_color = true);
 
 private:
+  struct RobotConfig {
+    double radius;
+    int armor_num;
+    Eigen::VectorXd p0;
+  };
+
   Solver & solver_;
   Color enemy_color_;
   int min_detect_count_;
@@ -42,6 +48,11 @@ private:
   Target target_;
   std::chrono::steady_clock::time_point last_timestamp_;
   ArmorPriority omni_target_priority_;
+
+  EkfParams ekf_params_;
+  RobotConfig outpost_cfg_;
+  RobotConfig base_cfg_;
+  RobotConfig normal_cfg_;
 
   void state_machine(bool found);
 

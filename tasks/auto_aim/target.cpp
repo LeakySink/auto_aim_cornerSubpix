@@ -9,7 +9,7 @@ namespace auto_aim
 {
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-  Eigen::VectorXd P0_dig)
+  Eigen::VectorXd P0_dig, EkfParams ekf_params)
 : name(armor.name),
   armor_type(armor.type),
   jumped(false),
@@ -19,7 +19,8 @@ Target::Target(
   t_(t),
   is_switch_(false),
   is_converged_(false),
-  switch_count_(0)
+  switch_count_(0),
+  ekf_params_(ekf_params)
 {
   auto r = radius;
   priority = armor.priority;
@@ -98,8 +99,8 @@ void Target::predict(double dt)
   // v1 = 100;  // 加速度方差
   // v2 = 75;  // 角加速度方差
   //哨兵
-  v1 = 100;
-  v2 = 75;
+  v1 = ekf_params_.q_xyz_acc_var;
+  v2 = ekf_params_.q_yaw_acc_var;
   auto a = dt * dt * dt * dt / 4;
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
@@ -196,8 +197,10 @@ void Target::update_ypda(const Armor & armor, int id)
   //    log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 9e-2}};
   //哨兵
   Eigen::VectorXd R_dig{
-      {4e-2, 4e-2, log(std::abs(delta_angle) + 1) + 1,
-       log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 1.5e-2}};
+      {ekf_params_.r_yaw,
+       ekf_params_.r_pitch,
+       log(std::abs(delta_angle) + 1) + 1,
+       log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base}};
 
   //测量过程噪声偏差的方差
   Eigen::MatrixXd R = R_dig.asDiagonal();

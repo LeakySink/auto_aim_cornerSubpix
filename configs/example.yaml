@@ -56,6 +56,30 @@ can_interface: "can0"
 #####-----tracker参数-----#####
 min_detect_count: 5
 max_temp_lost_count: 15
+outpost_max_temp_lost_count: 75
+
+#####-----EKF参数-----#####
+ekf:
+  q_xyz_acc_var: 100.0   # 位置/速度加速度方差
+  q_yaw_acc_var: 75.0    # 角加速度方差
+  r_yaw: 4.0e-2          # yaw 观测噪声
+  r_pitch: 4.0e-2        # pitch 观测噪声
+  r_dist_base: 1.5e-2    # 距离观测噪声基础值
+
+  outpost:
+    radius: 0.2765
+    armor_num: 3
+    p0: [1, 64, 1, 64, 1, 81, 0.4, 100, 1.0e-4, 0, 0]
+
+  base:
+    radius: 0.3205
+    armor_num: 3
+    p0: [1, 64, 1, 64, 1, 64, 0.4, 100, 1.0e-4, 0, 0]
+
+  normal:
+    radius: 0.2
+    armor_num: 4
+    p0: [1, 64, 1, 64, 1, 64, 0.4, 400, 1.0e-5, 1, 1]
 
 #####-----aimer参数-----#####
 yaw_offset: -2.5 # degree -2.5

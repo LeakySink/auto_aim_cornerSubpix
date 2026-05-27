@@ -14,6 +14,14 @@
 namespace auto_aim
 {
 
+struct EkfParams {
+  double q_xyz_acc_var;  // Q 矩阵：位置/速度加速度方差
+  double q_yaw_acc_var;  // Q 矩阵：角加速度方差
+  double r_yaw;          // R 矩阵：yaw 观测噪声
+  double r_pitch;        // R 矩阵：pitch 观测噪声
+  double r_dist_base;    // R 矩阵：距离观测噪声基础值
+};
+
 class Target
 {
 public:
@@ -26,7 +34,7 @@ public:
   Target() = default;
   Target(
     const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-    Eigen::VectorXd P0_dig);
+    Eigen::VectorXd P0_dig, EkfParams ekf_params);
   Target(double x, double vyaw, double radius, double h);
 
   void predict(std::chrono::steady_clock::time_point t);
@@ -54,6 +62,7 @@ private:
 
   tools::ExtendedKalmanFilter ekf_;
   std::chrono::steady_clock::time_point t_;
+  EkfParams ekf_params_;
 
   void update_ypda(const Armor & armor, int id);  // yaw pitch distance angle
 

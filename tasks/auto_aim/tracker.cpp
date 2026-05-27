@@ -24,6 +24,26 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
   outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
   normal_temp_lost_count_ = max_temp_lost_count_;
+
+  auto ekf = yaml["ekf"];
+  ekf_params_.q_xyz_acc_var = ekf["q_xyz_acc_var"].as<double>();
+  ekf_params_.q_yaw_acc_var = ekf["q_yaw_acc_var"].as<double>();
+  ekf_params_.r_yaw         = ekf["r_yaw"].as<double>();
+  ekf_params_.r_pitch       = ekf["r_pitch"].as<double>();
+  ekf_params_.r_dist_base   = ekf["r_dist_base"].as<double>();
+
+  auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {
+    auto node = ekf[key];
+    auto p0_vec = node["p0"].as<std::vector<double>>();
+    return {
+      node["radius"].as<double>(),
+      node["armor_num"].as<int>(),
+      Eigen::Map<Eigen::VectorXd>(p0_vec.data(), p0_vec.size())
+    };
+  };
+  outpost_cfg_ = load_robot_cfg("outpost");
+  base_cfg_    = load_robot_cfg("base");
+  normal_cfg_  = load_robot_cfg("normal");
 }
 
 std::string Tracker::state() const { return state_; }
@@ -236,20 +256,12 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   auto & armor = armors.front();
   solver_.solve(armor);
 
-  if (armor.name == ArmorName::outpost) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.2765, 3, P0_dig);
-  }
+  const RobotConfig * cfg;
+  if (armor.name == ArmorName::outpost)   cfg = &outpost_cfg_;
+  else if (armor.name == ArmorName::base) cfg = &base_cfg_;
+  else                                     cfg = &normal_cfg_;
 
-  else if (armor.name == ArmorName::base) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.3205, 3, P0_dig);
-  }
-
-  else {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 400, 1e-5, 1, 1}};
-    target_ = Target(armor, t, 0.2, 4, P0_dig);
-  }
+  target_ = Target(armor, t, cfg->radius, cfg->armor_num, cfg->p0, ekf_params_);
 
   return true;
 }
