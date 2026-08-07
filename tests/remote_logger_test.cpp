@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <nlohmann/json.hpp>
@@ -60,14 +61,20 @@ int main(int argc, char * argv[])
     auto t1 = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(t1 - t0).count();
 
-    // ── two sine waves ──
-    double sin1 = std::sin(elapsed * 2.0 * M_PI * 1.0);   // 1 Hz
-    double sin2 = std::sin(elapsed * 2.0 * M_PI * 3.0);   // 3 Hz
+    // ── signal data ──
+    double sin1 = std::sin(elapsed * 2.0 * M_PI * 1.0);
+    double sin2 = std::sin(elapsed * 2.0 * M_PI * 3.0);
+    double saw = 2.0 * std::fmod(elapsed * 0.5, 1.0) - 1.0;
+    double tri = 2.0 * std::abs(2.0 * std::fmod(elapsed * 0.5 + 0.25, 1.0) - 1.0) - 1.0;
+    double sqr = (std::sin(elapsed * 2.0 * M_PI * 0.5) > 0) ? 1.0 : -1.0;
 
     tools::RemoteLogger::instance().plot({
       {"elapsed", elapsed},
       {"sin_1Hz", sin1},
       {"sin_3Hz", sin2},
+      {"sawtooth", saw},
+      {"triangle", tri},
+      {"square", sqr},
     });
 
     // ── periodic log messages ──
@@ -134,7 +141,24 @@ int main(int argc, char * argv[])
                   cv::Scalar(100, 255, 200), 1);
     }
 
-    tools::RemoteLogger::instance().plot_image(frame);
+    tools::RemoteLogger::instance().plot_image(frame,
+      {{"name", use_video ? "video" : "simulation"}});
+
+    if (iter % 3 == 0 && !use_video) {
+      cv::Mat dbg(120, 320, CV_8UC3, cv::Scalar(20, 20, 30));
+      for (int x = 1; x < dbg.cols; x++) {
+        double t0 = elapsed - (dbg.cols - x) * 0.02;
+        int y1 = 60 - static_cast<int>(std::sin(t0 * 2 * M_PI) * 50);
+        int y2 = 60 - static_cast<int>(std::sin(t0 * 6 * M_PI) * 50);
+        cv::line(dbg, cv::Point(x - 1, std::clamp(y1, 0, 119)),
+                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((t0 + 0.02) * 2 * M_PI) * 50), 0, 119)),
+                 cv::Scalar(100, 200, 255), 2);
+        cv::line(dbg, cv::Point(x - 1, std::clamp(y2, 0, 119)),
+                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((t0 + 0.02) * 6 * M_PI) * 50), 0, 119)),
+                 cv::Scalar(100, 255, 200), 2);
+      }
+      tools::RemoteLogger::instance().plot_image(dbg, {{"name", "waveform"}});
+    }
 
     iter++;
     auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(

@@ -37,7 +37,7 @@ public:
   void init(const Config & cfg);
   void plot(const nlohmann::json & data);
   void log(const std::string & level, const std::string & msg);
-  void plot_image(cv::Mat img, const nlohmann::json & meta = {});
+  void plot_image(cv::Mat img, const nlohmann::json & meta);
   void shutdown();
 
 private:
@@ -62,7 +62,8 @@ private:
   void worker();
   void flush_var_local(const std::vector<VarEntry> & entries);
   void try_send_var(const VarEntry & entry);
-  void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts);
+  void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
+                     const nlohmann::json & meta);
   void send_udp(const void * data, size_t len);
   uint64_t now_ns() const;
 

@@ -92,10 +92,17 @@ void RemoteLogger::plot_image(cv::Mat img, const nlohmann::json & meta)
 {
   if (!running_) return;
 
+  uint64_t ts;
+  if (meta.contains("ts") && meta["ts"].is_number()) {
+    ts = meta["ts"].get<uint64_t>();
+  } else {
+    ts = now_ns();
+  }
+
   {
     std::lock_guard<std::mutex> lock(img_mtx_);
     if (img_buf_.size() >= cfg_.img_buffer_size) img_buf_.erase(img_buf_.begin());
-    img_buf_.push_back({now_ns(), meta, std::move(img)});
+    img_buf_.push_back({ts, meta, std::move(img)});
     cv_.notify_one();
   }
 }
@@ -149,7 +156,7 @@ void RemoteLogger::worker()
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.img_quality};
         cv::imencode(".jpg", resized, jpeg, params);
 
-        if (cfg_.enable_remote) try_send_img(jpeg, e.ts);
+        if (cfg_.enable_remote) try_send_img(jpeg, e.ts, e.meta);
       }
       img_pending.clear();
     }
@@ -206,9 +213,11 @@ void RemoteLogger::try_send_var(const VarEntry & entry)
   }
 }
 
-void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts)
+void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
+                                const nlohmann::json & meta)
 {
-  size_t total = 1 + 8 + 4 + jpeg.size();
+  std::string meta_str = meta.dump();
+  size_t total = 1 + 8 + 4 + meta_str.size() + 4 + jpeg.size();
   if (total > kMaxUdpPayload) {
     std::fprintf(stderr, "[RemoteLogger] image too large %zu bytes, skipped\n", total);
     return;
@@ -219,6 +228,10 @@ void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts)
   pkt.push_back(kImgMarker);
   pkt.insert(pkt.end(), reinterpret_cast<const uint8_t *>(&ts),
              reinterpret_cast<const uint8_t *>(&ts) + 8);
+  uint32_t meta_len = static_cast<uint32_t>(meta_str.size());
+  pkt.insert(pkt.end(), reinterpret_cast<const uint8_t *>(&meta_len),
+             reinterpret_cast<const uint8_t *>(&meta_len) + 4);
+  pkt.insert(pkt.end(), meta_str.begin(), meta_str.end());
   uint32_t jpg_len = static_cast<uint32_t>(jpeg.size());
   pkt.insert(pkt.end(), reinterpret_cast<const uint8_t *>(&jpg_len),
              reinterpret_cast<const uint8_t *>(&jpg_len) + 4);
