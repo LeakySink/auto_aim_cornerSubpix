@@ -31,7 +31,7 @@ public:
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
     std::string sender_name;
-    uint16_t control_port = 0;
+    uint16_t control_port = 15000;
     uint32_t register_retry_ms = 3000;
     bool enable_remote = true;
     bool enable_local = true;

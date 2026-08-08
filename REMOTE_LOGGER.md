@@ -16,9 +16,8 @@
 #include "tools/remote_logger.hpp"
 
 tools::RemoteLogger::Config cfg;
-cfg.remote_host       = "192.168.1.100";  // 远程主机 IP
-cfg.control_port      = 15000;            // 控制端口，0=直连模式
-cfg.sender_name       = "my_robot";       // 发送方名称（空=自动）
+cfg.remote_host = "192.168.1.100";  // 远程主机 IP
+cfg.sender_name  = "my_robot";      // 发送方名称（空=自动）
 cfg.heartbeat_interval_ms = 500;           // 心跳间隔，0=关闭
 
 tools::RemoteLogger::instance().init(cfg);
@@ -37,7 +36,7 @@ tools::RemoteLogger::instance().shutdown();  // 自动注销
 |------|--------|------|
 | `remote_host` | "127.0.0.1" | 远程主机 IP |
 | `remote_port` | 9871 | 数据端口（注册后被 host 分配覆盖） |
-| `control_port` | 0 | 控制端口，0=直连模式 |
+| `control_port` | 15000 | 控制端口 |
 | `register_retry_ms` | 3000 | 注册失败重试间隔 |
 | `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`） |
 | `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
