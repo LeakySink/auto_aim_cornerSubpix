@@ -7,7 +7,7 @@
 #include <tuple>
 
 #include "tasks/auto_aim/yolos/yolov5.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 namespace auto_aim
@@ -34,7 +34,7 @@ private:
 
   tools::ThreadSafeQueue<
     std::tuple<cv::Mat, std::chrono::steady_clock::time_point, ov::InferRequest>>
-    queue_{16, [] { tools::logger()->debug("[MultiThreadDetector] queue is full!"); }};
+    queue_{16, [] { tools::RemoteLogger::instance().log("DEBUG", "[MultiThreadDetector] queue is full!"); }};
 };
 
 }  // namespace multithread

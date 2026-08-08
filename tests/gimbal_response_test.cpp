@@ -6,7 +6,7 @@
 #include "io/cboard.hpp"
 #include "io/command.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 

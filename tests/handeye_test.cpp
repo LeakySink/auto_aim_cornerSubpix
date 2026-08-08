@@ -13,7 +13,7 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"

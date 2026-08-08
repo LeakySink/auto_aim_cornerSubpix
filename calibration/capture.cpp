@@ -7,7 +7,7 @@
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 const std::string keys =
@@ -63,7 +63,7 @@ void capture_loop(
     auto q_path = fmt::format("{}/{}.txt", output_folder, count);
     cv::imwrite(img_path, img);
     write_q(q_path, q);
-    tools::logger()->info("[{}] Saved in {}", count, output_folder);
+    tools::RemoteLogger::instance().log("INFO", "[{}] Saved in {}", count, output_folder);
   }
 
   // 离开该作用域时，camera和cboard会自动关闭
@@ -83,11 +83,11 @@ int main(int argc, char * argv[])
   // 新建输出文件夹（递归创建父目录）
   std::filesystem::create_directories(output_folder);
 
-  tools::logger()->info("默认标定板尺寸为11列×8行(内角点)");
+  tools::RemoteLogger::instance().log("INFO", "默认标定板尺寸为11列×8行(内角点)");
   // 主循环，保存图片和对应四元数
   capture_loop(config_path, "can0", output_folder);
 
-  tools::logger()->warn("注意四元数输出顺序为wxyz");
+  tools::RemoteLogger::instance().log("WARN", "注意四元数输出顺序为wxyz");
 
   return 0;
 }

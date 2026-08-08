@@ -6,7 +6,7 @@
 #include <filesystem>
 
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace auto_aim
 {
@@ -208,7 +208,7 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
     }
   }
 
-  // tools::logger()->debug(
+  // tools::RemoteLogger::instance().log("DEBUG", 
   // "min_distance_br_tr + min_distance_tl_bl is {}", min_distance_br_tr + min_distance_tl_bl);
   // std::vector<cv::Point2f> points2f{
   //   closest_left_lightbar->top, closest_left_lightbar->bottom, closest_right_lightbar->bottom,
@@ -255,7 +255,7 @@ bool Detector::check_name(const Armor & armor) const
   if (name_ok && !confidence_ok) save(armor);
 
   // 出现 5号 则显示 debug 信息。但不过滤。
-  if (armor.name == ArmorName::five) tools::logger()->debug("See pattern 5");
+  if (armor.name == ArmorName::five) tools::RemoteLogger::instance().log("DEBUG", "See pattern 5");
 
   return name_ok && confidence_ok;
 }
@@ -268,7 +268,7 @@ bool Detector::check_type(const Armor & armor) const
 
   // 保存异常的图案，用于分类器的迭代
   if (!name_ok) {
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "see strange armor: {} {}", ARMOR_TYPES[armor.type], ARMOR_NAMES[armor.name]);
     save(armor);
   }
@@ -314,18 +314,18 @@ ArmorType Detector::get_type(const Armor & armor)
   /// TODO: 25赛季是否还需要根据比例判断大小装甲？能否根据图案直接判断？
 
   if (armor.ratio > 3.0) {
-    // tools::logger()->debug(
+    // tools::RemoteLogger::instance().log("DEBUG", 
     //   "[Detector] get armor type by ratio: BIG {} {:.2f}", ARMOR_NAMES[armor.name], armor.ratio);
     return ArmorType::big;
   }
 
   if (armor.ratio < 2.5) {
-    // tools::logger()->debug(
+    // tools::RemoteLogger::instance().log("DEBUG", 
     //   "[Detector] get armor type by ratio: SMALL {} {:.2f}", ARMOR_NAMES[armor.name], armor.ratio);
     return ArmorType::small;
   }
 
-  // tools::logger()->debug("[Detector] get armor type by name: {}", ARMOR_NAMES[armor.name]);
+  // tools::RemoteLogger::instance().log("DEBUG", "[Detector] get armor type by name: {}", ARMOR_NAMES[armor.name]);
 
   // 英雄、基地只能是大装甲板
   if (armor.name == ArmorName::one || armor.name == ArmorName::base) {

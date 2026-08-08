@@ -14,7 +14,7 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/thread_safe_queue.hpp"
@@ -107,6 +107,7 @@ int main(int argc, char * argv[])
         auto armor = armors.front();
         data["measure_yaw"] = armor.yaw_raw;
       }
+      tools::RemoteLogger::instance().plot(data);
       plotter.plot(data);
 
       std::this_thread::sleep_for(10ms);
@@ -143,6 +144,10 @@ int main(int argc, char * argv[])
         solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
       tools::draw_points(img, image_points, {0, 0, 255});
     }
+
+    nlohmann::json meta;
+    meta["name"] = "reprojection";
+    tools::RemoteLogger::instance().plot_image(img, meta);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);

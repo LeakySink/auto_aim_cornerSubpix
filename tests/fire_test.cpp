@@ -3,7 +3,7 @@
 #include "io/gimbal/gimbal.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
@@ -47,7 +47,7 @@ int main(int argc, char * argv[])
     auto gs = gimbal.state();
     if (tools::delta_time(now, last_t) > 1.600) {
       plan.success = 2;  // 控制+开火
-      tools::logger()->debug("fire!");
+      tools::RemoteLogger::instance().log("DEBUG", "fire!");
       last_t = now;
     } else {
       plan.success = 1;  // 控制不开火

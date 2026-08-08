@@ -5,7 +5,7 @@
 #include <thread>
 
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 
@@ -44,7 +44,7 @@ int main(int argc, char * argv[])
     auto mode = gimbal.mode();
 
     if (mode != last_mode) {
-      tools::logger()->info("Gimbal mode changed: {}", gimbal.str(mode));
+      tools::RemoteLogger::instance().log("INFO", "Gimbal mode changed: {}", gimbal.str(mode));
       last_mode = mode;
     }
 
@@ -58,7 +58,7 @@ int main(int argc, char * argv[])
 
     if (!first_fired && fired) {
       first_fired = true;
-      tools::logger()->info("Gimbal first fired after: {:.3f}s", tools::delta_time(t, fire_stamp));
+      tools::RemoteLogger::instance().log("INFO", "Gimbal first fired after: {:.3f}s", tools::delta_time(t, fire_stamp));
     }
 
     if (fire && fire_count > 20) {

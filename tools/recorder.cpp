@@ -6,7 +6,7 @@
 #include <string>
 
 #include "math_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace tools
 {
@@ -41,7 +41,7 @@ void Recorder::save_to_file()
     FrameData frame;
     queue_.pop(frame);  // 从队列中取出帧数据
     if (frame.img.empty()) {
-      tools::logger()->debug("Recorder received empty img. Skip this frame.");
+      tools::RemoteLogger::instance().log("DEBUG", "Recorder received empty img. Skip this frame.");
       continue;
     }
     // 写入视频文件

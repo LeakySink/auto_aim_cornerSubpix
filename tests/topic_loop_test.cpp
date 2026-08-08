@@ -3,7 +3,7 @@
 
 #include "io/ros2/ros2.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 int main(int argc, char ** argv)
 {
@@ -28,7 +28,7 @@ int main(int argc, char ** argv)
 
     if (i % 3 == 0) {
       auto x = ros2.subscribe_enemy_status();
-      // tools::logger()->info("invincible enemy ids size is{}", x.size());
+      // tools::RemoteLogger::instance().log("INFO", "invincible enemy ids size is{}", x.size());
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(1));

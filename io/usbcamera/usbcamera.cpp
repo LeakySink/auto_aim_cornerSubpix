@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/yaml.hpp"
 
 using namespace std::chrono_literals;
@@ -23,14 +23,14 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
 
   // 守护线程
   daemon_thread_ = std::thread{[this] {
-    // tools::logger()->info("daemon thread start");
+    // tools::RemoteLogger::instance().log("INFO", "daemon thread start");
     while (!quit_) {
       std::this_thread::sleep_for(100ms);
 
       if (ok_) continue;
 
       if (open_count_ > 20) {
-        tools::logger()->warn("Give up to open {} USB camera", this->device_name);
+        tools::RemoteLogger::instance().log("WARN", "Give up to open {} USB camera", this->device_name);
         quit_ = true;
 
         {
@@ -39,7 +39,7 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
         }
 
         if (capture_thread_.joinable()) {
-          tools::logger()->warn("Stopping capture thread");
+          tools::RemoteLogger::instance().log("WARN", "Stopping capture thread");
           capture_thread_.join();
         }
 
@@ -54,7 +54,7 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
       }
       try_open();
     }
-    // tools::logger()->info("daemon thread exit");
+    // tools::RemoteLogger::instance().log("INFO", "daemon thread exit");
   }};
 }
 
@@ -67,14 +67,14 @@ USBCamera::~USBCamera()
   }
   if (daemon_thread_.joinable()) daemon_thread_.join();
   if (capture_thread_.joinable()) capture_thread_.join();
-  tools::logger()->info("USBCamera destructed.");
+  tools::RemoteLogger::instance().log("INFO", "USBCamera destructed.");
 }
 
 cv::Mat USBCamera::read()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
   if (!cap_.isOpened()) {
-    tools::logger()->warn("Failed to read {} USB camera", this->device_name);
+    tools::RemoteLogger::instance().log("WARN", "Failed to read {} USB camera", this->device_name);
     return cv::Mat();
   }
   cap_ >> img_;
@@ -96,7 +96,7 @@ void USBCamera::open()
   std::string true_device_name = "/dev/" + open_name_;
   cap_.open(true_device_name, cv::CAP_V4L);
   if (!cap_.isOpened()) {
-    tools::logger()->warn("Failed to open USB camera");
+    tools::RemoteLogger::instance().log("WARN", "Failed to open USB camera");
     return;
   }
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
@@ -118,16 +118,16 @@ void USBCamera::open()
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   }
 
-  tools::logger()->info("{} USBCamera opened", device_name);
-  // tools::logger()->info("USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
-  tools::logger()->info("USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
-  // tools::logger()->info("USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));
+  tools::RemoteLogger::instance().log("INFO", "{} USBCamera opened", device_name);
+  // tools::RemoteLogger::instance().log("INFO", "USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
+  tools::RemoteLogger::instance().log("INFO", "USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
+  // tools::RemoteLogger::instance().log("INFO", "USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));
 
   // 取图线程
   capture_thread_ = std::thread{[this] {
     ok_ = true;
     std::this_thread::sleep_for(50ms);
-    tools::logger()->info("[{} USB camera] capture thread started ", this->device_name);
+    tools::RemoteLogger::instance().log("INFO", "[{} USB camera] capture thread started ", this->device_name);
     while (!quit_) {
       std::this_thread::sleep_for(1ms);
 
@@ -142,7 +142,7 @@ void USBCamera::open()
       }
 
       if (!success) {
-        tools::logger()->warn("Failed to read frame, exiting capture thread");
+        tools::RemoteLogger::instance().log("WARN", "Failed to read frame, exiting capture thread");
         break;
       }
 
@@ -159,7 +159,7 @@ void USBCamera::try_open()
     open();
     open_count_++;
   } catch (const std::exception & e) {
-    tools::logger()->warn("{}", e.what());
+    tools::RemoteLogger::instance().log("WARN", "{}", e.what());
   }
 }
 
@@ -167,7 +167,7 @@ void USBCamera::close()
 {
   if (cap_.isOpened()) {
     cap_.release();
-    tools::logger()->info("USB camera released.");
+    tools::RemoteLogger::instance().log("INFO", "USB camera released.");
   }
 }
 

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "tasks/auto_aim/yolo.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace tools
 {
@@ -55,7 +55,7 @@ public:
       buffer_.clear();
       current_id_ = 0;
     }
-    tools::logger()->info("OrderedQueue destroyed, queue and buffer cleared.");
+    tools::RemoteLogger::instance().log("INFO", "OrderedQueue destroyed, queue and buffer cleared.");
   }
 
   void enqueue(const tools::Frame & item)
@@ -63,7 +63,7 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (item.id < current_id_) {
-      tools::logger()->warn("small id");
+      tools::RemoteLogger::instance().log("WARN", "small id");
       return;
     }
 

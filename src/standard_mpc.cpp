@@ -17,7 +17,7 @@
 #include "tasks/auto_buff/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
@@ -97,7 +97,7 @@ int main(int argc, char * argv[])
     mode = gimbal.mode();
 
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", gimbal.str(mode));
+      tools::RemoteLogger::instance().log("INFO", "Switch to {}", gimbal.str(mode));
       last_mode = mode.load();
     }
 

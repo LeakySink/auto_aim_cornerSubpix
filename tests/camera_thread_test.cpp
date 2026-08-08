@@ -16,7 +16,7 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
@@ -85,7 +85,7 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(t, last_t);
     last_t = t;
 
-    // tools::logger()->info("{:.2f} fps", 1 / dt);
+    // tools::RemoteLogger::instance().log("INFO", "{:.2f} fps", 1 / dt);
     // tools::draw_text(img, fmt::format("{:.2f} fps", 1/dt), {10, 60}, {255, 255, 255});
     nlohmann::json data;
     data["fps"] = 1 / dt;

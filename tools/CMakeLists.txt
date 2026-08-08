@@ -10,7 +10,6 @@ add_library(tools OBJECT
     remote_logger.cpp
     trajectory.cpp
     recorder.cpp
-    logger.cpp
     pid.cpp
     crc.cpp
 )

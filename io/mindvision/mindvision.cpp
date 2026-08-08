@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 using namespace std::chrono_literals;
 
@@ -21,7 +21,7 @@ MindVision::MindVision(double exposure_ms, double gamma, const std::string & vid
   pid_(-1)
 {
   set_vid_pid(vid_pid);
-  if (libusb_init(NULL)) tools::logger()->warn("Unable to init libusb!");
+  if (libusb_init(NULL)) tools::RemoteLogger::instance().log("WARN", "Unable to init libusb!");
 
   try_open();
 
@@ -47,7 +47,7 @@ MindVision::~MindVision()
   if (daemon_thread_.joinable()) daemon_thread_.join();
   if (capture_thread_.joinable()) capture_thread_.join();
   close();
-  tools::logger()->info("Mindvision destructed.");
+  tools::RemoteLogger::instance().log("INFO", "Mindvision destructed.");
 }
 
 void MindVision::read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
@@ -100,7 +100,7 @@ void MindVision::open()
       auto timestamp = std::chrono::steady_clock::now();
 
       if (status != CAMERA_STATUS_SUCCESS) {
-        tools::logger()->warn("Camera dropped!");
+        tools::RemoteLogger::instance().log("WARN", "Camera dropped!");
         ok_ = false;
         break;
       }
@@ -112,7 +112,7 @@ void MindVision::open()
     }
   }};
 
-  tools::logger()->info("Mindvision opened.");
+  tools::RemoteLogger::instance().log("INFO", "Mindvision opened.");
 }
 
 void MindVision::try_open()
@@ -120,7 +120,7 @@ void MindVision::try_open()
   try {
     open();
   } catch (const std::exception & e) {
-    tools::logger()->warn("{}", e.what());
+    tools::RemoteLogger::instance().log("WARN", "{}", e.what());
   }
 }
 
@@ -134,7 +134,7 @@ void MindVision::set_vid_pid(const std::string & vid_pid)
 {
   auto index = vid_pid.find(':');
   if (index == std::string::npos) {
-    tools::logger()->warn("Invalid vid_pid: \"{}\"", vid_pid);
+    tools::RemoteLogger::instance().log("WARN", "Invalid vid_pid: \"{}\"", vid_pid);
     return;
   }
 
@@ -145,7 +145,7 @@ void MindVision::set_vid_pid(const std::string & vid_pid)
     vid_ = std::stoi(vid_str, 0, 16);
     pid_ = std::stoi(pid_str, 0, 16);
   } catch (const std::exception &) {
-    tools::logger()->warn("Invalid vid_pid: \"{}\"", vid_pid);
+    tools::RemoteLogger::instance().log("WARN", "Invalid vid_pid: \"{}\"", vid_pid);
   }
 }
 
@@ -156,14 +156,14 @@ void MindVision::reset_usb() const
   // https://github.com/ralight/usb-reset/blob/master/usb-reset.c
   auto handle = libusb_open_device_with_vid_pid(NULL, vid_, pid_);
   if (!handle) {
-    tools::logger()->warn("Unable to open usb!");
+    tools::RemoteLogger::instance().log("WARN", "Unable to open usb!");
     return;
   }
 
   if (libusb_reset_device(handle))
-    tools::logger()->warn("Unable to reset usb!");
+    tools::RemoteLogger::instance().log("WARN", "Unable to reset usb!");
   else
-    tools::logger()->info("Reset usb successfully :)");
+    tools::RemoteLogger::instance().log("INFO", "Reset usb successfully :)");
 
   libusb_close(handle);
 }

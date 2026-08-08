@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <fmt/format.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
@@ -42,6 +43,13 @@ public:
   void init(const Config & cfg);
   void plot(const nlohmann::json & data);
   void log(const std::string & level, const std::string & msg);
+
+  template <typename... Args>
+  void log(const std::string & level, const std::string & fmt_str, Args &&... args)
+  {
+    log(level, fmt::format(fmt::runtime(fmt_str), std::forward<Args>(args)...));
+  }
+
   void plot_image(cv::Mat img, const nlohmann::json & meta);
   void shutdown();
 

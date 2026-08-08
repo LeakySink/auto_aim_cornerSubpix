@@ -2,7 +2,7 @@
 
 #include <numeric>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace auto_aim
@@ -252,7 +252,7 @@ bool Target::diverged() const
 
   if (r_ok && l_ok) return false;
 
-  tools::logger()->debug("[Target] r={:.3f}, l={:.3f}", ekf_.x[8], ekf_.x[9]);
+  tools::RemoteLogger::instance().log("DEBUG", "[Target] r={:.3f}, l={:.3f}", ekf_.x[8], ekf_.x[9]);
   return true;
 }
 

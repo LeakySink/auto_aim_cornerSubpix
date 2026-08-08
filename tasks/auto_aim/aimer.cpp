@@ -5,7 +5,7 @@
 #include <cmath>
 #include <vector>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/trajectory.hpp"
 
@@ -25,7 +25,7 @@ Aimer::Aimer(const std::string & config_path)
   if (yaml["left_yaw_offset"].IsDefined() && yaml["right_yaw_offset"].IsDefined()) {
     left_yaw_offset_ = yaml["left_yaw_offset"].as<double>() / 57.3;    // degree to rad
     right_yaw_offset_ = yaml["right_yaw_offset"].as<double>() / 57.3;  // degree to rad
-    tools::logger()->info("[Aimer] successfully loading shootmode");
+    tools::RemoteLogger::instance().log("INFO", "[Aimer] successfully loading shootmode");
   }
 }
 
@@ -53,7 +53,7 @@ io::Command Aimer::aim(
 
   else {
     auto dt = 0.005 + delay_time;  //detector-aimer耗时0.005+发弹延时0.1
-    // tools::logger()->info("dt is {:.4f} second", dt);
+    // tools::RemoteLogger::instance().log("INFO", "dt is {:.4f} second", dt);
     future += std::chrono::microseconds(int(dt * 1e6));
     target.predict(future);
   }
@@ -61,7 +61,7 @@ io::Command Aimer::aim(
   auto aim_point0 = choose_aim_point(target);
   debug_aim_point = aim_point0;
   if (!aim_point0.valid) {
-    // tools::logger()->debug("Invalid aim_point0.");
+    // tools::RemoteLogger::instance().log("DEBUG", "Invalid aim_point0.");
     return {false, false, 0, 0};
   }
 
@@ -69,7 +69,7 @@ io::Command Aimer::aim(
   auto d0 = std::sqrt(xyz0[0] * xyz0[0] + xyz0[1] * xyz0[1]);
   tools::Trajectory trajectory0(bullet_speed, d0, xyz0[2]);
   if (trajectory0.unsolvable) {
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "[Aimer] Unsolvable trajectory0: {:.2f} {:.2f} {:.2f}", bullet_speed, d0, xyz0[2]);
     debug_aim_point.valid = false;
     return {false, false, 0, 0};
@@ -100,7 +100,7 @@ io::Command Aimer::aim(
 
     // 检查弹道是否可解
     if (current_traj.unsolvable) {
-      tools::logger()->debug(
+      tools::RemoteLogger::instance().log("DEBUG", 
         "[Aimer] Unsolvable trajectory in iter {}: speed={:.2f}, d={:.2f}, z={:.2f}", iter + 1,
         bullet_speed, d, xyz.z());
       debug_aim_point.valid = false;
@@ -169,7 +169,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
     }
     // 绝无可能
     if (id_list.empty()) {
-      tools::logger()->warn("Empty id list!");
+      tools::RemoteLogger::instance().log("WARN", "Empty id list!");
       return {false, armor_xyza_list[0]};
     }
 

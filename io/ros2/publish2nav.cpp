@@ -5,7 +5,7 @@
 #include <memory>
 #include <thread>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace io
 {

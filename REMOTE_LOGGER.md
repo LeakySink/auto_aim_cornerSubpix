@@ -6,7 +6,7 @@
 
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
-- **文本日志**：`log(level, msg)` — 同时输出终端 stderr + 远程 UDP
+- **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
 - **图像数据**：`plot_image(cv::Mat, meta)` — JPEG 压缩后 UDP 发送
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 
@@ -25,6 +25,7 @@ tools::RemoteLogger::instance().init(cfg);
 // 发送数据（库自动处理注册/重试）
 tools::RemoteLogger::instance().plot({{"pitch", 0.15}, {"yaw", -0.3}});
 tools::RemoteLogger::instance().log("INFO", "target locked");
+tools::RemoteLogger::instance().log("ERROR", "motor {} fail, code={}", 3, 0x1F);
 tools::RemoteLogger::instance().plot_image(frame, {{"cam", "front"}});
 
 tools::RemoteLogger::instance().shutdown();  // 自动注销
@@ -75,11 +76,11 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 终端日志
 
-`log(level, msg)` 同时输出到终端 stderr：
+`log(level, fmt, args...)` 支持 fmt 格式串，同时输出到终端 stderr 和远程 UDP：
 
 ```
 14:30:05.123 [INFO] target locked
-14:30:05.456 [ERROR] high error rate
+14:30:05.456 [ERROR] motor 3 fail, code=0x1f
 ```
 
 ## UDP 数据格式

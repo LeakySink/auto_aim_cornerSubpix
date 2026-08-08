@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 namespace auto_buff
 {
 FanBlade::FanBlade(
@@ -65,7 +65,7 @@ PowerRune::PowerRune(
   }
   // error
   else {
-    tools::logger()->debug("[PowerRune] 识别出错!");
+    tools::RemoteLogger::instance().log("DEBUG", "[PowerRune] 识别出错!");
     unsolvable_ = true;
     return;
   }
