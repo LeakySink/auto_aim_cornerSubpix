@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -43,6 +44,8 @@ public:
   bool pop_all_image(std::vector<ImageData> & out);
   bool pop_all_log(std::vector<LogData> & out);
 
+  std::chrono::steady_clock::time_point last_packet_time() const;
+
 private:
   void worker();
 
@@ -60,6 +63,9 @@ private:
 
   std::vector<LogData> log_queue_;
   std::mutex log_mtx_;
+
+  mutable std::mutex time_mtx_;
+  std::chrono::steady_clock::time_point last_pkt_{};
 };
 
 std::string base64_encode(const uint8_t * data, size_t len);

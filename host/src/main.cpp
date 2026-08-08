@@ -1,3 +1,4 @@
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +22,7 @@ int main(int argc, char * argv[])
 {
   std::string host = "0.0.0.0";
   uint16_t port = 9871;
+  int timeout_ms = 3000;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
@@ -28,10 +30,13 @@ int main(int argc, char * argv[])
       host = argv[++i];
     } else if (arg == "--port" && i + 1 < argc) {
       port = static_cast<uint16_t>(std::stoi(argv[++i]));
+    } else if (arg == "--timeout" && i + 1 < argc) {
+      timeout_ms = std::stoi(argv[++i]);
     } else if (arg == "-h" || arg == "--help") {
-      std::printf("Usage: %s [--host HOST] [--port PORT]\n", argv[0]);
-      std::printf("  --host   Listen address (default: 0.0.0.0)\n");
-      std::printf("  --port   UDP listen port  (default: 9871)\n");
+      std::printf("Usage: %s [--host HOST] [--port PORT] [--timeout MS]\n", argv[0]);
+      std::printf("  --host     Listen address (default: 0.0.0.0)\n");
+      std::printf("  --port     UDP listen port  (default: 9871)\n");
+      std::printf("  --timeout  Heartbeat timeout in ms (default: 3000)\n");
       std::printf("\nOutputs JSON lines to stdout for the Python frontend.\n");
       return 0;
     }
@@ -46,6 +51,9 @@ int main(int argc, char * argv[])
   std::vector<backend::PlotData> plot_buf;
   std::vector<backend::ImageData> img_buf;
   std::vector<backend::LogData> log_buf;
+
+  bool was_connected = false;
+  auto timeout = std::chrono::milliseconds(timeout_ms);
 
   while (g_running) {
     bool has_data = false;
@@ -98,6 +106,21 @@ int main(int argc, char * argv[])
     }
 
     if (!has_data) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    auto now = std::chrono::steady_clock::now();
+    bool connected = (now - receiver.last_packet_time()) < timeout;
+    if (!was_connected && connected) {
+      nlohmann::json out;
+      out["type"] = "status";
+      out["connected"] = true;
+      std::cout << out.dump() << std::endl;
+    } else if (was_connected && !connected) {
+      nlohmann::json out;
+      out["type"] = "status";
+      out["connected"] = false;
+      std::cout << out.dump() << std::endl;
+    }
+    was_connected = connected;
   }
 
   receiver.stop();

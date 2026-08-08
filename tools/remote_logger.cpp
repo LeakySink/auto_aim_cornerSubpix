@@ -160,6 +160,8 @@ void RemoteLogger::worker()
       }
       img_pending.clear();
     }
+
+    if (cfg_.heartbeat_interval_ms > 0) send_heartbeat();
   }
 
   {
@@ -167,6 +169,23 @@ void RemoteLogger::worker()
     if (!var_buf_.empty()) var_buf_.swap(var_pending);
   }
   if (!var_pending.empty() && cfg_.enable_local) flush_var_local(var_pending);
+}
+
+void RemoteLogger::send_heartbeat()
+{
+  auto now = std::chrono::steady_clock::now();
+  if (last_hb_.time_since_epoch().count() == 0) {
+    last_hb_ = now;
+    return;
+  }
+  auto elapsed =
+    std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hb_);
+  if (elapsed.count() < static_cast<int64_t>(cfg_.heartbeat_interval_ms)) return;
+  last_hb_ = now;
+
+  nlohmann::json hb = {{"hb", 1}};
+  std::string payload = hb.dump();
+  send_udp(payload.data(), payload.size());
 }
 
 void RemoteLogger::flush_var_local(const std::vector<VarEntry> & entries)

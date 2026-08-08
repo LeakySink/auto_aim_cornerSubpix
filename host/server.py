@@ -906,21 +906,32 @@ function addLog(ts, level, msg) {
 
 // ── SSE ──────────────────────────────────────────────────────────────────────
 const dot = document.getElementById('dot'), stats = document.getElementById('stats');
-var pktCount = 0, lastPktTime = Date.now();
+var pktCount = 0, lastPktTime = Date.now(), lastAnyPkt = 0;
+var clientTimeout = 4000;
+
+function setConnected(c) {
+  if (c) { dot.className = 'dot'; document.getElementById('status').textContent = '已连接'; }
+  else { dot.className = 'dot dead'; document.getElementById('status').textContent = '断连'; }
+}
+setConnected(false);
+setInterval(function() {
+  if (lastAnyPkt && Date.now() - lastAnyPkt > clientTimeout) setConnected(false);
+}, 1000);
 const es = new EventSource('/events');
 es.onmessage = function(e) {
   try {
     var msg = JSON.parse(e.data);
+    lastAnyPkt = Date.now();
     pktCount++;
     var now = Date.now();
     if (now - lastPktTime >= 1000) {
       stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
       pktCount = 0; lastPktTime = now;
     }
-    if (msg.type === 'plot') addPoint(msg.ts, msg.data || {});
-    else if (msg.type === 'image') setImage(msg.jpg_b64, msg.meta);
-    else if (msg.type === 'log') addLog(msg.ts, msg.level, msg.msg);
-    dot.className = 'dot';
+    if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true); }
+    else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true); }
+    else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true); }
+    else if (msg.type === 'status') { setConnected(msg.connected); }
   } catch (err) {}
 };
 es.onerror = function() { dot.className = 'dot dead'; };

@@ -96,6 +96,12 @@ bool UDPReceiver::pop_all_log(std::vector<LogData> & out)
   return true;
 }
 
+std::chrono::steady_clock::time_point UDPReceiver::last_packet_time() const
+{
+  std::lock_guard<std::mutex> lock(time_mtx_);
+  return last_pkt_;
+}
+
 void UDPReceiver::worker()
 {
   uint8_t buf[65536];
@@ -104,6 +110,11 @@ void UDPReceiver::worker()
     ssize_t n = ::recvfrom(sock_, buf, sizeof(buf), 0, nullptr, nullptr);
     if (n <= 0) continue;
     if (static_cast<size_t>(n) < 1) continue;
+
+    {
+      std::lock_guard<std::mutex> lock(time_mtx_);
+      last_pkt_ = std::chrono::steady_clock::now();
+    }
 
     if (buf[0] == 0xFF) {
       if (static_cast<size_t>(n) < 17) continue;
@@ -131,6 +142,7 @@ void UDPReceiver::worker()
                            static_cast<size_t>(n));
       try {
         auto j = nlohmann::json::parse(json_str);
+        if (j.contains("hb") && j.size() == 1) continue;
         if (j.contains("level") && j.contains("msg") &&
             j["level"].is_string() && j["msg"].is_string()) {
           LogData log;

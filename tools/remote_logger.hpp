@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -28,6 +29,7 @@ public:
     size_t img_buffer_size = 10;
     int img_width = 640;
     int img_quality = 50;
+    uint32_t heartbeat_interval_ms = 0;
     bool enable_remote = true;
     bool enable_local = true;
   };
@@ -60,6 +62,7 @@ private:
   };
 
   void worker();
+  void send_heartbeat();
   void flush_var_local(const std::vector<VarEntry> & entries);
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
@@ -79,6 +82,7 @@ private:
   std::condition_variable cv_;
   std::mutex wake_mtx_;
   std::thread worker_;
+  std::chrono::steady_clock::time_point last_hb_{};
 
   int sock_{-1};
   sockaddr_in addr_{};
