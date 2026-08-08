@@ -1136,7 +1136,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     import argparse
     p = argparse.ArgumentParser(description='Remote Debugger Frontend')
-    p.add_argument('--backend', default='./udp_backend', help='path to C++ backend binary')
+    p.add_argument('--backend', default='build/udp_backend', help='path to C++ backend binary')
     p.add_argument('--port', type=int, default=8080, help='HTTP server port')
     p.add_argument('--udp-port', type=int, default=9871, help='default UDP data port (fallback)')
     p.add_argument('--control-port', type=int, default=15000, help='UDP control port')
