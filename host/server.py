@@ -14,6 +14,10 @@ import socketserver
 import subprocess
 import sys
 import threading
+import time
+
+from control import ControlServer
+from backend_mgr import BackendManager
 
 # ── HTML frontend (single-page app) ──────────────────────────────────────────
 
@@ -128,6 +132,8 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
     <span id="status">已连接</span>
     <span id="stats" style="color:#505060">0 pkt/s</span>
     <span style="flex:1"></span>
+    <select id="sender-sel" onchange="onSenderChange()" style="background:#1a1a26;color:#c8c8d0;border:1px solid #303040;border-radius:3px;padding:3px 6px;font:inherit;font-size:14px;max-width:180px">
+    </select>
     <button onclick="clearPlots()">清除</button>
     <button onclick="resetAllViews()">重置</button>
   </div>
@@ -731,6 +737,19 @@ var panelMap = {};
 
 function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
 
+function onSenderChange() {
+  var name = document.getElementById('sender-sel').value;
+  if (!name) return;
+  plotData = [];
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
+      var p = rows[ri].panels[pi];
+      if (p.chart) p.chart.data.datasets.length = 0;
+      rebuildPanelChart(p);
+    }
+  fetch('/select?sender=' + encodeURIComponent(name));
+}
+
 function getPanelById(id) {
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++)
@@ -909,9 +928,15 @@ const dot = document.getElementById('dot'), stats = document.getElementById('sta
 var pktCount = 0, lastPktTime = Date.now(), lastAnyPkt = 0;
 var clientTimeout = 4000;
 
-function setConnected(c) {
-  if (c) { dot.className = 'dot'; document.getElementById('status').textContent = '已连接'; }
-  else { dot.className = 'dot dead'; document.getElementById('status').textContent = '断连'; }
+function setConnected(c, sender) {
+  var st = document.getElementById('status');
+  if (c) {
+    dot.className = 'dot';
+    st.textContent = sender ? '已连接 \u2192 ' + sender : '已连接';
+  } else {
+    dot.className = 'dot dead';
+    st.textContent = '断连';
+  }
 }
 setConnected(false);
 setInterval(function() {
@@ -928,10 +953,25 @@ es.onmessage = function(e) {
       stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
       pktCount = 0; lastPktTime = now;
     }
-    if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true); }
-    else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true); }
-    else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true); }
-    else if (msg.type === 'status') { setConnected(msg.connected); }
+    var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
+    if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
+    else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true, snd); }
+    else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
+    else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
+    else if (msg.type === 'state') {
+      var sel = document.getElementById('sender-sel');
+      var cur = sel.value;
+      sel.innerHTML = '';
+      var list = msg.senders || [];
+      for (var i = 0; i < list.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = list[i]; opt.textContent = list[i];
+        sel.appendChild(opt);
+      }
+      if (list.indexOf(cur) >= 0) sel.value = cur;
+      else if (msg.active_sender && list.indexOf(msg.active_sender) >= 0) sel.value = msg.active_sender;
+      else if (list.length > 0) sel.value = list[0];
+    }
   } catch (err) {}
 };
 es.onerror = function() { dot.className = 'dot dead'; };
@@ -975,6 +1015,55 @@ def reader_thread(proc):
     print("[server] backend process ended", file=sys.stderr)
 
 
+# ── State management ─────────────────────────────────────────────────────────
+
+control_server = None
+backend_mgr = None
+_poller_thread = None
+_last_cs_version = -1
+_last_senders = []
+
+
+def push_state():
+    snames = control_server.get_senders() if control_server else []
+    state = {
+        "type": "state",
+        "active_sender": backend_mgr.active_sender if backend_mgr else "",
+        "senders": snames,
+    }
+    sse_queue.put(json.dumps(state))
+
+
+def poller():
+    global _last_cs_version, _last_senders
+    while control_server and control_server._running:
+        time.sleep(1)
+        try:
+            v = control_server.version()
+            snames = control_server.get_senders()
+            if v != _last_cs_version or snames != _last_senders:
+                _last_cs_version = v
+                _last_senders = snames
+                if snames and not backend_mgr.running:
+                    info = control_server.get_sender_info(snames[0])
+                    if info:
+                        backend_mgr.switch(snames[0], info["data_port"])
+                elif not snames and backend_mgr.running:
+                    backend_mgr.stop()
+                push_state()
+        except Exception:
+            pass
+
+
+def do_select(name):
+    if not name or not control_server:
+        return
+    info = control_server.get_sender_info(name)
+    if info:
+        backend_mgr.switch(name, info["data_port"])
+        push_state()
+
+
 # ── HTTP request handler ─────────────────────────────────────────────────────
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -989,7 +1078,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == '/': self._serve_html()
         elif self.path == '/events': self._serve_sse()
         elif self.path == '/chart.js': self._serve_chartjs()
+        elif self.path.startswith('/select'): self._handle_select()
         else: self.send_error(404)
+
+    def _handle_select(self):
+        import urllib.parse
+        qs = urllib.parse.urlparse(self.path).query
+        params = urllib.parse.parse_qs(qs)
+        name = params.get("sender", [""])[0]
+        do_select(name)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{"ok":true}')
 
     def _serve_html(self):
         body = HTML_PAGE.encode()
@@ -1025,7 +1126,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if line:
                     self.wfile.write(f"data: {line}\n\n".encode())
                     self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+        except Exception:
             pass
 
 
@@ -1036,11 +1137,19 @@ def main():
     p = argparse.ArgumentParser(description='Remote Debugger Frontend')
     p.add_argument('--backend', default='./udp_backend', help='path to C++ backend binary')
     p.add_argument('--port', type=int, default=8080, help='HTTP server port')
-    p.add_argument('--udp-port', type=int, default=9871, help='UDP listen port for backend')
+    p.add_argument('--udp-port', type=int, default=9871, help='default UDP data port (fallback)')
+    p.add_argument('--control-port', type=int, default=15000, help='UDP control port')
     p.add_argument('--download-chartjs', action='store_true', help='download Chart.js locally for offline use')
     args = p.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    binary = os.path.join(script_dir, args.backend)
+    if not os.path.exists(binary):
+        alt = os.path.join(script_dir, 'build', 'udp_backend')
+        if os.path.exists(alt): binary = alt
+        else:
+            print(f"[server] backend not found at {binary}", file=sys.stderr)
+            sys.exit(1)
 
     if args.download_chartjs:
         import urllib.request
@@ -1051,40 +1160,34 @@ def main():
         print(f"[server] saved to {dst} ({os.path.getsize(dst)} bytes)", file=sys.stderr)
         return
 
-    backend_path = os.path.join(script_dir, args.backend)
-    if not os.path.exists(backend_path):
-        alt = os.path.join(script_dir, 'build', 'udp_backend')
-        if os.path.exists(alt): backend_path = alt
-        else:
-            print(f"[server] backend not found at {backend_path}", file=sys.stderr)
-            sys.exit(1)
+    global control_server, backend_mgr
+    control_server = ControlServer(port=args.control_port)
+    control_server.start()
 
-    print(f"[server] starting backend: {backend_path} --port {args.udp_port}", file=sys.stderr)
-    proc = subprocess.Popen(
-        [backend_path, '--port', str(args.udp_port)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
-    )
+    backend_mgr = BackendManager(binary)
+    backend_mgr.on_output = lambda line: sse_queue.put(line)
+    backend_mgr.on_state = lambda: push_state()
 
-    t = threading.Thread(target=reader_thread, args=(proc,), daemon=True)
-    t.start()
+    _poller_thread = threading.Thread(target=poller, daemon=True)
+    _poller_thread.start()
 
     try:
-        server = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
+        httpd = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
     except OSError as e:
         print(f"[server] cannot bind port {args.port}: {e}", file=sys.stderr)
-        print(f"[server] try: python3 server.py --port {args.port + 1}", file=sys.stderr)
-        proc.terminate(); proc.wait(timeout=3)
+        control_server.stop()
         sys.exit(1)
 
-    print(f"[server]  http://localhost:{args.port}   (open this in browser)", file=sys.stderr)
-    print(f"[server]  UDP listening on port {args.udp_port}", file=sys.stderr)
+    print(f"[server] http://localhost:{args.port}", file=sys.stderr)
+    print(f"[server] control port {args.control_port}", file=sys.stderr)
     try:
-        server.serve_forever()
+        httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[server] shutting down...", file=sys.stderr)
     finally:
-        server.server_close()
-        proc.terminate(); proc.wait(timeout=3)
+        httpd.server_close()
+        backend_mgr.stop()
+        control_server.stop()
 
 
 if __name__ == '__main__':

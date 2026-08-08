@@ -99,6 +99,7 @@ int main(int argc, char * argv[])
         out["ts"] = l.ts;
         out["level"] = l.level;
         out["msg"] = l.message;
+        if (!l.sender.empty()) out["_from"] = l.sender;
         std::cout << out.dump() << std::endl;
       }
       log_buf.clear();
@@ -113,6 +114,7 @@ int main(int argc, char * argv[])
       nlohmann::json out;
       out["type"] = "status";
       out["connected"] = true;
+      out["sender"] = receiver.last_sender();
       std::cout << out.dump() << std::endl;
     } else if (was_connected && !connected) {
       nlohmann::json out;
