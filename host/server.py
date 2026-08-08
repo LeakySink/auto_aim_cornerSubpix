@@ -25,6 +25,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <title>Remote Debugger</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
   onerror="var s=document.createElement('script');s.src='/chart.js';document.head.appendChild(s);s.onerror=function(){document.body.innerHTML='<h1 style=color:red;text-align:center;padding-top:40vh>Chart.js failed to load.<br>Check your network or run:<br><code>python3 server.py --download-chartjs</code></h1>'}"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;background:#0f0f14;color:#c8c8d0;overflow:hidden;font-size:16px}
@@ -69,6 +71,9 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 .plot-legend .box{width:10px;height:10px;border:1px solid #fff;flex-shrink:0;border-radius:1px}
 .plot-legend .box.on{background:var(--c)}
 .plot-legend .box.off{background:transparent}
+.panel-id{font-weight:bold;font-size:12px;color:#707080;cursor:pointer;padding:0 4px;border-radius:2px;flex-shrink:0}
+.panel.active>.panel-header{background:#202030}
+.panel.active .panel-id{color:#4fc3f7}
 
 .splitter{position:absolute;z-index:4;background:#252530}
 .splitter:hover,.splitter.active{background:#4a6a8a}
@@ -124,6 +129,7 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
     <span id="stats" style="color:#505060">0 pkt/s</span>
     <span style="flex:1"></span>
     <button onclick="clearPlots()">清除</button>
+    <button onclick="resetAllViews()">重置</button>
   </div>
 </div>
 
@@ -216,6 +222,15 @@ function ensurePanelDOM(p) {
   var hdr = document.createElement('div');
   hdr.className = 'panel-header';
 
+  if (p.type === 'plot') {
+    var pidLabel = document.createElement('span');
+    pidLabel.className = 'panel-id';
+    pidLabel.textContent = 'P' + p.id;
+    pidLabel.title = '点击切换设置';
+    pidLabel.onclick = function(e) { e.stopPropagation(); activatePanel(p); };
+    hdr.appendChild(pidLabel);
+  }
+
   var typeSel = document.createElement('select');
   [{v:'plot',t:'绘图'},{v:'image',t:'图像'},{v:'log',t:'日志'}].forEach(function(o) {
     var opt = document.createElement('option');
@@ -285,6 +300,9 @@ function ensurePanelDOM(p) {
     p.logDiv = logs; p.logCount = lc; p.logEntries = 0;
   }
   el.appendChild(body);
+  if (p.type === 'plot') {
+    body.addEventListener('click', function() { activatePanel(p); });
+  }
   mainArea.appendChild(el);
   p.el = el;
   initPanelContent(p);
@@ -297,18 +315,42 @@ function initPanelContent(p) {
 
 function initPlotPanel(p) {
   if (!p.chartEl) return;
+  p.manualView = false;
+  p.lastMouseX = 0;
   var win = parseFloat(document.getElementById('win-size').value) || 10;
   p.chart = new Chart(p.chartEl.getContext('2d'), {
     type: 'line', data: { datasets: [] },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: 'nearest', intersect: false },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        zoom: {
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: function() { return p.lastMouseX < 50 ? 'y' : 'x'; },
+            overScaleMode: 'y',
+            onZoomStart: function() { p.manualView = true; }
+          },
+          pan: {
+            enabled: true,
+            mode: 'x',
+            overScaleMode: 'y',
+            onPanStart: function() { p.manualView = true; }
+          },
+          limits: { x: { min: 0 } }
+        }
+      },
       scales: {
         x: { type: 'linear', title:{display:true,text:'time (s)',color:'#606070',font:{size:12}}, ticks:{color:'#505060',font:{size:11}}, grid:{color:'#202030'}, min:0, max:win },
         y: { title:{display:true,text:'value',color:'#606070',font:{size:12}}, ticks:{color:'#505060',font:{size:11}}, grid:{color:'#202030'} }
       }
     }
+  });
+  p.chart.canvas.addEventListener('mousemove', function(e) {
+    var r = p.chart.canvas.getBoundingClientRect();
+    p.lastMouseX = e.clientX - r.left;
   });
   renderLegend(p);
   rebuildPanelChart(p);
@@ -316,8 +358,58 @@ function initPlotPanel(p) {
 
 function initImagePanel(p) {
   if (!p.imgEl) return;
+  p.imgScale = 1;
+  p.imgTx = 0; p.imgTy = 0;
+  p.imgDragging = false;
+
+  var body = p.el.querySelector('.panel-body');
+  body.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var s0 = p.imgScale;
+    p.imgScale *= e.deltaY > 0 ? 0.9 : 1.1;
+    if (p.imgScale < 0.1) p.imgScale = 0.1;
+    if (p.imgScale > 15) p.imgScale = 15;
+    var r = body.getBoundingClientRect();
+    var mx = e.clientX - r.left - r.width / 2;
+    var my = e.clientY - r.top - r.height / 2;
+    p.imgTx = mx + (p.imgTx - mx) * p.imgScale / s0;
+    p.imgTy = my + (p.imgTy - my) * p.imgScale / s0;
+    applyImgTransform(p);
+  });
+  body.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    p.imgDragging = true;
+    p.imgDragX = e.clientX - p.imgTx;
+    p.imgDragY = e.clientY - p.imgTy;
+    body.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!p.imgDragging) return;
+    p.imgTx = e.clientX - p.imgDragX;
+    p.imgTy = e.clientY - p.imgDragY;
+    applyImgTransform(p);
+  });
+  window.addEventListener('mouseup', function() {
+    if (p.imgDragging) {
+      p.imgDragging = false;
+      body.style.cursor = '';
+    }
+  });
+  p.imgEl.addEventListener('dragstart', function(e) { e.preventDefault(); });
+
   refreshImgOptions(p);
   if (Object.keys(imgSources).length > 0) showPanelImage(p);
+}
+
+function applyImgTransform(p) {
+  if (!p.imgEl) return;
+  p.imgEl.style.transform = 'translate(-50%,-50%) translate(' + p.imgTx.toFixed(1) + 'px,' + p.imgTy.toFixed(1) + 'px) scale(' + p.imgScale.toFixed(3) + ')';
+}
+
+function resetImgView(p) {
+  if (p.type !== 'image') return;
+  p.imgScale = 1; p.imgTx = 0; p.imgTy = 0;
+  applyImgTransform(p);
 }
 
 function renderLegend(p) {
@@ -407,6 +499,7 @@ function pushDataToPanel(p) {
 
 function updatePanelView(p) {
   if (!p.chart || lastX === 0) return;
+  if (p.manualView) { p.chart.update('none'); return; }
   var mode = document.querySelector('input[name="mode"]:checked').value;
   var win = parseFloat(document.getElementById('win-size').value) || 10;
   if (mode === 'paused') { p.chart.update('none'); return; }
@@ -424,6 +517,20 @@ function updateAllCharts() {
   for (var i = 0; i < rows.length; i++)
     for (var j = 0; j < rows[i].panels.length; j++)
       updatePanelView(rows[i].panels[j]);
+}
+
+function resetAllViews() {
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
+      var p = rows[ri].panels[pi];
+      if (p.type === 'plot' && p.chart) {
+        p.manualView = false;
+        if (p.chart.resetZoom) p.chart.resetZoom();
+        updatePanelView(p);
+      } else if (p.type === 'image') {
+        resetImgView(p);
+      }
+    }
 }
 
 function showPanelImage(p) {
@@ -458,11 +565,12 @@ function refreshImgOptions(p) {
 function switchPanelType(p, newType) {
   if (p.type === newType) return;
   if (p.type === 'plot' && p.chart) { p.chart.destroy(); p.chart = null; }
+  if (p.type === 'image') { p.imgDragging = false; }
   if (p.imgSel) { p.imgSel.remove(); p.imgSel = null; }
   if (p.imgFps) { p.imgFps.remove(); p.imgFps = null; }
   p.type = newType;
   p.el.querySelector('.panel-body').innerHTML = '';
-  p.legendDiv = null; p.chartEl = null; p.chart = null;
+  p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false;
   p.imgEl = null; p.placeholder = null; p.imgInfo = null;
   p.logDiv = null; p.logCount = null;
   var body = p.el.querySelector('.panel-body');
@@ -605,30 +713,69 @@ function startDrag(splitInfo, e) {
 // ── Data ─────────────────────────────────────────────────────────────────────
 const COLORS = ['#4fc3f7','#ffb74d','#81c784','#e57373','#ba68c8','#4dd0e1','#fff176','#a1887f','#90a4ae','#f48fb1','#ef5350','#26c6da','#7e57c2','#66bb6a','#ff7043'];
 var fieldMeta = {}, colorIdx = 0, xField = 'ts', firstTs = null, lastX = 0;
-var plotData = [];
+var plotData = [], activePanelId = null;
 const MAX_PTS = 50000;
 var panelMap = {};
 
 function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
 
+function getPanelById(id) {
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++)
+      if (rows[ri].panels[pi].id === id) return rows[ri].panels[pi];
+  return null;
+}
+
+function activatePanel(p) {
+  if (!p || p.type !== 'plot') return;
+  var old = activePanelId !== null ? getPanelById(activePanelId) : null;
+  if (old && old !== p && old.fieldDiv) {
+    var cbs = old.fieldDiv.querySelectorAll('input');
+    for (var i = 0; i < cbs.length; i++) old.subscribed[cbs[i].value] = cbs[i].checked;
+  }
+  activePanelId = p.id;
+  rebuildSidebar(p);
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
+      var rp = rows[ri].panels[pi];
+      if (rp.el) rp.el.classList.toggle('active', rp.id === p.id);
+    }
+}
+
+function rebuildSidebar(p) {
+  var fl = document.getElementById('field-list');
+  fl.innerHTML = '';
+  if (!p || Object.keys(fieldMeta).length === 0) {
+    fl.innerHTML = '<span style=\"color:#404050;font-size:13px\">等待数据…</span>';
+    return;
+  }
+  for (var name in fieldMeta) {
+    var lb = document.createElement('label');
+    lb.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:14px;padding:1px 0;color:#a0a0b0;cursor:pointer';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = name;
+    cb.checked = p.subscribed[name] || false;
+    cb.onchange = function() {
+      p.subscribed[this.value] = this.checked;
+      rebuildPanelChart(p);
+    };
+    lb.appendChild(cb);
+    lb.appendChild(document.createTextNode(' ' + name));
+    fl.appendChild(lb);
+  }
+  p.fieldDiv = fl;
+}
+
 function ensureField(name) {
   if (fieldMeta[name]) return;
-  fieldMeta[name] = { color: getColor(), subscribed: false };
-  var fl = document.getElementById('field-list');
-  if (fl.querySelector('.placeholder')) fl.innerHTML = '';
-  var lb = document.createElement('label');
-  lb.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:14px;padding:1px 0;color:#a0a0b0;cursor:pointer';
-  var cb = document.createElement('input');
-  cb.type = 'checkbox'; cb.value = name;
-  cb.onchange = function() {
-    fieldMeta[name].subscribed = cb.checked;
-    for (var ri = 0; ri < rows.length; ri++)
-      for (var pi = 0; pi < rows[ri].panels.length; pi++)
-        rebuildPanelChart(rows[ri].panels[pi]);
-  };
-  lb.appendChild(cb);
-  lb.appendChild(document.createTextNode(' ' + name));
-  fl.appendChild(lb);
+  fieldMeta[name] = { color: getColor() };
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
+      var p = rows[ri].panels[pi];
+      if (p.type === 'plot') p.subscribed[name] = false;
+    }
+  var ap = activePanelId !== null ? getPanelById(activePanelId) : null;
+  if (ap) rebuildSidebar(ap);
 }
 
 function rebuildAllCharts() {
@@ -648,7 +795,7 @@ function addPoint(ts, data) {
   for (var k in data) {
     if (k === xField || typeof data[k] !== 'number') continue;
     ensureField(k);
-    if (fieldMeta[k].subscribed) pt.fields[k] = data[k];
+    pt.fields[k] = data[k];
   }
   plotData.push(pt);
   var history = parseFloat(document.getElementById('history-sel').value);
