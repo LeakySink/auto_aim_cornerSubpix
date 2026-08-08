@@ -317,6 +317,9 @@ function initPlotPanel(p) {
   if (!p.chartEl) return;
   p.manualView = false;
   p.lastMouseX = 0;
+  p.subscribed = {};
+  for (var n in fieldMeta) p.subscribed[n] = false;
+  if (activePanelId === null) activatePanel(p);
   var win = parseFloat(document.getElementById('win-size').value) || 10;
   p.chart = new Chart(p.chartEl.getContext('2d'), {
     type: 'line', data: { datasets: [] },
@@ -417,8 +420,7 @@ function renderLegend(p) {
   if (!p.chart) return;
   p.legendDiv.innerHTML = '';
   for (var n in fieldMeta) {
-    if (!fieldMeta[n].subscribed) continue;
-    var idx = -1;
+    if (!p.subscribed[n]) continue;
     for (var i = 0; i < p.chart.data.datasets.length; i++) {
       if (p.chart.data.datasets[i].label === n) { idx = i; break; }
     }
@@ -449,7 +451,7 @@ function rebuildPanelChart(p) {
   if (!p.chart) return;
   p.chart.data.datasets.length = 0;
   for (var name in fieldMeta) {
-    if (!fieldMeta[name].subscribed) continue;
+    if (!p.subscribed[name]) continue;
     var ds = { label: name, data: [], borderColor: fieldMeta[name].color, borderWidth: 1.8, pointRadius: 0, spanGaps: false, hidden: false };
     for (var i = 0; i < plotData.length; i++) {
       var yv = plotData[i].fields[name];
@@ -469,7 +471,7 @@ function pushDataToPanel(p) {
   p.chart.data.datasets.forEach(function(ds) { existingLabels[ds.label] = true; });
   var addedNew = false;
   for (var name in fieldMeta) {
-    if (!fieldMeta[name].subscribed) continue;
+    if (!p.subscribed[name]) continue;
     if (existingLabels[name]) continue;
     var ds = { label: name, data: [], borderColor: fieldMeta[name].color, borderWidth: 1.8, pointRadius: 0, spanGaps: false, hidden: false };
     for (var i = 0; i < plotData.length - 1; i++) {
@@ -568,16 +570,26 @@ function switchPanelType(p, newType) {
   if (p.type === 'image') { p.imgDragging = false; }
   if (p.imgSel) { p.imgSel.remove(); p.imgSel = null; }
   if (p.imgFps) { p.imgFps.remove(); p.imgFps = null; }
+  var oldPid = p.el.querySelector('.panel-id');
+  if (oldPid) oldPid.remove();
   p.type = newType;
   p.el.querySelector('.panel-body').innerHTML = '';
-  p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false;
+  p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false; p.fieldDiv = null;
   p.imgEl = null; p.placeholder = null; p.imgInfo = null;
   p.logDiv = null; p.logCount = null;
   var body = p.el.querySelector('.panel-body');
   if (newType === 'plot') {
+    var typeSel = p.el.querySelector('.panel-header select');
+    var pidLabel = document.createElement('span');
+    pidLabel.className = 'panel-id';
+    pidLabel.textContent = 'P' + p.id;
+    pidLabel.title = '点击切换设置';
+    pidLabel.onclick = function(e) { e.stopPropagation(); activatePanel(p); };
+    typeSel.parentNode.insertBefore(pidLabel, typeSel);
     var cvs = document.createElement('canvas'); body.appendChild(cvs);
     var legend = document.createElement('div'); legend.className = 'plot-legend';
     body.appendChild(legend);
+    body.addEventListener('click', function() { activatePanel(p); });
     p.legendDiv = legend; p.chartEl = cvs;
     initPlotPanel(p);
   } else if (newType === 'image') {
@@ -808,7 +820,7 @@ function addPoint(ts, data) {
 }
 
 function clearPlots() {
-  plotData = []; fieldMeta = {}; firstTs = null; lastX = 0;
+  plotData = []; fieldMeta = {}; firstTs = null; lastX = 0; activePanelId = null;
   colorIdx = 0;
   document.getElementById('field-list').innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
   for (var ri = 0; ri < rows.length; ri++)
