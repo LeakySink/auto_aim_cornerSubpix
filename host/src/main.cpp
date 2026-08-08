@@ -71,6 +71,11 @@ int main(int argc, char * argv[])
         nlohmann::json out;
         out["type"] = "image";
         out["ts"] = img.ts;
+        try {
+          out["meta"] = nlohmann::json::parse(img.meta_json);
+        } catch (...) {
+          out["meta"] = img.meta_json;
+        }
         out["jpg_b64"] =
           backend::base64_encode(img.jpeg.data(), img.jpeg.size());
         std::cout << out.dump() << std::endl;

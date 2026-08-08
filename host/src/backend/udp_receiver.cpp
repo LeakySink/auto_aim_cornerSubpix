@@ -106,16 +106,23 @@ void UDPReceiver::worker()
     if (static_cast<size_t>(n) < 1) continue;
 
     if (buf[0] == 0xFF) {
-      if (static_cast<size_t>(n) < 13) continue;
+      if (static_cast<size_t>(n) < 17) continue;
       uint64_t ts;
       std::memcpy(&ts, buf + 1, 8);
+      uint32_t meta_len;
+      std::memcpy(&meta_len, buf + 9, 4);
+      if (static_cast<size_t>(n) < 13 + meta_len + 4) continue;
+      std::string meta_str(reinterpret_cast<char *>(buf + 13),
+                           static_cast<size_t>(meta_len));
       uint32_t jpg_len;
-      std::memcpy(&jpg_len, buf + 9, 4);
-      if (static_cast<size_t>(n) < 13 + jpg_len) continue;
+      std::memcpy(&jpg_len, buf + 13 + meta_len, 4);
+      size_t jpg_off = 13 + meta_len + 4;
+      if (static_cast<size_t>(n) < jpg_off + jpg_len) continue;
 
       ImageData img;
       img.ts = ts;
-      img.jpeg.assign(buf + 13, buf + 13 + jpg_len);
+      img.meta_json = std::move(meta_str);
+      img.jpeg.assign(buf + jpg_off, buf + jpg_off + jpg_len);
 
       std::lock_guard<std::mutex> lock(img_mtx_);
       img_queue_.push_back(std::move(img));

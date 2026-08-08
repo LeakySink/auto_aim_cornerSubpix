@@ -19,6 +19,7 @@ struct PlotData
 struct ImageData
 {
   uint64_t ts;
+  std::string meta_json;
   std::vector<uint8_t> jpeg;
 };
 
