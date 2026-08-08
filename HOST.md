@@ -35,7 +35,7 @@ Host 端是远程调试系统的接收与可视化端，运行在调试 PC 上�
 ## 快速开始
 
 ```bash
-./host/run.sh
+./host/watch.sh
 # 或
 cd host && cmake -B build && make -C build -j
 python3 server.py --port 8080 --control-port 15000
@@ -130,7 +130,7 @@ HTTP API:
 
 ```bash
 # 启动 host
-./host/run.sh
+./host/watch.sh
 
 # 单发送端测试
 ./build/remote_logger_test --host=127.0.0.1 --ctrl-port=15000 --name=mybot
