@@ -95,6 +95,9 @@ target_link_libraries(dm_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 target_link_libraries(remote_logger_test ${OpenCV_LIBS} fmt::fmt tools)
 
+add_executable(multi_sender_test tests/multi_sender_test.cpp)
+target_link_libraries(multi_sender_test ${OpenCV_LIBS} fmt::fmt tools)
+
 add_executable(gimbal_test tests/gimbal_test.cpp)
 target_link_libraries(gimbal_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 

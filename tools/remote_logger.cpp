@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <ctime>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -34,6 +35,8 @@ void RemoteLogger::init(const Config & cfg)
     ::mkdir(cfg_.log_dir.c_str(), 0755);
   }
 
+  sender_name_ = resolve_sender();
+
   if (cfg_.enable_remote) {
     sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_ < 0) {
@@ -53,6 +56,33 @@ void RemoteLogger::init(const Config & cfg)
 void RemoteLogger::shutdown()
 {
   if (!running_) return;
+
+  if (cfg_.control_port > 0 && registered_) {
+    int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (reg_sock >= 0) {
+      sockaddr_in ctrl_addr{};
+      ctrl_addr.sin_family = AF_INET;
+      ctrl_addr.sin_port = ::htons(cfg_.control_port);
+      ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+
+      nlohmann::json dreg;
+      dreg["type"] = "deregister";
+      dreg["name"] = sender_name_;
+      std::string payload = dreg.dump();
+      ::sendto(reg_sock, payload.data(), payload.size(), 0,
+               reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
+
+      timeval tv{};
+      tv.tv_sec = 1;
+      tv.tv_usec = 0;
+      ::setsockopt(reg_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+      char buf[512];
+      ::recvfrom(reg_sock, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
+      ::close(reg_sock);
+    }
+  }
+
   running_ = false;
   cv_.notify_all();
   if (worker_.joinable()) worker_.join();
@@ -83,6 +113,14 @@ void RemoteLogger::plot(const nlohmann::json & data)
 void RemoteLogger::log(const std::string & level, const std::string & msg)
 {
   if (!running_) return;
+
+  auto ts = now_ns();
+  auto t = static_cast<time_t>(ts / 1000000000ULL);
+  auto ms = (ts / 1000000ULL) % 1000;
+  char tbuf[32];
+  std::strftime(tbuf, sizeof(tbuf), "%H:%M:%S", std::localtime(&t));
+  std::fprintf(stderr, "%s.%03lu [%s] %s\n", tbuf,
+               static_cast<unsigned long>(ms), level.c_str(), msg.c_str());
 
   nlohmann::json entry = {{"level", level}, {"msg", msg}};
   plot(entry);
@@ -118,6 +156,8 @@ void RemoteLogger::worker()
 {
   std::vector<VarEntry> var_pending;
   std::vector<ImgEntry> img_pending;
+
+  if (cfg_.control_port > 0 && !registered_) try_register();
 
   while (running_) {
     {
@@ -162,6 +202,8 @@ void RemoteLogger::worker()
     }
 
     if (cfg_.heartbeat_interval_ms > 0) send_heartbeat();
+
+    if (cfg_.control_port > 0 && !registered_) try_register();
   }
 
   {
@@ -169,6 +211,58 @@ void RemoteLogger::worker()
     if (!var_buf_.empty()) var_buf_.swap(var_pending);
   }
   if (!var_pending.empty() && cfg_.enable_local) flush_var_local(var_pending);
+}
+
+bool RemoteLogger::try_register()
+{
+  if (sock_ < 0) return false;
+  auto now = std::chrono::steady_clock::now();
+  if (last_register_ts_.time_since_epoch().count() > 0) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_register_ts_);
+    if (elapsed.count() < static_cast<int64_t>(cfg_.register_retry_ms)) return false;
+  }
+  last_register_ts_ = now;
+
+  int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+  if (reg_sock < 0) return false;
+
+  sockaddr_in ctrl_addr{};
+  ctrl_addr.sin_family = AF_INET;
+  ctrl_addr.sin_port = ::htons(cfg_.control_port);
+  ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+
+  nlohmann::json reg;
+  reg["type"] = "register";
+  reg["name"] = sender_name_;
+  std::string payload = reg.dump();
+  ::sendto(reg_sock, payload.data(), payload.size(), 0,
+           reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
+
+  timeval tv{};
+  tv.tv_sec = 3;
+  tv.tv_usec = 0;
+  ::setsockopt(reg_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+  char buf[2048];
+  ssize_t n = ::recvfrom(reg_sock, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
+  if (n > 0) {
+    buf[n] = '\0';
+    try {
+      auto resp = nlohmann::json::parse(buf);
+      if (resp.value("status", "") == "ok" && resp.contains("port")) {
+        uint16_t assigned = resp["port"].get<uint16_t>();
+        addr_.sin_port = ::htons(assigned);
+        cfg_.remote_port = assigned;
+        registered_ = true;
+        std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
+                     sender_name_.c_str(), assigned);
+        ::close(reg_sock);
+        return true;
+      }
+    } catch (...) {}
+  }
+  ::close(reg_sock);
+  return false;
 }
 
 void RemoteLogger::send_heartbeat()
@@ -183,7 +277,7 @@ void RemoteLogger::send_heartbeat()
   if (elapsed.count() < static_cast<int64_t>(cfg_.heartbeat_interval_ms)) return;
   last_hb_ = now;
 
-  nlohmann::json hb = {{"hb", 1}};
+  nlohmann::json hb = {{"hb", 1}, {"_from", sender_name_}, {"ts", now_ns()}};
   std::string payload = hb.dump();
   send_udp(payload.data(), payload.size());
 }
@@ -223,11 +317,12 @@ void RemoteLogger::try_send_var(const VarEntry & entry)
   try {
     auto j = nlohmann::json::parse(entry.json_str);
     if (!j.contains("ts")) j["ts"] = entry.ts;
+    inject_sender(j);
     std::string payload = j.dump();
     send_udp(payload.data(), payload.size());
   } catch (...) {
     std::string payload =
-      "{\"ts\":" + std::to_string(entry.ts) + ",\"raw\":\"" + entry.json_str + "\"}";
+      "{\"ts\":" + std::to_string(entry.ts) + ",\"_from\":\"" + sender_name_ + "\",\"raw\":\"" + entry.json_str + "\"}";
     send_udp(payload.data(), payload.size());
   }
 }
@@ -235,7 +330,9 @@ void RemoteLogger::try_send_var(const VarEntry & entry)
 void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
                                 const nlohmann::json & meta)
 {
-  std::string meta_str = meta.dump();
+  auto jmeta = meta;
+  inject_sender(jmeta);
+  std::string meta_str = jmeta.dump();
   size_t total = 1 + 8 + 4 + meta_str.size() + 4 + jpeg.size();
   if (total > kMaxUdpPayload) {
     std::fprintf(stderr, "[RemoteLogger] image too large %zu bytes, skipped\n", total);
@@ -263,6 +360,22 @@ void RemoteLogger::send_udp(const void * data, size_t len)
 {
   if (sock_ < 0) return;
   ::sendto(sock_, data, len, 0, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+}
+
+std::string RemoteLogger::resolve_sender() const
+{
+  if (!cfg_.sender_name.empty()) return cfg_.sender_name;
+  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "dev_%04x", static_cast<uint32_t>(ns & 0xFFFF));
+  return buf;
+}
+
+void RemoteLogger::inject_sender(nlohmann::json & j) const
+{
+  if (!j.contains("_from")) j["_from"] = sender_name_;
 }
 
 }  // namespace tools

@@ -30,6 +30,9 @@ public:
     int img_width = 640;
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
+    std::string sender_name;
+    uint16_t control_port = 0;
+    uint32_t register_retry_ms = 3000;
     bool enable_remote = true;
     bool enable_local = true;
   };
@@ -62,7 +65,10 @@ private:
   };
 
   void worker();
+  bool try_register();
   void send_heartbeat();
+  std::string resolve_sender() const;
+  void inject_sender(nlohmann::json & j) const;
   void flush_var_local(const std::vector<VarEntry> & entries);
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
@@ -83,10 +89,13 @@ private:
   std::mutex wake_mtx_;
   std::thread worker_;
   std::chrono::steady_clock::time_point last_hb_{};
+  std::atomic<bool> registered_{false};
+  std::chrono::steady_clock::time_point last_register_ts_{};
 
   int sock_{-1};
   sockaddr_in addr_{};
   std::string session_file_;
+  std::string sender_name_;
 };
 
 }  // namespace tools
