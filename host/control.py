@@ -16,11 +16,12 @@ import threading
 
 
 class ControlServer:
-    def __init__(self, host="0.0.0.0", port=15000, data_port_start=15001, data_port_end=15099):
+    def __init__(self, host="0.0.0.0", port=15000, data_port_start=15001, data_port_end=15099, reuse_ports=False):
         self.host = host
         self.port = port
         self.data_port_start = data_port_start
         self.data_port_end = data_port_end
+        self.reuse_ports = reuse_ports
         self.senders = {}
         self.used_ports = set()
         self._lock = threading.Lock()
@@ -69,6 +70,8 @@ class ControlServer:
             return self.senders.get(name)
 
     def _next_port(self):
+        if self.reuse_ports:
+            return self.data_port_start
         for p in range(self.data_port_start, self.data_port_end + 1):
             if p not in self.used_ports:
                 self.used_ports.add(p)
@@ -76,7 +79,8 @@ class ControlServer:
         return 0
 
     def _release_port(self, p):
-        self.used_ports.discard(p)
+        if not self.reuse_ports:
+            self.used_ports.discard(p)
 
     def _send(self, addr, obj):
         try:
