@@ -102,6 +102,12 @@ std::chrono::steady_clock::time_point UDPReceiver::last_packet_time() const
   return last_pkt_;
 }
 
+std::string UDPReceiver::last_sender() const
+{
+  std::lock_guard<std::mutex> lock(sender_mtx_);
+  return last_sender_;
+}
+
 void UDPReceiver::worker()
 {
   uint8_t buf[65536];
@@ -135,6 +141,14 @@ void UDPReceiver::worker()
       img.meta_json = std::move(meta_str);
       img.jpeg.assign(buf + jpg_off, buf + jpg_off + jpg_len);
 
+      try {
+        auto mj = nlohmann::json::parse(img.meta_json);
+        if (mj.contains("_from") && mj["_from"].is_string()) {
+          std::lock_guard<std::mutex> lock(sender_mtx_);
+          last_sender_ = mj["_from"].get<std::string>();
+        }
+      } catch (...) {}
+
       std::lock_guard<std::mutex> lock(img_mtx_);
       img_queue_.push_back(std::move(img));
     } else {
@@ -142,13 +156,18 @@ void UDPReceiver::worker()
                            static_cast<size_t>(n));
       try {
         auto j = nlohmann::json::parse(json_str);
-        if (j.contains("hb") && j.size() == 1) continue;
+        if (j.contains("_from") && j["_from"].is_string()) {
+          std::lock_guard<std::mutex> lock(sender_mtx_);
+          last_sender_ = j["_from"].get<std::string>();
+        }
+        if (j.contains("hb") && j.size() <= 2) continue;
         if (j.contains("level") && j.contains("msg") &&
             j["level"].is_string() && j["msg"].is_string()) {
           LogData log;
           log.ts = j.value("ts", uint64_t(0));
           log.level = j["level"].get<std::string>();
           log.message = j["msg"].get<std::string>();
+          log.sender = j.value("_from", "");
 
           std::lock_guard<std::mutex> lock(log_mtx_);
           log_queue_.push_back(std::move(log));

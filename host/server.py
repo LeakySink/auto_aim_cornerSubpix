@@ -1037,7 +1037,7 @@ def push_state():
 def poller():
     global _last_cs_version, _last_senders
     while control_server and control_server._running:
-        time.sleep(1)
+        time.sleep(0.5)
         try:
             v = control_server.version()
             snames = control_server.get_senders()
@@ -1061,7 +1061,7 @@ def do_select(name):
     info = control_server.get_sender_info(name)
     if info:
         backend_mgr.switch(name, info["data_port"])
-        push_state()
+    push_state()
 
 
 # ── HTTP request handler ─────────────────────────────────────────────────────
@@ -1120,6 +1120,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Connection', 'keep-alive')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
+        push_state()
         try:
             while True:
                 line = sse_queue.get(timeout=1.0)
@@ -1170,6 +1171,7 @@ def main():
 
     _poller_thread = threading.Thread(target=poller, daemon=True)
     _poller_thread.start()
+    push_state()  # initial state for SSE clients
 
     try:
         httpd = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)

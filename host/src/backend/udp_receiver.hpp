@@ -29,6 +29,7 @@ struct LogData
   uint64_t ts;
   std::string level;
   std::string message;
+  std::string sender;
 };
 
 class UDPReceiver
@@ -45,6 +46,7 @@ public:
   bool pop_all_log(std::vector<LogData> & out);
 
   std::chrono::steady_clock::time_point last_packet_time() const;
+  std::string last_sender() const;
 
 private:
   void worker();
@@ -66,6 +68,9 @@ private:
 
   mutable std::mutex time_mtx_;
   std::chrono::steady_clock::time_point last_pkt_{};
+
+  mutable std::mutex sender_mtx_;
+  std::string last_sender_;
 };
 
 std::string base64_encode(const uint8_t * data, size_t len);

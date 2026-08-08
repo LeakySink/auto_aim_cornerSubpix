@@ -1,34 +1,49 @@
-#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
+#include <string>
 #include <thread>
 
 #include "tools/exiter.hpp"
 #include "tools/remote_logger.hpp"
 
-using namespace std::chrono_literals;
-
-const std::string keys =
-  "{help h usage ? |                     | 输出命令行参数说明}"
-  "{host           |      127.0.0.1      | 远程接收端 IP}"
-  "{port p         |         9871        | 远程接收端端口}"
-  "{rate r         |         50          | 发送频率 Hz}"
-  "{video v        |                     | 视频文件路径（可选，不填则生成测试画面）}";
-
 int main(int argc, char * argv[])
 {
-  cv::CommandLineParser cli(argc, argv, keys);
-  if (cli.has("help")) {
-    cli.printMessage();
-    return 0;
-  }
+  std::string host = "127.0.0.1";
+  uint16_t port = 9871;
+  uint16_t ctrl_port = 15000;
+  std::string name;
+  uint32_t hb = 0;
+  int rate = 50;
+  std::string video_path;
 
-  auto host = cli.get<std::string>("host");
-  auto port = static_cast<uint16_t>(cli.get<int>("port"));
-  auto rate = cli.get<int>("rate");
-  auto video_path = cli.get<std::string>("video");
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--help" || arg == "-h") {
+      std::printf("Usage: %s [options]\n", argv[0]);
+      std::printf("  --host=IP       Remote host IP (default: 127.0.0.1)\n");
+      std::printf("  --port=PORT     Data port      (default: 9871)\n");
+      std::printf("  --ctrl-port=P   Control port   (default: 15000)\n");
+      std::printf("  --name=NAME     Sender name    (default: auto)\n");
+      std::printf("  --hb=MS         Heartbeat ms   (default: 0=off)\n");
+      std::printf("  --rate=HZ       Send rate      (default: 50)\n");
+      std::printf("  --video=PATH    Video file     (optional)\n");
+      return 0;
+    }
+    auto eq = arg.find('=');
+    std::string k = (eq != std::string::npos) ? arg.substr(0, eq) : arg;
+    std::string v = (eq != std::string::npos) ? arg.substr(eq + 1) : (i + 1 < argc ? argv[++i] : "");
+    if (k == "--host") host = v;
+    else if (k == "--port") port = static_cast<uint16_t>(std::stoi(v));
+    else if (k == "--ctrl-port") ctrl_port = static_cast<uint16_t>(std::stoi(v));
+    else if (k == "--name") name = v;
+    else if (k == "--hb") hb = static_cast<uint32_t>(std::stoul(v));
+    else if (k == "--rate") rate = std::stoi(v);
+    else if (k == "--video") video_path = v;
+  }
 
   cv::VideoCapture cap;
   bool use_video = !video_path.empty();
@@ -44,6 +59,9 @@ int main(int argc, char * argv[])
   tools::RemoteLogger::Config cfg;
   cfg.remote_host = host;
   cfg.remote_port = port;
+  cfg.control_port = ctrl_port;
+  cfg.sender_name = name;
+  cfg.heartbeat_interval_ms = hb;
   cfg.log_dir = "./logs";
   cfg.img_width = 320;
   cfg.img_quality = 40;
@@ -61,7 +79,6 @@ int main(int argc, char * argv[])
     auto t1 = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(t1 - t0).count();
 
-    // ── signal data ──
     double sin1 = std::sin(elapsed * 2.0 * M_PI * 1.0);
     double sin2 = std::sin(elapsed * 2.0 * M_PI * 3.0);
     double saw = 2.0 * std::fmod(elapsed * 0.5, 1.0) - 1.0;
@@ -77,7 +94,6 @@ int main(int argc, char * argv[])
       {"square", sqr},
     });
 
-    // ── periodic log messages ──
     if (iter % 200 == 0) {
       tools::RemoteLogger::instance().log(
         "ERROR", "high error rate detected at iter=" + std::to_string(iter));
@@ -93,7 +109,6 @@ int main(int argc, char * argv[])
                    std::to_string(1.0 / rate * 1000).substr(0, 4) + "ms");
     }
 
-    // ── image ──
     cv::Mat frame;
     if (use_video) {
       cap >> frame;
@@ -103,7 +118,6 @@ int main(int argc, char * argv[])
       }
     } else {
       frame = cv::Mat(240, 320, CV_8UC3);
-      // animated background
       for (int y = 0; y < frame.rows; y++) {
         for (int x = 0; x < frame.cols; x++) {
           frame.at<cv::Vec3b>(y, x) = cv::Vec3b(
@@ -113,7 +127,6 @@ int main(int argc, char * argv[])
         }
       }
 
-      // moving ball
       ball_x += ball_dx;
       ball_y += ball_dy;
       if (ball_x < 20 || ball_x > 300) ball_dx = -ball_dx;
@@ -121,24 +134,17 @@ int main(int argc, char * argv[])
       cv::circle(frame, cv::Point(static_cast<int>(ball_x), static_cast<int>(ball_y)),
                  15, cv::Scalar(0, 200, 255), -1);
 
-      // crosshair
-      cv::line(frame, cv::Point(160, 110), cv::Point(160, 130),
-               cv::Scalar(0, 255, 0), 1);
-      cv::line(frame, cv::Point(150, 120), cv::Point(170, 120),
-               cv::Scalar(0, 255, 0), 1);
+      cv::line(frame, cv::Point(160, 110), cv::Point(160, 130), cv::Scalar(0, 255, 0), 1);
+      cv::line(frame, cv::Point(150, 120), cv::Point(170, 120), cv::Scalar(0, 255, 0), 1);
 
-      // HUD text
       cv::putText(frame, "iter:" + std::to_string(iter), cv::Point(8, 20),
                   cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
       cv::putText(frame, "t:" + std::to_string(elapsed).substr(0, 5) + "s",
-                  cv::Point(8, 40), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                  cv::Scalar(255, 255, 255), 1);
+                  cv::Point(8, 40), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
       cv::putText(frame, "sin1:" + std::to_string(sin1).substr(0, 5),
-                  cv::Point(8, 60), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                  cv::Scalar(100, 200, 255), 1);
+                  cv::Point(8, 60), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(100, 200, 255), 1);
       cv::putText(frame, "sin2:" + std::to_string(sin2).substr(0, 5),
-                  cv::Point(8, 80), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                  cv::Scalar(100, 255, 200), 1);
+                  cv::Point(8, 80), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(100, 255, 200), 1);
     }
 
     tools::RemoteLogger::instance().plot_image(frame,
@@ -147,14 +153,14 @@ int main(int argc, char * argv[])
     if (iter % 3 == 0 && !use_video) {
       cv::Mat dbg(120, 320, CV_8UC3, cv::Scalar(20, 20, 30));
       for (int x = 1; x < dbg.cols; x++) {
-        double t0 = elapsed - (dbg.cols - x) * 0.02;
-        int y1 = 60 - static_cast<int>(std::sin(t0 * 2 * M_PI) * 50);
-        int y2 = 60 - static_cast<int>(std::sin(t0 * 6 * M_PI) * 50);
+        double tv = elapsed - (dbg.cols - x) * 0.02;
+        int y1 = 60 - static_cast<int>(std::sin(tv * 2 * M_PI) * 50);
+        int y2 = 60 - static_cast<int>(std::sin(tv * 6 * M_PI) * 50);
         cv::line(dbg, cv::Point(x - 1, std::clamp(y1, 0, 119)),
-                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((t0 + 0.02) * 2 * M_PI) * 50), 0, 119)),
+                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((tv + 0.02) * 2 * M_PI) * 50), 0, 119)),
                  cv::Scalar(100, 200, 255), 2);
         cv::line(dbg, cv::Point(x - 1, std::clamp(y2, 0, 119)),
-                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((t0 + 0.02) * 6 * M_PI) * 50), 0, 119)),
+                 cv::Point(x, std::clamp(static_cast<int>(60 - std::sin((tv + 0.02) * 6 * M_PI) * 50), 0, 119)),
                  cv::Scalar(100, 255, 200), 2);
       }
       tools::RemoteLogger::instance().plot_image(dbg, {{"name", "waveform"}});
