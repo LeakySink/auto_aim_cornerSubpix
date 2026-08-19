@@ -64,26 +64,30 @@ function findFrameIndex(t) {
 }
 
 function showFrameAt(t) {
+  const wrap = document.getElementById('img-wrap');
+  const img = document.getElementById('frame-img');
+  const ph = document.getElementById('img-placeholder');
   if (!session.frames.length) {
-    document.getElementById('frame-img').style.display = 'none';
-    document.getElementById('img-placeholder').style.display = '';
+    wrap.classList.add('empty');
+    ph.textContent = '无图像';
     document.getElementById('img-meta').textContent = '';
     return;
   }
   const idx = findFrameIndex(t);
   const fr = session.frames[idx];
-  const img = document.getElementById('frame-img');
-  const ph = document.getElementById('img-placeholder');
   if (fr && fr.b64) {
+    wrap.classList.remove('empty');
     img.src = 'data:image/jpeg;base64,' + fr.b64;
-    img.style.display = '';
-    ph.style.display = 'none';
     const meta = fr.meta || {};
     const parts = [];
     if (meta.cam) parts.push('cam=' + meta.cam);
     if (meta.name) parts.push(meta.name);
     parts.push('t=' + fmtTime(fr.t) + 's');
     document.getElementById('img-meta').textContent = parts.join(' · ');
+  } else {
+    wrap.classList.add('empty');
+    ph.textContent = '无图像';
+    document.getElementById('img-meta').textContent = '';
   }
 }
 
