@@ -7,7 +7,7 @@
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
-- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程零拷贝入 150fps 邮箱；`img_gate_` 降到 30fps 后由 worker JPEG / UDP / `.rlog`
+- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker resize 后放开全分辨率，再 JPEG / UDP / `.rlog`
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 
 ## 快速开始
@@ -62,7 +62,7 @@ remote_logger:
 | `enable_local` | true | 启用本地日志 |
 | `log_dir` | "./logs" | 本地日志目录 |
 | `var_buffer_size` | 1024 | 变量缓冲条数 |
-| `img_buffer_size` | 10 | 降频后的编码环形槽数（满则覆盖最旧） |
+| `img_buffer_size` | 10 | yaml 兼容保留，图像侧不再使用深队列 |
 | `img_width` | 640 | 图像压缩宽度 |
 | `img_quality` | 50 | JPEG 质量 |
 | `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
@@ -125,7 +125,9 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 本地日志 (`.rlog`)
 
-单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。主线程 `plot_image` 只把 `cv::Mat` 头写入 **inbox**（refcount 钉住像素，**零拷贝**），不限帧率。`img_gate_` 按 30Hz 取 inbox 最新一帧转发到编码环；JPEG / 写盘 / UDP 只在 **img_worker** 完成。编码环满则覆盖最旧（编码中的槽改为替换等待中的最新帧）。
+单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
+
+`plot_image` 用采集时间戳对齐到 30Hz 网格（`due += n/30s`），未入选的帧只做一次 atomic 比较后返回，不入队、不加 Mat 引用、不 notify。入选帧把 Mat 头放进深度 1 邮箱（在飞编码 1 张 + 等待最新 1 张）。`img_worker` resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时覆盖等待槽，端到端延时保持在约一帧编码时间。
 
 格式 magic `RLG2`：
 
@@ -147,22 +149,23 @@ type 0x01 image:
 
 ## 线程模型
 
-四条后台路径：变量、图像降频中间件、图像编码、远程控制互不阻塞；`.rlog` 由 var/img 写（`session_mtx_`）。
+三条后台路径：变量、图像编码、远程控制；`.rlog` 由 var/img 写（`session_mtx_`）。
 
 ```
-主线程              img_gate_           img_worker_        var_worker_     ctrl_worker_
-──────              ────────            ───────────        ───────────     ─────────────
-plot_image          30Hz 取最新         JPEG+.rlog+UDP     .rlog+UDP JSON  try_register()
- → img_inbox_       → img_ring_         （FIFO）           plot/log        heartbeat
- （150fps 零拷贝）
-shutdown→join gate+img+var+ctrl
+主线程                         img_worker_           var_worker_      ctrl_worker_
+──────                         ───────────           ───────────      ─────────────
+plot_image
+  未到 30Hz 网格 → return
+  入选 → mailbox(1)  ────────► resize 放全分辨率
+                               JPEG + .rlog + UDP
+plot/log → var_buf_  ──────────────────────────────► .rlog + UDP
+shutdown → join img+var+ctrl                         JSON             register/hb
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
 | `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
-| `img_gate_` | 150fps inbox → 30fps，只转发 Mat 头 | 30Hz 节拍；shutdown 可打断 |
-| `img_worker_` | 编码环 FIFO → JPEG + 写本地 + UDP | gate 入环 notify；空闲 poll 5ms |
+| `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP | 入选帧 publish；空闲 poll 50ms |
 | `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-`img_inbox_` 容量 2，latest-wins，专供 150fps 热路径。`img_gate_` 每 33ms 抽一帧交给 `img_ring_`（`img_buffer_size`），编码与降频分离。
+150fps+ 热路径：未入选帧无锁队列、无拷贝。保存间隔为 `33.3ms ± 一帧相机周期`，与输入帧率是否整除 30 无关。

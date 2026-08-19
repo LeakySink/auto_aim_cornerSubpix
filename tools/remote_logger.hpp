@@ -19,11 +19,12 @@
 namespace tools
 {
 
-/// RemoteLogger — 主线程只入队，worker / 中间件分工：
+/// RemoteLogger — 主线程只入队，worker 分工：
 ///
-///   plot / log  ──→ var_buf_     ──→ var_worker_   ──→ .rlog (json) + UDP
-///   plot_image  ──→ img_inbox_   ──→ img_gate_     ──→ img_ring_ ──→ img_worker_
-///                   （150fps 零拷贝）   （降到 30fps）     JPEG + .rlog + UDP
+///   plot / log  ──→ var_buf_    ──→ var_worker_  ──→ .rlog (json) + UDP
+///   plot_image  ──→ 相位锁选 30fps ──→ mailbox(1) ──→ img_worker_
+///                   未入选帧直接 return              resize 后放全分辨率
+///                                                   JPEG + .rlog + UDP
 ///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试
 class RemoteLogger
 {
@@ -36,7 +37,7 @@ public:
     bool enable_local = true;
     std::string log_dir = "./logs";
     size_t var_buffer_size = 1024;
-    size_t img_buffer_size = 10;
+    size_t img_buffer_size = 10;  // yaml 兼容保留，图像侧不再用深队列
     int img_width = 640;
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
@@ -80,10 +81,10 @@ private:
   };
 
   void var_worker_loop();
-  void img_gate_loop();
   void img_worker_loop();
   void ctrl_worker_loop();
 
+  bool try_select_img(uint64_t ts);
   bool try_register();
   void send_heartbeat();
   std::string resolve_sender() const;
@@ -97,7 +98,7 @@ private:
   void flush_img_local(uint64_t ts, const nlohmann::json & meta,
                        const std::vector<uint8_t> & jpeg);
 
-  bool encode_and_dispatch_image(const ImgEntry & entry);
+  bool encode_and_dispatch_image(ImgEntry & entry);
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
                     const nlohmann::json & meta);
@@ -115,36 +116,25 @@ private:
   std::mutex var_wake_mtx_;
   std::thread var_worker_;
 
-  // ── 图像：inbox(150fps) → gate 降频 → ring(30fps) → encode ──
-  class ImgRingBuffer
+  // ── 图像：相位锁 30fps + 深度 1 邮箱（在飞 1 + 等待 1）──────────
+  class ImgMailbox
   {
   public:
-    void reset(size_t cap);
-    bool push(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
-    ImgEntry * acquire();
-    ImgEntry * acquire_latest();
-    void release();
-    bool wait_not_empty(int timeout_ms, const std::atomic<bool> & running);
+    void reset();
+    void publish(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
+    bool take(ImgEntry & out, int timeout_ms, const std::atomic<bool> & running);
     void wake();
     void clear();
 
   private:
-    void drop_slot(size_t idx);
-
-    std::vector<ImgEntry> slots_;
-    size_t cap_{0};
-    size_t tail_{0};
-    size_t count_{0};
-    bool busy_{false};
+    ImgEntry slot_;
+    bool has_{false};
     std::mutex mtx_;
     std::condition_variable cv_;
   };
 
-  ImgRingBuffer img_inbox_;
-  ImgRingBuffer img_ring_;
-  std::mutex img_gate_mtx_;
-  std::condition_variable img_gate_cv_;
-  std::thread img_gate_;
+  std::atomic<uint64_t> img_due_ns_{0};
+  ImgMailbox img_mbox_;
   std::thread img_worker_;
 
   // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
