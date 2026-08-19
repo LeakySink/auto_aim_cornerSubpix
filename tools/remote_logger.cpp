@@ -25,7 +25,8 @@ constexpr uint8_t kRecImg = 0x01;
 constexpr uint8_t kImgMarker = 0xFF;
 constexpr size_t kMaxUdpPayload = 60000;
 constexpr size_t kSessionIoBuf = 256 * 1024;
-constexpr uint64_t kImgMinIntervalNs = 33000000ULL;  // ~30 fps，仅 worker 侧限流
+constexpr int kImgGateFps = 30;           // 降频中间件输出帧率
+constexpr size_t kImgInboxCap = 2;        // 150fps 邮箱，latest-wins
 constexpr uint32_t kSessionFlushMs = 200;
 constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 5;
@@ -56,6 +57,7 @@ void RemoteLogger::init(const Config & cfg)
   registered_ = false;
   last_register_ts_ = {};
   last_hb_ = {};
+  img_inbox_.reset(kImgInboxCap);
   img_ring_.reset(cfg_.img_buffer_size);
   {
     std::lock_guard<std::mutex> lock(session_mtx_);
@@ -86,6 +88,7 @@ void RemoteLogger::init(const Config & cfg)
   }
   var_worker_ = std::thread(&RemoteLogger::var_worker_loop, this);
   img_worker_ = std::thread(&RemoteLogger::img_worker_loop, this);
+  img_gate_ = std::thread(&RemoteLogger::img_gate_loop, this);
 }
 
 void RemoteLogger::init(const std::string & config_path)
@@ -147,9 +150,12 @@ void RemoteLogger::shutdown()
 
   running_ = false;
   var_cv_.notify_all();
+  img_gate_cv_.notify_all();
+  img_inbox_.wake();
   img_ring_.wake();
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
+  if (img_gate_.joinable()) img_gate_.join();
   if (img_worker_.joinable()) img_worker_.join();
 
   close_session_file();
@@ -208,7 +214,7 @@ void RemoteLogger::plot_image(const cv::Mat & img, const nlohmann::json & meta)
     ts = now_ns();
   }
 
-  img_ring_.push(ts, meta, img);
+  img_inbox_.push(ts, meta, img);
 }
 
 uint64_t RemoteLogger::now_ns() const
@@ -275,7 +281,7 @@ void RemoteLogger::ctrl_worker_loop()
   }
 }
 
-// ── img_ring：主线程只钉 Mat 头（零拷贝），worker 取最新帧编码 ─────────
+// ── img_inbox / img_ring：零拷贝 Mat 头环形槽 ────────────────────────
 
 void RemoteLogger::ImgRingBuffer::reset(size_t cap)
 {
@@ -330,6 +336,14 @@ bool RemoteLogger::ImgRingBuffer::push(uint64_t ts, nlohmann::json meta,
   return true;
 }
 
+RemoteLogger::ImgEntry * RemoteLogger::ImgRingBuffer::acquire()
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (count_ == 0 || busy_) return nullptr;
+  busy_ = true;
+  return &slots_[tail_];
+}
+
 RemoteLogger::ImgEntry * RemoteLogger::ImgRingBuffer::acquire_latest()
 {
   std::lock_guard<std::mutex> lock(mtx_);
@@ -378,21 +392,46 @@ void RemoteLogger::ImgRingBuffer::clear()
   busy_ = false;
 }
 
-// ── img_worker：JPEG 编码 → 本地 + UDP（与 var_worker 互不阻塞）────────
+// ── img_gate：150fps inbox → 30fps 采样，只转发 Mat 头 ───────────────
+
+void RemoteLogger::img_gate_loop()
+{
+  using clock = std::chrono::steady_clock;
+  const auto period = std::chrono::nanoseconds(1000000000LL / kImgGateFps);
+  auto next_tick = clock::now();
+
+  auto forward_latest = [&]() {
+    ImgEntry * entry = img_inbox_.acquire_latest();
+    if (!entry) return;
+    img_ring_.push(entry->ts, std::move(entry->meta), entry->img);
+    img_inbox_.release();
+  };
+
+  std::unique_lock<std::mutex> lock(img_gate_mtx_);
+  while (running_) {
+    img_gate_cv_.wait_until(lock, next_tick, [&] { return !running_.load(); });
+    if (!running_) break;
+    lock.unlock();
+    forward_latest();
+    lock.lock();
+    next_tick += period;
+    const auto now = clock::now();
+    if (now >= next_tick + period) next_tick = now;
+  }
+  lock.unlock();
+
+  forward_latest();
+  img_inbox_.clear();
+}
+
+// ── img_worker：JPEG 编码 → 本地 + UDP（已是 30fps 流）──────────────
 
 void RemoteLogger::img_worker_loop()
 {
-  uint64_t last_keep_ns = 0;
-
   auto consume_one = [&]() -> bool {
-    ImgEntry * entry = img_ring_.acquire_latest();
+    ImgEntry * entry = img_ring_.acquire();
     if (!entry) return false;
-    const uint64_t ts = entry->ts;
-    if (last_keep_ns == 0 || ts < last_keep_ns ||
-        ts - last_keep_ns >= kImgMinIntervalNs) {
-      last_keep_ns = ts;
-      encode_and_dispatch_image(*entry);
-    }
+    encode_and_dispatch_image(*entry);
     img_ring_.release();
     return true;
   };

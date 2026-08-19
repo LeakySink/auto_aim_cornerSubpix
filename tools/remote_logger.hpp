@@ -19,12 +19,12 @@
 namespace tools
 {
 
-/// RemoteLogger — 主线程只入队，三个 worker 分工：
+/// RemoteLogger — 主线程只入队，worker / 中间件分工：
 ///
-///   plot / log  ──→ var_buf_   ──→ var_worker_   ──→ .rlog (json) + UDP
-///   plot_image  ──→ img_ring_  ──→ img_worker_   ──→ .rlog (jpeg) + UDP
-///                   （仅 Mat 头，零拷贝；worker 取最新帧）
-///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试（独立控制线程）
+///   plot / log  ──→ var_buf_     ──→ var_worker_   ──→ .rlog (json) + UDP
+///   plot_image  ──→ img_inbox_   ──→ img_gate_     ──→ img_ring_ ──→ img_worker_
+///                   （150fps 零拷贝）   （降到 30fps）     JPEG + .rlog + UDP
+///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试
 class RemoteLogger
 {
 public:
@@ -80,6 +80,7 @@ private:
   };
 
   void var_worker_loop();
+  void img_gate_loop();
   void img_worker_loop();
   void ctrl_worker_loop();
 
@@ -114,12 +115,13 @@ private:
   std::mutex var_wake_mtx_;
   std::thread var_worker_;
 
-  // ── 图像环形缓冲（主线程只入队 Mat 头，img_worker 异步编码最新帧）──
+  // ── 图像：inbox(150fps) → gate 降频 → ring(30fps) → encode ──
   class ImgRingBuffer
   {
   public:
     void reset(size_t cap);
     bool push(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
+    ImgEntry * acquire();
     ImgEntry * acquire_latest();
     void release();
     bool wait_not_empty(int timeout_ms, const std::atomic<bool> & running);
@@ -138,7 +140,11 @@ private:
     std::condition_variable cv_;
   };
 
+  ImgRingBuffer img_inbox_;
   ImgRingBuffer img_ring_;
+  std::mutex img_gate_mtx_;
+  std::condition_variable img_gate_cv_;
+  std::thread img_gate_;
   std::thread img_worker_;
 
   // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
