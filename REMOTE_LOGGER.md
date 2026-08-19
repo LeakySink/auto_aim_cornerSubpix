@@ -73,7 +73,7 @@ remote_logger:
 
 远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
 
-可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。本地 `.rlog` 独立预览：[`replayer/README.md`](replayer/README.md)，`./replayer/replay.sh logs/run_xxx.rlog`。
+可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。
 
 ```
 Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port
@@ -143,12 +143,6 @@ type 0x00 json:
 
 type 0x01 image:
   meta_len (4B) + meta JSON + jpg_len (4B) + jpeg bytes
-```
-
-本地独立预览（预加载内存，左图右曲线 + 进度条）：
-
-```bash
-./replayer/replay.sh logs/run_<ts_ns>.rlog
 ```
 
 ## 线程模型

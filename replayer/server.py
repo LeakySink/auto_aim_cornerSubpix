@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-HOST_VENDOR = ROOT.parent / "host" / "rdbg" / "static" / "vendor"
+VENDOR = STATIC / "vendor"
 
 CDN = {
     "chart.umd.min.js":
@@ -84,12 +84,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/vendor/"):
             name = path.split("/")[-1]
-            for root in (STATIC / "vendor", HOST_VENDOR):
-                fp = root / name
-                if fp.is_file():
-                    self._send(200, fp.read_bytes(), "application/javascript",
-                                cache="public, max-age=86400")
-                    return
+            fp = VENDOR / name
+            if fp.is_file():
+                self._send(200, fp.read_bytes(), "application/javascript",
+                            cache="public, max-age=86400")
+                return
             url = CDN.get(name)
             if url:
                 self.send_response(302)

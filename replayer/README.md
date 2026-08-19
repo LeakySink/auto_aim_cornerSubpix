@@ -44,4 +44,11 @@ replayer/
   README.md
 ```
 
-`.rlog` 格式见 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+## `.rlog` 格式（本工具可读）
+
+- magic `RLG2`（4B LE），旧版 `RLOG` 仅 JSON 也支持
+- 每条：`type(1B) + ts_ns(8B) + payload`
+  - `0x00` json：`len(4B) + utf-8 json`
+  - `0x01` image：`meta_len(4B) + meta json + jpg_len(4B) + jpeg`
+
+离线使用可将 Chart.js / Hammer / zoom 插件放入 `replayer/static/vendor/`（文件名见 `server.py` 的 `CDN` 字典），否则首次打开会走 CDN。
