@@ -85,9 +85,6 @@ print_header "使用说明"
 
 echo -e "${CYAN}启动 PlotJuggler:${RESET}"
 echo -e "  plotjuggler"
-echo -e "\n${CYAN}加载项目布局文件:${RESET}"
-echo -e "  plotjuggler --layout /home/baiye/auto_aim_/mpc_layout.xml"
-echo -e "  plotjuggler --layout /home/baiye/auto_aim_/buff_layout.xml"
 echo -e "\n${CYAN}接收实时数据（Plotter 工具通过 UDP 发送）:${RESET}"
 echo -e "  启动后菜单 Streaming → Start UDP Server，端口填 ${GREEN}9870${RESET}"
 
