@@ -4,21 +4,19 @@
 
 Host 端是远程调试系统的接收与可视化端，运行在调试 PC 上（Linux / macOS / Windows，只需 Python 3.8+，无第三方包）。
 
+`host/` 根目录只放启动脚本和文档，Python 包在 `host/rdbg/`。
+
 ```
 host/
-  __main__.py          python -m host 入口
-  cli.py               debugger / field 子命令
-  control.py           UDP 注册协议
-  udp.py               UDP 数据解析
-  sse.py               SSE 队列
-  httputil.py          静态资源 / vendor CDN
-  apps/
-    debugger.py        单车调试
-    field.py           多车场控
-  static/
-    debugger.html
-    field.html
-    css/  js/  vendor/
+  watch.sh                 单车调试入口
+  field.sh                 多车场控入口
+  HOST.md                  本文件
+  FIELD.md                 场控文档
+  rdbg/                    Python 包（勿直接当入口）
+    cli.py / control.py / udp.py / sse.py / httputil.py
+    apps/debugger.py
+    apps/field.py
+    static/                HTML / CSS / JS / vendor
 ```
 
 ## 架构
@@ -38,27 +36,21 @@ host/
 ```
 
 **关键设计原则：**
-- 纯 Python 标准库，仓库根目录执行 `python3 -m host`
-- 前端 HTML / CSS / JS 与后端分离，放在 `host/static/`
+- 纯 Python 标准库，用 `./host/watch.sh` / `./host/field.sh` 启动
+- 前端 HTML / CSS / JS 与后端分离
 - 状态通过 `{"type":"state",...}` SSE 推送
 
 ## 快速开始
 
-在仓库根目录：
-
 ```bash
-python3 -m host                  # 单车调试，http://localhost:8080
-python3 -m host field            # 多车场控，http://localhost:8888
-./host/watch.sh                  # 同上 debugger
-./host/field.sh                  # 同上 field
+./host/watch.sh          # 单车调试，http://localhost:8080
+./host/field.sh          # 多车场控，http://localhost:8888
 ```
 
-兼容旧命令：`python3 host/server.py`、`python3 host/field.py`。
-
-离线使用（下载 Hammer / zoom 到 `host/static/vendor/`）：
+端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`；场控另有 `DATA_PORT`。其余参数原样传给 Python，例如离线下载 JS：
 
 ```bash
-python3 -m host --download-assets
+./host/watch.sh --download-assets
 ```
 
 ## 模块详解
@@ -111,26 +103,21 @@ GET /static/...      CSS / JS / vendor
 | `log` | 日志 |
 | `status` | `{connected, sender}` |
 
-## 命令行
+## 参数
 
-```bash
-python3 -m host debugger --port 8080 --control-port 15000
-python3 -m host field --port 8888 --data-port 20000 --ctrl-port 15000
-```
-
-| 子命令 | 参数 | 默认 | 说明 |
-|--------|------|------|------|
-| debugger | `--port` | 8080 | HTTP |
-| debugger | `--control-port` | 15000 | 注册端口 |
-| field | `--port` | 8888 | HTTP |
-| field | `--data-port` | 20000 | 共享数据端口 |
-| field | `--ctrl-port` | 15000 | 注册端口 |
+| 脚本 | 环境变量 | 默认 | 说明 |
+|------|----------|------|------|
+| watch.sh | `HTTP_PORT` | 8080 | HTTP |
+| watch.sh | `CTRL_PORT` | 15000 | 注册端口 |
+| field.sh | `HTTP_PORT` | 8888 | HTTP |
+| field.sh | `DATA_PORT` | 20000 | 共享数据端口 |
+| field.sh | `CTRL_PORT` | 15000 | 注册端口 |
 | 两者 | `--download-assets` | off | 下载离线 JS |
 
 ## 使用示例
 
 ```bash
-python3 -m host
+./host/watch.sh
 
 ./build/remote_logger_test --host=127.0.0.1 --ctrl-port=15000 --name=mybot
 ./build/multi_sender_test --ctrl-port=15000

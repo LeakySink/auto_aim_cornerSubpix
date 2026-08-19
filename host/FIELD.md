@@ -4,15 +4,11 @@
 
 场控系统用于多机器人同时监控，每个机器人渲染为一个 tile（上方图像 + 下方绘图），横向自动铺满。纯 Python 标准库，无需编译。
 
-实现位于 `host/apps/field.py`，前端在 `host/static/field.html`。
+实现位于 `host/rdbg/apps/field.py`，前端在 `host/rdbg/static/field.html`。入口只有 `./host/field.sh`。
 
 ## 快速开始
 
-仓库根目录：
-
 ```bash
-python3 -m host field
-# 或
 ./host/field.sh
 
 ./build/remote_logger_test --name=robot_1 &
@@ -48,12 +44,13 @@ python3 -m host field
 ## 参数
 
 ```bash
-python3 -m host field --port 8888 --data-port 20000 --ctrl-port 15000
+HTTP_PORT=8888 DATA_PORT=20000 CTRL_PORT=15000 ./host/field.sh
+./host/field.sh --download-assets
 ```
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
-| `--port` | 8888 | HTTP 端口 |
-| `--data-port` | 20000 | UDP 数据端口 |
-| `--ctrl-port` | 15000 | 控制端口 |
+| `HTTP_PORT` | 8888 | HTTP 端口 |
+| `DATA_PORT` | 20000 | UDP 数据端口 |
+| `CTRL_PORT` | 15000 | 控制端口 |
 | `--download-assets` | off | 下载离线 JS |

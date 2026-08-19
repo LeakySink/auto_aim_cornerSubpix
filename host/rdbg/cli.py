@@ -1,4 +1,4 @@
-"""CLI: python -m host [debugger|field]"""
+"""CLI: invoked by host/*.sh via python -m rdbg"""
 
 import argparse
 import sys
@@ -6,7 +6,7 @@ import sys
 
 def _parser():
     p = argparse.ArgumentParser(
-        prog="python -m host",
+        prog="rdbg",
         description="Remote Debugger host (stdlib only)",
     )
     sub = p.add_subparsers(dest="cmd")

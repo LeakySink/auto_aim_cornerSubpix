@@ -13,6 +13,7 @@ Protocol:
 import json
 import socket
 import threading
+import time
 
 
 class ControlServer:
@@ -52,7 +53,6 @@ class ControlServer:
                 self._send(info["addr"], {"type": "host_shutdown"})
                 self.senders.pop(name, None)
                 self._release_port(info["data_port"])
-        import time
         time.sleep(0.2)
         if self._sock:
             self._sock.close()
@@ -111,16 +111,20 @@ class ControlServer:
             if t == "register" and name:
                 with self._lock:
                     if name in self.senders:
-                        self._send(addr, {"type": "register_ack", "status": "error", "message": f"name '{name}' already registered"})
-                        continue
-                    port = self._next_port()
+                        port = 0
+                    else:
+                        port = self._next_port()
                     if port == 0:
-                        self._send(addr, {"type": "register_ack", "status": "error", "message": "no available data port"})
-                        continue
-                    self.senders[name] = {"addr": addr, "data_port": port}
-                print(f"[control] registered '{name}' -> {addr[0]}:{addr[1]}, data port {port}")
-                self._send(addr, {"type": "register_ack", "status": "ok", "port": port})
-                self._version += 1
+                        err = (f"name '{name}' already registered" if name in self.senders
+                               else "no available data port")
+                        ack = {"type": "register_ack", "status": "error", "message": err}
+                    else:
+                        self.senders[name] = {"addr": addr, "data_port": port}
+                        self._version += 1
+                        ack = {"type": "register_ack", "status": "ok", "port": port}
+                if ack.get("status") == "ok":
+                    print(f"[control] registered '{name}' -> {addr[0]}:{addr[1]}, data port {ack['port']}")
+                self._send(addr, ack)
 
             elif t == "deregister" and name:
                 with self._lock:
@@ -128,6 +132,7 @@ class ControlServer:
                         continue
                     info = self.senders.pop(name)
                     self._release_port(info["data_port"])
+                    self._version += 1
                 print(f"[control] deregistered '{name}'")
                 self._send(addr, {"type": "deregister_ack", "status": "ok"})
-                self._version += 1
+
