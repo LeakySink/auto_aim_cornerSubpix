@@ -107,6 +107,9 @@ target_link_libraries(planner_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim too
 add_executable(planner_test_offline tests/planner_test_offline.cpp)
 target_link_libraries(planner_test_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
+add_executable(auto_aim_debug_mpc_offline tests/auto_aim_debug_mpc_offline.cpp)
+target_link_libraries(auto_aim_debug_mpc_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+
 add_executable(diagnose_hik_camera io/hikrobot/diagnose_camera.cpp)
 target_include_directories(diagnose_hik_camera PRIVATE io/hikrobot/include)
 target_link_directories(diagnose_hik_camera PRIVATE io/hikrobot/lib/amd64)
