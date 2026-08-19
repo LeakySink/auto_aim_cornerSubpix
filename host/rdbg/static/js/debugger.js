@@ -402,11 +402,18 @@ function resetAllViews() {
 function showPanelImage(p) {
   if (p.type !== 'image' || !p.imgSel) return;
   var name = p.imgSel.value;
-  if (!name) { var keys = Object.keys(imgSources); if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; } }
+  if (!name) {
+    var keys = Object.keys(imgSources);
+    if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; }
+  }
   var s = imgSources[name];
-  if (s && s.src) {
-    p.imgEl.src = s.src; p.imgEl.style.display = '';
-    p.placeholder.style.display = 'none'; p.imgInfo.textContent = s.kb + ' KB';
+  var src = s && (s.src || s.b64);
+  if (src) {
+    p.imgEl.src = src;
+    p.imgEl.style.display = '';
+    p.placeholder.style.display = 'none';
+    p.imgInfo.textContent = (s.kb != null ? s.kb : '?') + ' KB';
+    if (typeof applyImgTransform === 'function') applyImgTransform(p);
   }
 }
 
@@ -745,10 +752,12 @@ var imgSources = {};
 var imgFpsTracker = {};
 
 function setImage(b64, meta) {
+  if (!b64) return;
   setImageSrc('data:image/jpeg;base64,' + b64, meta, (b64.length * 0.75 / 1024).toFixed(0));
 }
 
 function setImageSrc(src, meta, kb) {
+  if (!src) return;
   var name = (meta && meta.name) ? meta.name : 'default';
   var now = Date.now();
   var isNew = !imgSources[name];
@@ -762,7 +771,8 @@ function setImageSrc(src, meta, kb) {
     fps = Math.round((imgFpsTracker[name].length - 1) * 1000 / dt);
   }
 
-  imgSources[name] = { src: src, ts: now, kb: kb != null ? kb : '?' };
+  // Keep both keys: older cached showPanelImage looked up .b64
+  imgSources[name] = { src: src, b64: src, ts: now, kb: kb != null ? kb : '?' };
 
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
@@ -770,8 +780,26 @@ function setImageSrc(src, meta, kb) {
       if (p.type !== 'image') continue;
       if (isNew) refreshImgOptions(p);
       if (p.imgFps) p.imgFps.textContent = fps + ' fps';
-      if (p.imgSel.value === name) showPanelImage(p);
+      var sel = p.imgSel ? p.imgSel.value : '';
+      if (!sel || sel === name) showPanelImage(p);
     }
+}
+
+function setImageFromUrl(url, meta) {
+  if (!url) return;
+  // Prefer URL directly (same-origin /img/N); also works if fetch is blocked.
+  setImageSrc(url, meta, '?');
+  fetch(url).then(function(r) {
+    if (!r.ok) throw new Error('img ' + r.status);
+    return r.blob();
+  }).then(function(blob) {
+    var obj = URL.createObjectURL(blob);
+    var prev = imgSources[(meta && meta.name) ? meta.name : 'default'];
+    if (prev && prev.src && prev.src.indexOf('blob:') === 0) {
+      try { URL.revokeObjectURL(prev.src); } catch (e) {}
+    }
+    setImageSrc(obj, meta, (blob.size / 1024).toFixed(0));
+  }).catch(function() { /* keep url src */ });
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────
@@ -828,8 +856,9 @@ es.onmessage = function(e) {
     var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
     if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
     else if (msg.type === 'image') {
-      if (msg.url) setImageSrc(msg.url, msg.meta, '?');
-      else setImage(msg.jpg_b64, msg.meta);
+      // Prefer embedded jpeg (works with older cached JS); url is optional.
+      if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
+      else if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
       setConnected(true, snd);
     }
     else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }

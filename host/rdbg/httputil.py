@@ -55,9 +55,15 @@ def _safe_file(rel):
     return path if path.is_file() else None
 
 
-def send_file(handler, path, cache="public, max-age=3600"):
+def send_file(handler, path, cache=None):
     data = path.read_bytes()
     ctype = MIME.get(path.suffix.lower(), "application/octet-stream")
+    if cache is None:
+        # Avoid stale debugger.js after updates (was public max-age=3600).
+        if path.suffix.lower() in (".js", ".css", ".html"):
+            cache = "no-cache"
+        else:
+            cache = "public, max-age=3600"
     handler.send_response(200)
     handler.send_header("Content-Type", ctype)
     handler.send_header("Content-Length", str(len(data)))

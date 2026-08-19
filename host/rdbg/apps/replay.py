@@ -12,8 +12,8 @@ from ..rlog import load, sender_name, to_sse
 
 # Compress idle gaps so long pauses don't feel stuck; still respects --speed.
 _MAX_GAP_S = 0.35
-# Drop intermediate frames if the client is already behind schedule.
-_IMG_CATCHUP_S = 0.04
+# Drop intermediate frames only when clearly behind (keep UI responsive).
+_IMG_CATCHUP_S = 0.15
 
 
 def _record_ts(rec):
@@ -118,7 +118,8 @@ def _write_replay_sse(handler, records, sender, speed):
             msg = _to_sse(rec)
             if msg:
                 emit(msg)
-                if i % 32 == 0:
+                # Flush images immediately so <img src=/img/N> can load without delay.
+                if is_img or i % 16 == 0:
                     handler.wfile.flush()
 
             prev_ts = ts
