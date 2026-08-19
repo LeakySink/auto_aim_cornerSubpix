@@ -159,12 +159,9 @@ int main(int argc, char * argv[])
       data["cmd_shoot"] = command.shoot;
     }
     tools::RemoteLogger::instance().plot(data);
-
-    cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("reprojection", img);
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
   }
 
+  tools::RemoteLogger::instance().shutdown();
   return 0;
 }

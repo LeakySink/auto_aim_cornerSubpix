@@ -142,13 +142,9 @@ int main(int argc, char * argv[])
     }
 
     tools::RemoteLogger::instance().plot(data);
-
-    cv::resize(img, img, {}, 0.5, 0.5);
-    cv::imshow("result", img);
-
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "result"}});
   }
 
+  tools::RemoteLogger::instance().shutdown();
   return 0;
 }
