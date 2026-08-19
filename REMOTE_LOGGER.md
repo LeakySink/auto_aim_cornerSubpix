@@ -73,7 +73,7 @@ remote_logger:
 
 远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
 
-可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。本地 `.rlog` 回放见 [`replayer/README.md`](replayer/README.md)，先开 Host 再 `./replayer/replay.sh logs/run_xxx.rlog`。
+可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。本地 `.rlog` 独立预览：[`replayer/README.md`](replayer/README.md)，`./replayer/replay.sh logs/run_xxx.rlog`。
 
 ```
 Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port
@@ -145,10 +145,9 @@ type 0x01 image:
   meta_len (4B) + meta JSON + jpg_len (4B) + jpeg bytes
 ```
 
-回放到 Host（伪装成车上进程，协议与直播相同）：
+本地独立预览（预加载内存，左图右曲线 + 进度条）：
 
 ```bash
-./host/watch.sh
 ./replayer/replay.sh logs/run_<ts_ns>.rlog
 ```
 

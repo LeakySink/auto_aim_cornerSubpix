@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replayer</title>
+<script src="/vendor/chart.umd.min.js"></script>
+<script src="/vendor/hammer.min.js"></script>
+<script src="/vendor/chartjs-plugin-zoom.min.js"></script>
+<link rel="stylesheet" href="/static/css/player.css">
+</head>
+<body>
+
+<div id="top-bar">
+  <span id="title">Replayer</span>
+  <span id="time-label">0.00 / 0.00 s</span>
+  <span class="spacer"></span>
+  <label class="ctl">窗口(s)
+    <select id="win-size">
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="20">20</option>
+      <option value="60">60</option>
+    </select>
+  </label>
+  <label class="ctl">速度
+    <select id="speed">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+    </select>
+  </label>
+  <button id="btn-reset">重置缩放</button>
+  <button id="btn-play">▶</button>
+</div>
+
+<div id="main">
+  <div id="image-pane">
+    <div id="img-wrap">
+      <img id="frame-img" alt="">
+      <span id="img-placeholder">无图像</span>
+    </div>
+    <div id="img-meta"></div>
+  </div>
+  <div id="chart-pane">
+    <canvas id="chart"></canvas>
+    <div id="field-list"></div>
+  </div>
+</div>
+
+<div id="scrub-bar">
+  <input type="range" id="scrub" min="0" max="1000" value="0" step="1">
+  <div id="scrub-hint">拖动进度条 · 滚轮缩放曲线 · 拖拽平移</div>
+</div>
+
+<script src="/static/js/player.js"></script>
+</body>
+</html>

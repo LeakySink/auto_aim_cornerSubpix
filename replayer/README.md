@@ -1,36 +1,47 @@
-# Replayer — 本地 `.rlog` 回放
+# Replayer — 本地 `.rlog` 独立预览
 
-读 RemoteLogger 写出的 `.rlog`，按车上相同 UDP 协议向 Host 注册并发送数据。Host 侧用 `./host/watch.sh` 接收，与真车无异。
+读 RemoteLogger 写出的 `.rlog`，**预加载到内存**（默认上限 1GiB），打开独立预览窗口：
+
+- **左侧**：当前时刻图像
+- **右侧**：变量曲线（时间轴以当前时刻为中心对齐）
+- **底部**：可拖动进度条，流畅 scrub
+- 曲线支持滚轮缩放、拖拽平移（`重置缩放` 恢复居中跟随）
 
 ## 快速开始
 
 ```bash
-./host/watch.sh                              # 终端 1
-./replayer/replay.sh logs/run_xxx.rlog       # 终端 2
+./replayer/replay.sh logs/run_xxx.rlog
 ```
+
+会自动打开浏览器窗口（优先 Chromium `--app` 无地址栏模式）。
 
 ## 参数
 
 | 环境变量 / 参数 | 默认 | 说明 |
 |----------------|------|------|
-| `HOST` / `--host` | 127.0.0.1 | Host IP |
-| `CTRL_PORT` / `--ctrl-port` | 15000 | 注册端口 |
-| `SPEED` / `--speed` | 1 | 回放倍速 |
-| `--name` | 文件内 `_from` | 伪装的 sender 名 |
-| `--gap-cap` | 0.5 | 记录间最大等待（秒），0=不限制 |
-| `--hb` | 500 | 心跳间隔（ms），0=关闭 |
-| `--loop` | off | 播完再循环 |
+| `HOST` / `--host` | 127.0.0.1 | HTTP 绑定地址 |
+| `PORT` / `--port` | 8765 | HTTP 端口 |
+| `--max-mb` | 1024 | 预加载内存上限（MiB） |
+| `--no-browser` | off | 不自动打开窗口 |
 
-Ctrl+C 会发 `deregister`。
+## 快捷键
+
+| 键 | 作用 |
+|----|------|
+| 空格 | 播放 / 暂停 |
+| ← / → | 后退 / 前进 0.05s |
 
 ## 文件
 
 ```
 replayer/
-  replay.sh    入口脚本
-  replay.py    注册 + 按时序 UDP 发送
-  rlog.py      解析 RLG2 / 旧 RLOG
-  README.md    本文件
+  replay.sh          入口
+  replay.py          加载 + 启动本地 HTTP 服务
+  session.py         解析 .rlog 并预加载
+  server.py          静态页 + /api/session
+  rlog.py            RLG2 / 旧 RLOG 解析
+  static/            预览 UI
+  README.md
 ```
 
-协议细节见仓库根目录 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+`.rlog` 格式见 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
