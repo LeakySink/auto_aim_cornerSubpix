@@ -25,7 +25,7 @@ constexpr uint8_t kRecImg = 0x01;
 constexpr uint8_t kImgMarker = 0xFF;
 constexpr size_t kMaxUdpPayload = 60000;
 constexpr size_t kSessionIoBuf = 256 * 1024;
-constexpr uint64_t kImgMinIntervalNs = 33000000ULL;  // ~30 fps 入队上限
+constexpr uint64_t kImgMinIntervalNs = 33000000ULL;  // ~30 fps，仅 worker 侧限流
 constexpr uint32_t kSessionFlushMs = 200;
 constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 5;
@@ -56,7 +56,6 @@ void RemoteLogger::init(const Config & cfg)
   registered_ = false;
   last_register_ts_ = {};
   last_hb_ = {};
-  last_img_keep_ns_ = 0;
   img_ring_.reset(cfg_.img_buffer_size);
   {
     std::lock_guard<std::mutex> lock(session_mtx_);
@@ -209,11 +208,6 @@ void RemoteLogger::plot_image(cv::Mat img, const nlohmann::json & meta)
     ts = now_ns();
   }
 
-  if (last_img_keep_ns_ != 0 && ts >= last_img_keep_ns_ &&
-      ts - last_img_keep_ns_ < kImgMinIntervalNs) {
-    return;
-  }
-  last_img_keep_ns_ = ts;
   img_ring_.push(ts, meta, img);
 }
 
@@ -367,6 +361,21 @@ void RemoteLogger::ImgRingBuffer::clear()
 
 void RemoteLogger::img_worker_loop()
 {
+  uint64_t last_keep_ns = 0;
+
+  auto consume_one = [&]() -> bool {
+    ImgEntry * entry = img_ring_.acquire();
+    if (!entry) return false;
+    const uint64_t ts = entry->ts;
+    if (last_keep_ns == 0 || ts < last_keep_ns ||
+        ts - last_keep_ns >= kImgMinIntervalNs) {
+      last_keep_ns = ts;
+      encode_and_dispatch_image(*entry);
+    }
+    img_ring_.release();
+    return true;
+  };
+
   while (running_) {
     img_ring_.wait_not_empty(kImgWorkerPollMs, running_);
     if (!running_) break;
@@ -375,18 +384,11 @@ void RemoteLogger::img_worker_loop()
       std::chrono::steady_clock::now() + std::chrono::milliseconds(kImgEncodeBudgetMs);
 
     while (running_ && std::chrono::steady_clock::now() < budget_end) {
-      ImgEntry * entry = img_ring_.acquire();
-      if (!entry) break;
-      encode_and_dispatch_image(*entry);
-      img_ring_.release();
+      if (!consume_one()) break;
     }
   }
 
-  while (true) {
-    ImgEntry * entry = img_ring_.acquire();
-    if (!entry) break;
-    encode_and_dispatch_image(*entry);
-    img_ring_.release();
+  while (consume_one()) {
   }
   img_ring_.clear();
 }

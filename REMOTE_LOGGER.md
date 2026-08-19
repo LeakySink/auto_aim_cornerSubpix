@@ -125,7 +125,7 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 本地日志 (`.rlog`)
 
-单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **img_worker** 完成。主线程 `plot_image` 把像素 `copyTo` 进预分配环形槽后立即返回（间隔小于约 33ms 的帧直接丢弃，约 30fps；环满则覆盖最旧，正在编码的槽不覆盖）。槽内 `cv::Mat` 复用，稳态不再反复分配。
+单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **img_worker** 完成。主线程 `plot_image` 只 `copyTo` 进预分配环形槽后立即返回，**不作帧率限制**；环满则覆盖最旧（正在编码的槽不覆盖）。约 30fps（间隔 < 33ms）的限流在 `img_worker` 编码前丢近邻帧。槽内 `cv::Mat` 复用，稳态不再反复分配。
 
 格式 magic `RLG2`：
 
@@ -165,4 +165,4 @@ shutdown→join×3→deregister
 | `img_worker_` | 从环形槽取出 → JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
 | `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-`img_ring_` 为 SPSC 环形缓冲：主线程只写入槽位，`img_worker_` 异步编码。主线程仍限 ~30fps 入队；worker 每轮在 time budget 内尽量多编几帧。
+`img_ring_` 为 SPSC 环形缓冲：主线程只写入槽位、不限帧率；`img_worker_` 异步编码，并在编码前按约 30fps 丢近邻帧。worker 每轮在 time budget 内尽量多处理几槽。

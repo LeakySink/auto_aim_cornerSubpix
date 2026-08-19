@@ -137,7 +137,6 @@ private:
 
   ImgRingBuffer img_ring_;
   std::thread img_worker_;
-  uint64_t last_img_keep_ns_{0};
 
   // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
   std::thread ctrl_worker_;
