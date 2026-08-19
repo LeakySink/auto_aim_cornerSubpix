@@ -1,5 +1,6 @@
 """Offline .rlog replay — same debugger UI, paced SSE (no UDP)."""
 
+import base64
 import json
 import sys
 import time
@@ -41,19 +42,23 @@ def _prepare(records):
     return out, images
 
 
-def _to_sse(rec):
+def _to_sse(rec, images):
     if rec.get("_rlog") == "img":
+        idx = rec["_img_idx"]
+        jpeg = images[idx] if 0 <= idx < len(images) else b""
         meta = rec.get("meta") or {}
+        # jpg_b64 keeps older/cached debugger.js working; url is optional.
         return {
             "type": "image",
             "ts": rec.get("ts", 0),
             "meta": meta,
-            "url": f"/img/{rec['_img_idx']}",
+            "url": f"/img/{idx}",
+            "jpg_b64": base64.b64encode(jpeg).decode("ascii"),
         }
     return to_sse(rec)
 
 
-def _write_replay_sse(handler, records, sender, speed):
+def _write_replay_sse(handler, records, images, sender, speed):
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream")
     handler.send_header("Cache-Control", "no-cache")
@@ -115,10 +120,10 @@ def _write_replay_sse(handler, records, sender, speed):
             if delay > 0.001:
                 time.sleep(delay)
 
-            msg = _to_sse(rec)
+            msg = _to_sse(rec, images)
             if msg:
                 emit(msg)
-                # Flush images immediately so <img src=/img/N> can load without delay.
+                # Flush images immediately so the browser can paint without delay.
                 if is_img or i % 16 == 0:
                     handler.wfile.flush()
 
@@ -162,7 +167,7 @@ def run(rlog_path, http_port, speed=1.0):
             if route == "/":
                 serve_page(self, "debugger.html")
             elif route == "/events":
-                _write_replay_sse(self, records, sender, speed)
+                _write_replay_sse(self, records, images, sender, speed)
             elif route.startswith("/img/"):
                 try:
                     idx = int(route.rsplit("/", 1)[-1])
