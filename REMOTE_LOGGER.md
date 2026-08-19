@@ -147,13 +147,23 @@ type 0x01 image:
 
 ## 线程模型
 
+双 worker 分离：变量与图像互不阻塞，共享同一 `.rlog` 会话文件（`session_mtx_` 串行写盘）。
+
 ```
-主线程                         worker 线程
-──────                         ──────────
-init() ──start──→              try_register() (重试)
-plot() ──push──→ var_buf_      swap → 写本地 .rlog (json)
-log()  ──push──→ var_buf_      swap → UDP 发送
-         ──print──→ stderr     每轮 1 帧 → 压缩 → 写本地 / UDP
-img()  ──push──→ img_buf_      heartbeat
-shutdown() ──stop──→           刷剩余 + deregister
+主线程                    var_worker_                 img_worker_
+──────                    ───────────                 ───────────
+plot / log ──→ var_buf_   swap → .rlog (json)         swap → resize/JPEG
+              notify          → UDP (变量)                  → .rlog (jpeg)
+                                              img_buf_      → UDP (图像)
+plot_image ──→ img_buf_    注册 / 心跳 / 重试
+              notify
+stderr ← log 文本
+shutdown → join 两线程 → 刷剩余队列 → deregister
 ```
+
+| 线程 | 职责 | 唤醒 |
+|------|------|------|
+| `var_worker_` | JSON 写本地 + UDP；注册、心跳 | `plot()` 每次 notify；空闲 poll 50ms |
+| `img_worker_` | JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms；每轮最多编码 ~25ms |
+
+主线程 `plot_image` 仍限 ~30fps 入队；`img_worker_` 每轮在 time budget 内尽量多编几帧。

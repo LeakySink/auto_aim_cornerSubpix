@@ -16,14 +16,22 @@
 namespace tools
 {
 
+namespace
+{
+
 constexpr uint32_t kFileMagicV2 = 0x32474C52;  // "RLG2"
 constexpr uint8_t kRecJson = 0x00;
 constexpr uint8_t kRecImg = 0x01;
 constexpr uint8_t kImgMarker = 0xFF;
 constexpr size_t kMaxUdpPayload = 60000;
 constexpr size_t kSessionIoBuf = 256 * 1024;
-constexpr uint64_t kImgMinIntervalNs = 33000000ULL;  // ~30 fps
+constexpr uint64_t kImgMinIntervalNs = 33000000ULL;  // ~30 fps 入队上限
 constexpr uint32_t kSessionFlushMs = 200;
+constexpr int kVarWorkerPollMs = 50;
+constexpr int kImgWorkerPollMs = 5;
+constexpr int kImgEncodeBudgetMs = 25;  // 每轮 img_worker 最多编码时长
+
+}  // namespace
 
 RemoteLogger & RemoteLogger::instance()
 {
@@ -47,9 +55,12 @@ void RemoteLogger::init(const Config & cfg)
   registered_ = false;
   last_register_ts_ = {};
   last_hb_ = {};
-  close_session_file();
-  session_file_.clear();
   last_img_keep_ns_ = 0;
+  {
+    std::lock_guard<std::mutex> lock(session_mtx_);
+    close_session_file_unlocked();
+  }
+  session_file_.clear();
 
   if (cfg_.enable_remote && cfg_.control_port == 0) {
     cfg_.enable_remote = false;
@@ -69,7 +80,8 @@ void RemoteLogger::init(const Config & cfg)
   }
 
   running_ = true;
-  worker_ = std::thread(&RemoteLogger::worker, this);
+  var_worker_ = std::thread(&RemoteLogger::var_worker_loop, this);
+  img_worker_ = std::thread(&RemoteLogger::img_worker_loop, this);
 }
 
 void RemoteLogger::init(const std::string & config_path)
@@ -130,8 +142,12 @@ void RemoteLogger::shutdown()
   registered_ = false;
 
   running_ = false;
-  cv_.notify_all();
-  if (worker_.joinable()) worker_.join();
+  var_cv_.notify_all();
+  img_cv_.notify_all();
+  if (var_worker_.joinable()) var_worker_.join();
+  if (img_worker_.joinable()) img_worker_.join();
+
+  close_session_file();
   if (sock_ >= 0) {
     ::close(sock_);
     sock_ = -1;
@@ -151,9 +167,12 @@ void RemoteLogger::plot(const nlohmann::json & data)
 
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
+    if (var_buf_.size() >= cfg_.var_buffer_size) {
+      var_buf_.erase(var_buf_.begin());
+    }
     var_buf_.push_back({ts, data.dump()});
-    if (var_buf_.size() >= cfg_.var_buffer_size) cv_.notify_one();
   }
+  var_cv_.notify_one();
 }
 
 void RemoteLogger::log(const std::string & level, const std::string & msg)
@@ -191,10 +210,12 @@ void RemoteLogger::plot_image(cv::Mat img, const nlohmann::json & meta)
       return;
     }
     last_img_keep_ns_ = ts;
-    if (img_buf_.size() >= cfg_.img_buffer_size) img_buf_.erase(img_buf_.begin());
+    if (img_buf_.size() >= cfg_.img_buffer_size) {
+      img_buf_.erase(img_buf_.begin());
+    }
     img_buf_.push_back({ts, meta, std::move(img)});
-    cv_.notify_one();
   }
+  img_cv_.notify_one();
 }
 
 uint64_t RemoteLogger::now_ns() const
@@ -204,62 +225,132 @@ uint64_t RemoteLogger::now_ns() const
     .count();
 }
 
-void RemoteLogger::worker()
-{
-  std::vector<VarEntry> var_pending;
+// ── var_worker：JSON 变量 / 日志 → 本地 + UDP；注册与心跳 ────────────────
 
-  if (cfg_.enable_remote && !registered_) try_register();
+void RemoteLogger::var_worker_loop()
+{
+  std::vector<VarEntry> pending;
+
+  if (cfg_.enable_remote) try_register();
 
   while (running_) {
     {
-      std::unique_lock<std::mutex> lock(wake_mtx_);
-      cv_.wait_for(lock, std::chrono::milliseconds(200));
+      std::unique_lock<std::mutex> lock(var_wake_mtx_);
+      var_cv_.wait_for(lock, std::chrono::milliseconds(kVarWorkerPollMs));
     }
-
     if (!running_) break;
 
     {
       std::lock_guard<std::mutex> lock(var_mtx_);
-      if (!var_buf_.empty()) var_buf_.swap(var_pending);
+      if (!var_buf_.empty()) var_buf_.swap(pending);
     }
 
-    if (!var_pending.empty()) {
-      if (cfg_.enable_local) flush_var_local(var_pending);
+    if (!pending.empty()) {
+      if (cfg_.enable_local) flush_var_local(pending);
       if (cfg_.enable_remote && registered_) {
-        for (const auto & e : var_pending) try_send_var(e);
+        for (const auto & e : pending) try_send_var(e);
       }
-      var_pending.clear();
+      pending.clear();
     }
-
-    // One JPEG per wake so encode/disk never batches into multi-second stalls.
-    if (process_one_image()) cv_.notify_one();
 
     if (cfg_.heartbeat_interval_ms > 0 && registered_) send_heartbeat();
-
     if (cfg_.enable_remote && !registered_) try_register();
   }
 
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
-    if (!var_buf_.empty()) var_buf_.swap(var_pending);
+    if (!var_buf_.empty()) var_buf_.swap(pending);
   }
-  if (!var_pending.empty() && cfg_.enable_local) flush_var_local(var_pending);
+  if (!pending.empty()) {
+    if (cfg_.enable_local) flush_var_local(pending);
+    if (cfg_.enable_remote && registered_) {
+      for (const auto & e : pending) try_send_var(e);
+    }
+  }
+}
 
-  while (process_one_image()) {
+// ── img_worker：JPEG 编码 → 本地 + UDP（与 var_worker 互不阻塞）────────
+
+void RemoteLogger::img_worker_loop()
+{
+  while (running_) {
+    {
+      std::unique_lock<std::mutex> lock(img_wake_mtx_);
+      img_cv_.wait_for(lock, std::chrono::milliseconds(kImgWorkerPollMs));
+    }
+    if (!running_) break;
+
+    const auto budget_end =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(kImgEncodeBudgetMs);
+
+    while (running_ && std::chrono::steady_clock::now() < budget_end) {
+      ImgEntry entry;
+      {
+        std::lock_guard<std::mutex> lock(img_mtx_);
+        if (img_buf_.empty()) break;
+        entry = std::move(img_buf_.front());
+        img_buf_.erase(img_buf_.begin());
+      }
+      encode_and_dispatch_image(entry);
+    }
   }
 
-  close_session_file();
+  while (true) {
+    ImgEntry entry;
+    {
+      std::lock_guard<std::mutex> lock(img_mtx_);
+      if (img_buf_.empty()) break;
+      entry = std::move(img_buf_.front());
+      img_buf_.erase(img_buf_.begin());
+    }
+    encode_and_dispatch_image(entry);
+  }
+}
+
+bool RemoteLogger::encode_and_dispatch_image(ImgEntry & entry)
+{
+  if (entry.img.empty() || entry.img.cols <= 0) return false;
+
+  cv::Mat resized;
+  const cv::Mat * to_encode = &entry.img;
+  if (cfg_.img_width > 0 && entry.img.cols > cfg_.img_width) {
+    double scale = static_cast<double>(cfg_.img_width) / entry.img.cols;
+    int new_h = static_cast<int>(entry.img.rows * scale);
+    if (new_h < 1) new_h = 1;
+    cv::resize(entry.img, resized, cv::Size(cfg_.img_width, new_h));
+    to_encode = &resized;
+  }
+
+  std::vector<uint8_t> jpeg;
+  std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.img_quality};
+  if (!cv::imencode(".jpg", *to_encode, jpeg, params) || jpeg.empty()) {
+    return false;
+  }
+
+  entry.img.release();
+  resized.release();
+
+  if (cfg_.enable_local) flush_img_local(entry.ts, entry.meta, jpeg);
+  if (cfg_.enable_remote && registered_) {
+    try_send_img(jpeg, entry.ts, entry.meta);
+  }
+  return true;
 }
 
 bool RemoteLogger::try_register()
 {
   if (sock_ < 0) return false;
+
   auto now = std::chrono::steady_clock::now();
-  if (last_register_ts_.time_since_epoch().count() > 0) {
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_register_ts_);
-    if (elapsed.count() < static_cast<int64_t>(cfg_.register_retry_ms)) return false;
+  {
+    std::lock_guard<std::mutex> lock(remote_mtx_);
+    if (last_register_ts_.time_since_epoch().count() > 0) {
+      auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_register_ts_);
+      if (elapsed.count() < static_cast<int64_t>(cfg_.register_retry_ms)) return false;
+    }
+    last_register_ts_ = now;
   }
-  last_register_ts_ = now;
 
   int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
   if (reg_sock < 0) return false;
@@ -283,22 +374,26 @@ bool RemoteLogger::try_register()
 
   char buf[2048];
   ssize_t n = ::recvfrom(reg_sock, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
-  if (n > 0) {
-    buf[n] = '\0';
-    try {
-      auto resp = nlohmann::json::parse(buf);
-      if (resp.value("status", "") == "ok" && resp.contains("port")) {
-        uint16_t assigned = resp["port"].get<uint16_t>();
-        addr_.sin_port = ::htons(assigned);
-        registered_ = true;
-        std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
-                     sender_name_.c_str(), assigned);
-        ::close(reg_sock);
-        return true;
-      }
-    } catch (...) {}
-  }
   ::close(reg_sock);
+
+  if (n <= 0) return false;
+
+  buf[n] = '\0';
+  try {
+    auto resp = nlohmann::json::parse(buf);
+    if (resp.value("status", "") == "ok" && resp.contains("port")) {
+      uint16_t assigned = resp["port"].get<uint16_t>();
+      {
+        std::lock_guard<std::mutex> lock(remote_mtx_);
+        addr_.sin_port = ::htons(assigned);
+      }
+      registered_ = true;
+      std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
+                   sender_name_.c_str(), assigned);
+      return true;
+    }
+  } catch (...) {
+  }
   return false;
 }
 
@@ -309,33 +404,13 @@ void RemoteLogger::send_heartbeat()
     last_hb_ = now;
     return;
   }
-  auto elapsed =
-    std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hb_);
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hb_);
   if (elapsed.count() < static_cast<int64_t>(cfg_.heartbeat_interval_ms)) return;
   last_hb_ = now;
 
   nlohmann::json hb = {{"hb", 1}, {"_from", sender_name_}, {"ts", now_ns()}};
   std::string payload = hb.dump();
   send_udp(payload.data(), payload.size());
-}
-
-void RemoteLogger::flush_var_local(const std::vector<VarEntry> & entries)
-{
-  if (entries.empty()) return;
-  if (!ensure_session_file()) return;
-
-  for (const auto & e : entries) {
-    uint8_t type = kRecJson;
-    uint32_t len = static_cast<uint32_t>(e.json_str.size());
-    if (std::fwrite(&type, sizeof(type), 1, session_fp_) != 1 ||
-        std::fwrite(&e.ts, sizeof(e.ts), 1, session_fp_) != 1 ||
-        std::fwrite(&len, sizeof(len), 1, session_fp_) != 1 ||
-        std::fwrite(e.json_str.data(), 1, len, session_fp_) != len) {
-      std::fprintf(stderr, "[RemoteLogger] Failed to write var record\n");
-      return;
-    }
-  }
-  maybe_flush_session(false);
 }
 
 bool RemoteLogger::ensure_session_file()
@@ -355,7 +430,7 @@ bool RemoteLogger::ensure_session_file()
   uint32_t magic = kFileMagicV2;
   if (std::fwrite(&magic, sizeof(magic), 1, session_fp_) != 1) {
     std::fprintf(stderr, "[RemoteLogger] Failed to write magic to %s\n", session_file_.c_str());
-    close_session_file();
+    close_session_file_unlocked();
     session_file_.clear();
     return false;
   }
@@ -363,12 +438,18 @@ bool RemoteLogger::ensure_session_file()
   return true;
 }
 
-void RemoteLogger::close_session_file()
+void RemoteLogger::close_session_file_unlocked()
 {
   if (!session_fp_) return;
   std::fflush(session_fp_);
   std::fclose(session_fp_);
   session_fp_ = nullptr;
+}
+
+void RemoteLogger::close_session_file()
+{
+  std::lock_guard<std::mutex> lock(session_mtx_);
+  close_session_file_unlocked();
 }
 
 void RemoteLogger::maybe_flush_session(bool force)
@@ -383,9 +464,31 @@ void RemoteLogger::maybe_flush_session(bool force)
   last_session_flush_ = now;
 }
 
+void RemoteLogger::flush_var_local(const std::vector<VarEntry> & entries)
+{
+  if (entries.empty()) return;
+
+  std::lock_guard<std::mutex> lock(session_mtx_);
+  if (!ensure_session_file()) return;
+
+  for (const auto & e : entries) {
+    uint8_t type = kRecJson;
+    uint32_t len = static_cast<uint32_t>(e.json_str.size());
+    if (std::fwrite(&type, sizeof(type), 1, session_fp_) != 1 ||
+        std::fwrite(&e.ts, sizeof(e.ts), 1, session_fp_) != 1 ||
+        std::fwrite(&len, sizeof(len), 1, session_fp_) != 1 ||
+        std::fwrite(e.json_str.data(), 1, len, session_fp_) != len) {
+      std::fprintf(stderr, "[RemoteLogger] Failed to write var record\n");
+      return;
+    }
+  }
+  maybe_flush_session(false);
+}
+
 void RemoteLogger::flush_img_local(uint64_t ts, const nlohmann::json & meta,
                                    const std::vector<uint8_t> & jpeg)
 {
+  std::lock_guard<std::mutex> lock(session_mtx_);
   if (!ensure_session_file()) return;
 
   nlohmann::json jmeta = meta;
@@ -408,44 +511,6 @@ void RemoteLogger::flush_img_local(uint64_t ts, const nlohmann::json & meta,
   maybe_flush_session(false);
 }
 
-bool RemoteLogger::process_one_image()
-{
-  ImgEntry e;
-  {
-    std::lock_guard<std::mutex> lock(img_mtx_);
-    if (img_buf_.empty()) return false;
-    e = std::move(img_buf_.front());
-    img_buf_.erase(img_buf_.begin());
-  }
-
-  if (e.img.empty() || e.img.cols <= 0) {
-    std::lock_guard<std::mutex> lock(img_mtx_);
-    return !img_buf_.empty();
-  }
-
-  cv::Mat resized;
-  const cv::Mat * to_encode = &e.img;
-  if (cfg_.img_width > 0 && e.img.cols > cfg_.img_width) {
-    double scale = static_cast<double>(cfg_.img_width) / e.img.cols;
-    int new_h = static_cast<int>(e.img.rows * scale);
-    if (new_h < 1) new_h = 1;
-    cv::resize(e.img, resized, cv::Size(cfg_.img_width, new_h));
-    to_encode = &resized;
-  }
-
-  std::vector<uint8_t> jpeg;
-  std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.img_quality};
-  if (cv::imencode(".jpg", *to_encode, jpeg, params) && !jpeg.empty()) {
-    e.img.release();
-    resized.release();
-    if (cfg_.enable_local) flush_img_local(e.ts, e.meta, jpeg);
-    if (cfg_.enable_remote && registered_) try_send_img(jpeg, e.ts, e.meta);
-  }
-
-  std::lock_guard<std::mutex> lock(img_mtx_);
-  return !img_buf_.empty();
-}
-
 void RemoteLogger::try_send_var(const VarEntry & entry)
 {
   try {
@@ -455,8 +520,8 @@ void RemoteLogger::try_send_var(const VarEntry & entry)
     std::string payload = j.dump();
     send_udp(payload.data(), payload.size());
   } catch (...) {
-    std::string payload =
-      "{\"ts\":" + std::to_string(entry.ts) + ",\"_from\":\"" + sender_name_ + "\",\"raw\":\"" + entry.json_str + "\"}";
+    std::string payload = "{\"ts\":" + std::to_string(entry.ts) + ",\"_from\":\"" +
+                          sender_name_ + "\",\"raw\":\"" + entry.json_str + "\"}";
     send_udp(payload.data(), payload.size());
   }
 }
@@ -493,6 +558,7 @@ void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
 void RemoteLogger::send_udp(const void * data, size_t len)
 {
   if (sock_ < 0 || !registered_) return;
+  std::lock_guard<std::mutex> lock(remote_mtx_);
   ::sendto(sock_, data, len, 0, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
 }
 

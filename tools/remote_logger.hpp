@@ -19,6 +19,12 @@
 namespace tools
 {
 
+/// RemoteLogger — 主线程只入队，两个 worker 分别处理变量与图像。
+///
+///   plot / log  ──→ var_buf_  ──→ var_worker_  ──→ .rlog (json) + UDP
+///   plot_image  ──→ img_buf_  ──→ img_worker_  ──→ .rlog (jpeg) + UDP
+///
+/// 注册、心跳、注销由 var_worker_ 负责；图像 UDP 复用同一 socket。
 class RemoteLogger
 {
 public:
@@ -73,46 +79,62 @@ private:
     cv::Mat img;
   };
 
-  void worker();
+  void var_worker_loop();
+  void img_worker_loop();
+
   bool try_register();
   void send_heartbeat();
   std::string resolve_sender() const;
   void inject_sender(nlohmann::json & j) const;
-  bool ensure_session_file();
+
+  bool ensure_session_file();  // 调用方须已持有 session_mtx_
   void close_session_file();
+  void close_session_file_unlocked();
   void maybe_flush_session(bool force = false);
   void flush_var_local(const std::vector<VarEntry> & entries);
   void flush_img_local(uint64_t ts, const nlohmann::json & meta,
                        const std::vector<uint8_t> & jpeg);
-  bool process_one_image();
+
+  bool encode_and_dispatch_image(ImgEntry & entry);
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
-                     const nlohmann::json & meta);
+                    const nlohmann::json & meta);
   void send_udp(const void * data, size_t len);
+
   uint64_t now_ns() const;
 
   Config cfg_;
   std::atomic<bool> running_{false};
 
+  // ── 变量队列（主线程写，var_worker 读）────────────────────────────
   std::vector<VarEntry> var_buf_;
   std::mutex var_mtx_;
+  std::condition_variable var_cv_;
+  std::mutex var_wake_mtx_;
+  std::thread var_worker_;
 
+  // ── 图像队列（主线程写，img_worker 读）────────────────────────────
   std::vector<ImgEntry> img_buf_;
   std::mutex img_mtx_;
+  std::condition_variable img_cv_;
+  std::mutex img_wake_mtx_;
+  std::thread img_worker_;
+  uint64_t last_img_keep_ns_{0};
 
-  std::condition_variable cv_;
-  std::mutex wake_mtx_;
-  std::thread worker_;
-  std::chrono::steady_clock::time_point last_hb_{};
-  std::atomic<bool> registered_{false};
-  std::chrono::steady_clock::time_point last_register_ts_{};
-
-  int sock_{-1};
-  sockaddr_in addr_{};
+  // ── 本地 .rlog 会话文件（两 worker 写，session_mtx_ 保护）────────
+  std::mutex session_mtx_;
   std::string session_file_;
   FILE * session_fp_{nullptr};
   std::chrono::steady_clock::time_point last_session_flush_{};
-  uint64_t last_img_keep_ns_{0};
+
+  // ── 远程 UDP（注册状态 + sendto）────────────────────────────────
+  std::mutex remote_mtx_;
+  std::atomic<bool> registered_{false};
+  std::chrono::steady_clock::time_point last_register_ts_{};
+  std::chrono::steady_clock::time_point last_hb_{};
+  int sock_{-1};
+  sockaddr_in addr_{};
+
   std::string sender_name_;
 };
 
