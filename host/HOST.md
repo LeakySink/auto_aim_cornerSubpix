@@ -8,16 +8,13 @@ Host 端是远程调试系统的接收与可视化端，运行在调试 PC 上�
 
 ```
 host/
-  watch.sh                 单车调试入口
-  field.sh                 多车场控入口
+  watch.sh                 单车调试入口（自动打开浏览器）
   replay.sh                本地 .rlog 回放入口
   HOST.md                  本文件
-  FIELD.md                 场控文档
   rdbg/                    Python 包（勿直接当入口）
     cli.py / control.py / udp.py / sse.py / httputil.py
     rlog.py / session.py   .rlog 解析与预加载
     apps/debugger.py
-    apps/field.py
     apps/replay.py
     static/                HTML / CSS / JS / vendor
 ```
@@ -39,22 +36,22 @@ host/
 ```
 
 **关键设计原则：**
-- 纯 Python 标准库，用 `./host/watch.sh` / `./host/field.sh` 启动
+- 纯 Python 标准库，用 `./host/watch.sh` / `./host/replay.sh` 启动
 - 前端 HTML / CSS / JS 与后端分离
 - 状态通过 `{"type":"state",...}` SSE 推送
 
 ## 快速开始
 
 ```bash
-./host/watch.sh          # 单车调试，http://localhost:8080
-./host/field.sh          # 多车场控，http://localhost:8888
-./host/replay.sh logs/run_xxx.rlog   # 本地回放，默认 http://127.0.0.1:8765
+./host/watch.sh                          # 单车调试，自动打开 http://localhost:8080
+./host/replay.sh logs/run_xxx.rlog       # 本地回放，默认 http://127.0.0.1:8765
 ```
 
-端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`；场控另有 `DATA_PORT`。其余参数原样传给 Python，例如离线下载 JS：
+端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`。其余参数原样传给 Python：
 
 ```bash
 ./host/watch.sh --download-assets
+./host/watch.sh --no-browser
 ```
 
 ## 模块详解
@@ -127,17 +124,16 @@ GET /static/...      CSS / JS / vendor
 
 ## 参数
 
-| 脚本 | 环境变量 | 默认 | 说明 |
+| 脚本 | 环境变量 / 参数 | 默认 | 说明 |
 |------|----------|------|------|
 | watch.sh | `HTTP_PORT` | 8080 | HTTP |
 | watch.sh | `CTRL_PORT` | 15000 | 注册端口 |
-| field.sh | `HTTP_PORT` | 8888 | HTTP |
-| field.sh | `DATA_PORT` | 20000 | 共享数据端口 |
-| field.sh | `CTRL_PORT` | 15000 | 注册端口 |
+| watch.sh | `--no-browser` | off | 不自动打开浏览器 |
 | replay.sh | `--port` | 8765 | HTTP（占用则自动 +1） |
 | replay.sh | `--host` | 127.0.0.1 | HTTP 绑定 |
 | replay.sh | `--max-mb` | 1024 | 预加载内存上限 |
-| 前两者 | `--download-assets` | off | 下载离线 JS |
+| replay.sh | `--no-browser` | off | 不自动打开浏览器 |
+| watch.sh | `--download-assets` | off | 下载离线 JS |
 
 ## 使用示例
 

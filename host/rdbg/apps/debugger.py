@@ -8,7 +8,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from ..control import ControlServer
-from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
+from ..httputil import ThreadingHTTPServer, open_browser, serve_page, try_serve_static
 from ..sse import SSEQueue, write_sse
 from ..udp import UdpBackend
 
@@ -88,7 +88,7 @@ class DebuggerApp:
         return Handler
 
 
-def run(http_port, control_port):
+def run(http_port, control_port, no_browser=False):
     app = DebuggerApp(control_port)
     app.control.start()
     threading.Thread(target=app.poller, daemon=True).start()
@@ -101,8 +101,12 @@ def run(http_port, control_port):
         app.control.stop()
         return 1
 
-    print(f"[debugger] http://localhost:{http_port}", file=sys.stderr)
+    url = f"http://localhost:{http_port}"
+    print(f"[debugger] {url}", file=sys.stderr)
     print(f"[debugger] control port {control_port}", file=sys.stderr)
+    if not no_browser:
+        time.sleep(0.15)
+        open_browser(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

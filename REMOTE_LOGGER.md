@@ -73,7 +73,7 @@ remote_logger:
 
 远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
 
-可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。
+可视化 Host 端见 [`host/HOST.md`](host/HOST.md)：`./host/watch.sh` 实时调试，`./host/replay.sh` 回放 `.rlog`。
 
 ```
 Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port

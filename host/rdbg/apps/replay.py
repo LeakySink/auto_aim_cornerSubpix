@@ -2,16 +2,13 @@
 
 import base64
 import json
-import shutil
-import subprocess
 import sys
 import time
-import webbrowser
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
+from ..httputil import ThreadingHTTPServer, open_browser, serve_page, try_serve_static
 from ..session import load_session_or_exit
 
 PORT_TRY = 20
@@ -32,16 +29,6 @@ def public_meta(session):
         "series": session.get("series") or {},
         "frames": frames,
     }
-
-
-def _open_window(url):
-    for browser in ("google-chrome", "chromium-browser", "chromium", "microsoft-edge"):
-        exe = shutil.which(browser)
-        if exe:
-            subprocess.Popen([exe, f"--app={url}"])
-            return True
-    webbrowser.open(url)
-    return True
 
 
 class ReplayApp:
@@ -135,7 +122,7 @@ def run(rlog, host="127.0.0.1", port=8765, max_mb=1024, no_browser=False):
     print(f"[replay] {url}", file=sys.stderr)
     if not no_browser:
         time.sleep(0.15)
-        _open_window(url)
+        open_browser(url)
 
     try:
         httpd.serve_forever()

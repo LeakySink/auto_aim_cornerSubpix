@@ -16,13 +16,7 @@ def _parser():
     dbg.add_argument("--control-port", type=int, default=15000, help="UDP control port")
     dbg.add_argument("--download-assets", action="store_true",
                      help="download Chart.js / Hammer / zoom for offline use")
-
-    fld = sub.add_parser("field", help="multi-robot field control")
-    fld.add_argument("--port", type=int, default=8888, help="HTTP port")
-    fld.add_argument("--data-port", type=int, default=20000, help="shared UDP data port")
-    fld.add_argument("--ctrl-port", type=int, default=15000, help="UDP control port")
-    fld.add_argument("--download-assets", action="store_true",
-                     help="download Chart.js / Hammer / zoom for offline use")
+    dbg.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
     rpl = sub.add_parser("replay", help="play local .rlog file")
     rpl.add_argument("rlog", help="path to .rlog")
@@ -46,13 +40,9 @@ def main(argv=None):
         download_vendor()
         return 0
 
-    if args.cmd == "field":
-        from .apps.field import run
-        return run(args.port, args.data_port, args.ctrl_port)
-
     if args.cmd == "debugger":
         from .apps.debugger import run
-        return run(args.port, args.control_port)
+        return run(args.port, args.control_port, args.no_browser)
 
     if args.cmd == "replay":
         from .apps.replay import run

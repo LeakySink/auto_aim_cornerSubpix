@@ -1,8 +1,11 @@
 """Static file serving, vendor CDN fallback, HTTP server mixin."""
 
 import http.server
+import shutil
 import socketserver
+import subprocess
 import sys
+import webbrowser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -113,3 +116,13 @@ def download_vendor():
         print(f"[assets] downloading {url}", file=sys.stderr)
         urllib.request.urlretrieve(url, dst)
         print(f"[assets] saved {dst} ({dst.stat().st_size} bytes)", file=sys.stderr)
+
+
+def open_browser(url):
+    for browser in ("google-chrome", "chromium-browser", "chromium", "microsoft-edge"):
+        exe = shutil.which(browser)
+        if exe:
+            subprocess.Popen([exe, f"--app={url}"])
+            return True
+    webbrowser.open(url)
+    return True
