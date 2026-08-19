@@ -1,5 +1,6 @@
 """Local HTTP server for replayer UI."""
 
+import base64
 import json
 import mimetypes
 import socketserver
@@ -40,6 +41,24 @@ def _safe(root, rel):
     return path if path.is_file() else None
 
 
+def public_meta(session):
+    """JSON metadata without embedded JPEG payloads."""
+    frames = [
+        {"i": i, "t": f["t"], "meta": f.get("meta") or {}}
+        for i, f in enumerate(session.get("frames") or [])
+    ]
+    return {
+        "file": session.get("file", ""),
+        "path": session.get("path", ""),
+        "sender": session.get("sender", ""),
+        "duration": session.get("duration", 0),
+        "memory_bytes": session.get("memory_bytes", 0),
+        "fields": session.get("fields") or [],
+        "series": session.get("series") or {},
+        "frames": frames,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     session = None
 
@@ -66,12 +85,37 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404)
             return
 
-        if path == "/api/session":
+        if path == "/api/meta":
             if self.session is None:
                 self.send_error(503, "session not loaded")
                 return
-            body = json.dumps(self.session, separators=(",", ":"))
+            body = json.dumps(public_meta(self.session), separators=(",", ":"))
             self._send(200, body, "application/json; charset=utf-8")
+            return
+
+        if path.startswith("/api/frame/"):
+            if self.session is None:
+                self.send_error(503, "session not loaded")
+                return
+            try:
+                idx = int(path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_error(400)
+                return
+            frames = self.session.get("frames") or []
+            if idx < 0 or idx >= len(frames):
+                self.send_error(404)
+                return
+            fr = frames[idx]
+            jpeg = fr.get("jpeg")
+            if not jpeg:
+                b64 = fr.get("b64")
+                if b64:
+                    jpeg = base64.b64decode(b64)
+            if not jpeg:
+                self.send_error(404)
+                return
+            self._send(200, jpeg, "image/jpeg", cache="public, max-age=86400")
             return
 
         if path.startswith("/static/"):

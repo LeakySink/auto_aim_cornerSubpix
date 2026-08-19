@@ -19,29 +19,38 @@ button:hover { border-color: #505060; }
 
 #main {
   display: flex; height: calc(100% - 42px - 56px);
+  min-height: 0;
 }
 #image-pane {
   flex: 0 0 42%; display: flex; flex-direction: column;
   border-right: 1px solid #252530; min-width: 240px;
+  min-height: 0;
 }
 #img-wrap {
-  flex: 1; position: relative; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
   background: #080810;
 }
 #frame-img {
-  max-width: 100%; max-height: 100%; object-fit: contain;
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
 }
-#img-wrap.empty #frame-img { display: none; }
-#img-wrap.empty #img-placeholder { display: block; }
-#img-placeholder { display: none; color: #404050; font-size: 15px; }
+#img-wrap.empty #frame-img { visibility: hidden; }
+#img-wrap.empty #img-placeholder { display: flex; }
+#img-placeholder {
+  display: none; position: absolute; inset: 0;
+  align-items: center; justify-content: center;
+  color: #404050; font-size: 15px;
+}
 #img-meta {
   height: 28px; padding: 4px 10px; font-size: 12px; color: #606070;
   border-top: 1px solid #202028; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex-shrink: 0;
 }
 
 #chart-pane {
-  flex: 1; position: relative; min-width: 280px; padding: 8px 8px 8px 4px;
+  flex: 1; position: relative; min-width: 280px; min-height: 0;
+  padding: 8px 8px 8px 4px;
 }
 #chart { width: 100% !important; height: 100% !important; }
 #field-list {

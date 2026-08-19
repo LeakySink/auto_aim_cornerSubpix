@@ -1,4 +1,4 @@
-// Replayer — local .rlog viewer (preload in memory, scrub + centered chart)
+// Replayer — local .rlog viewer (preload frames, centered chart, scrub)
 
 const COLORS = [
   '#4fc3f7', '#ffb74d', '#81c784', '#e57373', '#ba68c8', '#4dd0e1',
@@ -6,13 +6,13 @@ const COLORS = [
 ];
 
 let session = null;
+let frameUrls = [];
 let duration = 0;
 let currentT = 0;
 let playing = false;
 let playWall0 = 0;
 let playT0 = 0;
 let manualView = false;
-let scrubbing = false;
 let chart = null;
 let fieldColors = {};
 let hiddenFields = {};
@@ -67,28 +67,44 @@ function showFrameAt(t) {
   const wrap = document.getElementById('img-wrap');
   const img = document.getElementById('frame-img');
   const ph = document.getElementById('img-placeholder');
+  const metaEl = document.getElementById('img-meta');
+
   if (!session.frames.length) {
     wrap.classList.add('empty');
     ph.textContent = '无图像';
-    document.getElementById('img-meta').textContent = '';
+    metaEl.textContent = '';
     return;
   }
+
   const idx = findFrameIndex(t);
   const fr = session.frames[idx];
-  if (fr && fr.b64) {
+  const url = frameUrls[fr.i];
+
+  if (url) {
     wrap.classList.remove('empty');
-    img.src = 'data:image/jpeg;base64,' + fr.b64;
+    if (img.src !== url) img.src = url;
     const meta = fr.meta || {};
     const parts = [];
     if (meta.cam) parts.push('cam=' + meta.cam);
     if (meta.name) parts.push(meta.name);
     parts.push('t=' + fmtTime(fr.t) + 's');
-    document.getElementById('img-meta').textContent = parts.join(' · ');
+    parts.push('# frame ' + (idx + 1) + '/' + session.frames.length);
+    metaEl.textContent = parts.join(' · ');
   } else {
     wrap.classList.add('empty');
-    ph.textContent = '无图像';
-    document.getElementById('img-meta').textContent = '';
+    ph.textContent = '图像加载失败';
+    metaEl.textContent = '';
   }
+}
+
+async function preloadFrames() {
+  frameUrls = new Array(session.frames.length);
+  await Promise.all(session.frames.map(async function(fr) {
+    const r = await fetch('/api/frame/' + fr.i);
+    if (!r.ok) throw new Error('frame ' + fr.i);
+    const blob = await r.blob();
+    frameUrls[fr.i] = URL.createObjectURL(blob);
+  }));
 }
 
 function windowSec() {
@@ -139,7 +155,7 @@ function buildChart() {
       borderWidth: 1.8,
       pointRadius: 0,
       spanGaps: false,
-      hidden: !!hiddenFields[name],
+      hidden: hiddenFields[name] !== false,
     });
   });
 
@@ -195,15 +211,15 @@ function renderFieldList() {
     const item = document.createElement('div');
     item.className = 'item';
     const box = document.createElement('div');
-    const on = !hiddenFields[name];
+    const on = hiddenFields[name] === false;
     box.className = 'box' + (on ? ' on' : '');
     box.style.setProperty('--c', fieldColors[name]);
     item.appendChild(box);
     item.appendChild(document.createTextNode(name));
     item.onclick = function() {
-      hiddenFields[name] = !hiddenFields[name];
+      hiddenFields[name] = hiddenFields[name] === false ? true : false;
       const ds = chart.data.datasets.find(function(d) { return d.label === name; });
-      if (ds) ds.hidden = hiddenFields[name];
+      if (ds) ds.hidden = hiddenFields[name] !== false;
       chart.update('none');
       renderFieldList();
     };
@@ -242,26 +258,7 @@ function resetZoom() {
   updateChartView(true);
 }
 
-async function init() {
-  const resp = await fetch('/api/session');
-  if (!resp.ok) {
-    document.body.innerHTML = '<p style="padding:24px;color:#e57373">加载失败</p>';
-    return;
-  }
-  session = await resp.json();
-  duration = session.duration || 0;
-  document.getElementById('title').textContent = session.file || 'Replayer';
-  document.getElementById('title').title = session.path || '';
-
-  session.fields.forEach(function(name, i) {
-    fieldColors[name] = COLORS[i % COLORS.length];
-    hiddenFields[name] = false;
-  });
-
-  buildChart();
-  renderFieldList();
-  seekTo(0, false);
-
+function bindControls() {
   document.getElementById('btn-play').onclick = function() {
     setPlaying(!playing);
   };
@@ -279,13 +276,10 @@ async function init() {
 
   const scrub = document.getElementById('scrub');
   scrub.oninput = function() {
-    scrubbing = true;
     const t = (parseInt(scrub.value, 10) / 1000) * duration;
     seekTo(t, true);
   };
-  scrub.onchange = function() { scrubbing = false; };
   scrub.onpointerdown = function() {
-    scrubbing = true;
     if (playing) setPlaying(false);
   };
 
@@ -299,6 +293,47 @@ async function init() {
       seekTo(currentT + 0.05, false);
     }
   });
+}
+
+async function init() {
+  const status = document.getElementById('title');
+  try {
+    status.textContent = '加载中…';
+    const resp = await fetch('/api/meta');
+    if (!resp.ok) throw new Error('meta HTTP ' + resp.status);
+    session = await resp.json();
+    duration = session.duration || 0;
+    status.textContent = session.file || 'Replayer';
+    status.title = session.path || '';
+
+    session.fields.forEach(function(name, i) {
+      fieldColors[name] = COLORS[i % COLORS.length];
+      hiddenFields[name] = true;
+    });
+
+    if (session.frames.length) {
+      status.textContent = (session.file || 'Replayer') + ' · 加载图像…';
+      await preloadFrames();
+    }
+
+    showFrameAt(0);
+    updateTimeLabel();
+
+    try {
+      buildChart();
+      renderFieldList();
+      updateChartView(true);
+    } catch (e) {
+      console.error('chart init failed', e);
+    }
+
+    bindControls();
+    seekTo(0, false);
+  } catch (e) {
+    console.error(e);
+    document.body.innerHTML =
+      '<p style="padding:24px;color:#e57373">加载失败: ' + e.message + '</p>';
+  }
 }
 
 init();

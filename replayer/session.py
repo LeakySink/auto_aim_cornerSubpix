@@ -1,6 +1,5 @@
 """Load .rlog into memory for local playback."""
 
-import base64
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -35,14 +34,16 @@ def load_session(path, max_bytes=MAX_BYTES):
         if rec.get("kind") == "img":
             jpeg = rec.get("jpeg") or b""
             mem += len(jpeg)
-            b64 = base64.b64encode(jpeg).decode("ascii")
-            mem += len(b64)
             meta = rec.get("meta") or {}
             if not sender:
                 frm = meta.get("_from")
                 if isinstance(frm, str) and frm:
                     sender = frm
-            frames.append({"t": t_sec, "b64": b64, "meta": meta})
+            frames.append({
+                "t": t_sec,
+                "meta": meta,
+                "jpeg": jpeg,
+            })
         else:
             obj = rec.get("obj") or {}
             if "hb" in obj:
