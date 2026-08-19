@@ -404,8 +404,8 @@ function showPanelImage(p) {
   var name = p.imgSel.value;
   if (!name) { var keys = Object.keys(imgSources); if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; } }
   var s = imgSources[name];
-  if (s && s.b64) {
-    p.imgEl.src = s.b64; p.imgEl.style.display = '';
+  if (s && s.src) {
+    p.imgEl.src = s.src; p.imgEl.style.display = '';
     p.placeholder.style.display = 'none'; p.imgInfo.textContent = s.kb + ' KB';
   }
 }
@@ -691,9 +691,18 @@ function addPoint(ts, data) {
   while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
   if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
 
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++)
-      pushDataToPanel(rows[ri].panels[pi]);
+  scheduleChartFlush();
+}
+
+var _chartFlushRaf = 0;
+function scheduleChartFlush() {
+  if (_chartFlushRaf) return;
+  _chartFlushRaf = requestAnimationFrame(function() {
+    _chartFlushRaf = 0;
+    for (var ri = 0; ri < rows.length; ri++)
+      for (var pi = 0; pi < rows[ri].panels.length; pi++)
+        pushDataToPanel(rows[ri].panels[pi]);
+  });
 }
 
 function clearPlots() {
@@ -736,8 +745,13 @@ var imgSources = {};
 var imgFpsTracker = {};
 
 function setImage(b64, meta) {
+  setImageSrc('data:image/jpeg;base64,' + b64, meta, (b64.length * 0.75 / 1024).toFixed(0));
+}
+
+function setImageSrc(src, meta, kb) {
   var name = (meta && meta.name) ? meta.name : 'default';
   var now = Date.now();
+  var isNew = !imgSources[name];
 
   if (!imgFpsTracker[name]) imgFpsTracker[name] = [];
   imgFpsTracker[name].push(now);
@@ -748,13 +762,13 @@ function setImage(b64, meta) {
     fps = Math.round((imgFpsTracker[name].length - 1) * 1000 / dt);
   }
 
-  imgSources[name] = { b64: 'data:image/jpeg;base64,' + b64, ts: now, kb: (b64.length * 0.75 / 1024).toFixed(0) };
+  imgSources[name] = { src: src, ts: now, kb: kb != null ? kb : '?' };
 
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
       var p = rows[ri].panels[pi];
       if (p.type !== 'image') continue;
-      refreshImgOptions(p);
+      if (isNew) refreshImgOptions(p);
       if (p.imgFps) p.imgFps.textContent = fps + ' fps';
       if (p.imgSel.value === name) showPanelImage(p);
     }
@@ -813,7 +827,11 @@ es.onmessage = function(e) {
     }
     var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
     if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
-    else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true, snd); }
+    else if (msg.type === 'image') {
+      if (msg.url) setImageSrc(msg.url, msg.meta, '?');
+      else setImage(msg.jpg_b64, msg.meta);
+      setConnected(true, snd);
+    }
     else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
     else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
     else if (msg.type === 'state') {

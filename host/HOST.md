@@ -84,7 +84,7 @@ rx.stop()
 
 ### rlog.py — 本地 .rlog
 
-`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志：旧 magic `RLOG`（仅 JSON）与新 magic `RLG2`（JSON + JPEG）均可。`./host/rlog.sh` 灌进与 UDP 相同的 SSE `plot` / `log` / `image`，打开同一套调试页。
+`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志：旧 magic `RLOG`（仅 JSON）与新 magic `RLG2`（JSON + JPEG）均可。`./host/rlog.sh` 按时间轴回放（默认 1x，可用 `SPEED=2` / `--speed 2`），图像走 `/img/N` 二进制，SSE 与直播相同：`plot` / `log` / `image`。
 
 ### apps/debugger.py — 单车编排
 

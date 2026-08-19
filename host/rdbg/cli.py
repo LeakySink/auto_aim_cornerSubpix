@@ -27,6 +27,12 @@ def _parser():
     rep = sub.add_parser("replay", help="replay a local .rlog file")
     rep.add_argument("rlog", help="path to .rlog")
     rep.add_argument("--port", type=int, default=8080, help="HTTP port")
+    rep.add_argument(
+        "--speed",
+        type=float,
+        default=1.0,
+        help="playback speed (1=realtime, 2=2x; idle gaps capped)",
+    )
     return p
 
 
@@ -53,7 +59,7 @@ def main(argv=None):
 
     if args.cmd == "replay":
         from .apps.replay import run
-        return run(args.rlog, args.port)
+        return run(args.rlog, args.port, speed=args.speed)
 
     _parser().print_help()
     return 0
