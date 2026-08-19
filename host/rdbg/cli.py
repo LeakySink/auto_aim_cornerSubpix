@@ -23,6 +23,10 @@ def _parser():
     fld.add_argument("--ctrl-port", type=int, default=15000, help="UDP control port")
     fld.add_argument("--download-assets", action="store_true",
                      help="download Chart.js / Hammer / zoom for offline use")
+
+    rep = sub.add_parser("replay", help="replay a local .rlog file")
+    rep.add_argument("rlog", help="path to .rlog")
+    rep.add_argument("--port", type=int, default=8080, help="HTTP port")
     return p
 
 
@@ -46,6 +50,10 @@ def main(argv=None):
     if args.cmd == "debugger":
         from .apps.debugger import run
         return run(args.port, args.control_port)
+
+    if args.cmd == "replay":
+        from .apps.replay import run
+        return run(args.rlog, args.port)
 
     _parser().print_help()
     return 0
