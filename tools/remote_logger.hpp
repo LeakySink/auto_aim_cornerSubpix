@@ -19,12 +19,11 @@
 namespace tools
 {
 
-/// RemoteLogger — 主线程只入队，两个 worker 分别处理变量与图像。
+/// RemoteLogger — 主线程只入队，三个 worker 分工：
 ///
-///   plot / log  ──→ var_buf_  ──→ var_worker_  ──→ .rlog (json) + UDP
-///   plot_image  ──→ img_buf_  ──→ img_worker_  ──→ .rlog (jpeg) + UDP
-///
-/// 注册、心跳、注销由 var_worker_ 负责；图像 UDP 复用同一 socket。
+///   plot / log  ──→ var_buf_   ──→ var_worker_   ──→ .rlog (json) + UDP
+///   plot_image  ──→ img_buf_   ──→ img_worker_   ──→ .rlog (jpeg) + UDP
+///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试（独立控制线程）
 class RemoteLogger
 {
 public:
@@ -81,6 +80,7 @@ private:
 
   void var_worker_loop();
   void img_worker_loop();
+  void ctrl_worker_loop();
 
   bool try_register();
   void send_heartbeat();
@@ -121,7 +121,10 @@ private:
   std::thread img_worker_;
   uint64_t last_img_keep_ns_{0};
 
-  // ── 本地 .rlog 会话文件（两 worker 写，session_mtx_ 保护）────────
+  // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
+  std::thread ctrl_worker_;
+
+  // ── 本地 .rlog 会话文件（var/img worker 写，session_mtx_ 保护）──
   std::mutex session_mtx_;
   std::string session_file_;
   FILE * session_fp_{nullptr};

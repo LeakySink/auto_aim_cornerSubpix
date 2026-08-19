@@ -30,6 +30,7 @@ constexpr uint32_t kSessionFlushMs = 200;
 constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 5;
 constexpr int kImgEncodeBudgetMs = 25;  // 每轮 img_worker 最多编码时长
+constexpr int kCtrlWorkerPollMs = 200;  // 控制线程轮询间隔
 
 }  // namespace
 
@@ -80,6 +81,9 @@ void RemoteLogger::init(const Config & cfg)
   }
 
   running_ = true;
+  if (cfg_.enable_remote && sock_ >= 0) {
+    ctrl_worker_ = std::thread(&RemoteLogger::ctrl_worker_loop, this);
+  }
   var_worker_ = std::thread(&RemoteLogger::var_worker_loop, this);
   img_worker_ = std::thread(&RemoteLogger::img_worker_loop, this);
 }
@@ -144,6 +148,7 @@ void RemoteLogger::shutdown()
   running_ = false;
   var_cv_.notify_all();
   img_cv_.notify_all();
+  if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
 
@@ -225,13 +230,11 @@ uint64_t RemoteLogger::now_ns() const
     .count();
 }
 
-// ── var_worker：JSON 变量 / 日志 → 本地 + UDP；注册与心跳 ────────────────
+// ── var_worker：JSON 变量 / 日志 → 本地 + UDP ─────────────────────────
 
 void RemoteLogger::var_worker_loop()
 {
   std::vector<VarEntry> pending;
-
-  if (cfg_.enable_remote) try_register();
 
   while (running_) {
     {
@@ -252,9 +255,6 @@ void RemoteLogger::var_worker_loop()
       }
       pending.clear();
     }
-
-    if (cfg_.heartbeat_interval_ms > 0 && registered_) send_heartbeat();
-    if (cfg_.enable_remote && !registered_) try_register();
   }
 
   {
@@ -265,6 +265,24 @@ void RemoteLogger::var_worker_loop()
     if (cfg_.enable_local) flush_var_local(pending);
     if (cfg_.enable_remote && registered_) {
       for (const auto & e : pending) try_send_var(e);
+    }
+  }
+}
+
+// ── ctrl_worker：注册 / 心跳 / 重试（与 var/img 完全分离）────────────
+
+void RemoteLogger::ctrl_worker_loop()
+{
+  try_register();
+
+  while (running_) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(kCtrlWorkerPollMs));
+    if (!running_) break;
+
+    if (!registered_) {
+      try_register();
+    } else if (cfg_.heartbeat_interval_ms > 0) {
+      send_heartbeat();
     }
   }
 }

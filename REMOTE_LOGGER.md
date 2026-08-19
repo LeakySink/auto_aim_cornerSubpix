@@ -147,23 +147,22 @@ type 0x01 image:
 
 ## 线程模型
 
-双 worker 分离：变量与图像互不阻塞，共享同一 `.rlog` 会话文件（`session_mtx_` 串行写盘）。
+三 worker 分离：变量、图像、远程控制互不阻塞；`.rlog` 由 var/img 写（`session_mtx_`）。
 
 ```
-主线程                    var_worker_                 img_worker_
-──────                    ───────────                 ───────────
-plot / log ──→ var_buf_   swap → .rlog (json)         swap → resize/JPEG
-              notify          → UDP (变量)                  → .rlog (jpeg)
-                                              img_buf_      → UDP (图像)
-plot_image ──→ img_buf_    注册 / 心跳 / 重试
-              notify
-stderr ← log 文本
-shutdown → join 两线程 → 刷剩余队列 → deregister
+主线程              var_worker_        img_worker_       ctrl_worker_
+──────              ───────────        ───────────       ─────────────
+plot/log→var_buf_   .rlog(json)+UDP    .rlog(jpeg)+UDP   try_register()
+notify              (仅数据)           (仅图像)          send_heartbeat()
+plot_image→img_buf_
+notify
+shutdown→join×3→deregister
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
-| `var_worker_` | JSON 写本地 + UDP；注册、心跳 | `plot()` 每次 notify；空闲 poll 50ms |
-| `img_worker_` | JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms；每轮最多编码 ~25ms |
+| `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
+| `img_worker_` | JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
+| `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 主线程 `plot_image` 仍限 ~30fps 入队；`img_worker_` 每轮在 time budget 内尽量多编几帧。
