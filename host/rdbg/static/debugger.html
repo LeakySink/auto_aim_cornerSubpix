@@ -58,6 +58,12 @@
     <button type="button" id="rp-play" title="空格键播放/暂停">▶</button>
     <input type="range" id="rp-seek" min="0" max="1000" value="0" step="1">
     <span id="rp-time">0:00 / 0:00</span>
+    <label class="rp-speed-wrap">模式
+      <select id="rp-mode" title="流畅=压缩无图间隔；实际时间=按录制时钟（空窗会定格）">
+        <option value="smooth" selected>流畅</option>
+        <option value="realtime">实际时间</option>
+      </select>
+    </label>
     <label class="rp-speed-wrap">倍速
       <select id="rp-speed">
         <option value="0.25">0.25x</option>
@@ -72,6 +78,6 @@
 </div>
 
 <script src="/static/js/debugger.js?v=6"></script>
-<script src="/static/js/replay.js?v=3"></script>
+<script src="/static/js/replay.js?v=4"></script>
 </body>
 </html>

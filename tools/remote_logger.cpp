@@ -199,7 +199,6 @@ uint64_t RemoteLogger::now_ns() const
 void RemoteLogger::worker()
 {
   std::vector<VarEntry> var_pending;
-  std::vector<ImgEntry> img_pending;
 
   if (cfg_.enable_remote && !registered_) try_register();
 
@@ -224,11 +223,9 @@ void RemoteLogger::worker()
       var_pending.clear();
     }
 
-    {
-      std::lock_guard<std::mutex> lock(img_mtx_);
-      if (!img_buf_.empty()) img_buf_.swap(img_pending);
-    }
-    process_images(img_pending);
+    // One image per wake: JPEG+disk of a full buffer (~10) can take seconds and
+    // creates "10 frames then long gap" in the log while newer frames are dropped.
+    if (process_one_image()) cv_.notify_one();
 
     if (cfg_.heartbeat_interval_ms > 0 && registered_) send_heartbeat();
 
@@ -241,12 +238,10 @@ void RemoteLogger::worker()
   }
   if (!var_pending.empty() && cfg_.enable_local) flush_var_local(var_pending);
 
-  {
-    std::lock_guard<std::mutex> lock(img_mtx_);
-    if (!img_buf_.empty()) img_buf_.swap(img_pending);
+  while (process_one_image()) {
   }
-  process_images(img_pending);
 
+  maybe_flush_session(true);
   close_session_file();
 }
 
@@ -346,7 +341,6 @@ void RemoteLogger::process_images(std::vector<ImgEntry> & pending)
     std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.img_quality};
     if (!cv::imencode(".jpg", *to_encode, jpeg, params) || jpeg.empty()) continue;
 
-    // Drop Mat pixels ASAP so peak memory stays low while writing / UDP.
     e.img.release();
     resized.release();
 
@@ -354,6 +348,37 @@ void RemoteLogger::process_images(std::vector<ImgEntry> & pending)
     if (want_udp) try_send_img(jpeg, e.ts, e.meta);
   }
   pending.clear();
+}
+
+bool RemoteLogger::process_one_image()
+{
+  ImgEntry one;
+  {
+    std::lock_guard<std::mutex> lock(img_mtx_);
+    if (img_buf_.empty()) return false;
+    one = std::move(img_buf_.front());
+    img_buf_.erase(img_buf_.begin());
+  }
+  std::vector<ImgEntry> single;
+  single.push_back(std::move(one));
+  process_images(single);
+
+  std::lock_guard<std::mutex> lock(img_mtx_);
+  return !img_buf_.empty();
+}
+
+void RemoteLogger::maybe_flush_session(bool force)
+{
+  if (!session_fp_) return;
+  auto now = std::chrono::steady_clock::now();
+  if (!force) {
+    if (last_session_flush_.time_since_epoch().count() != 0) {
+      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_session_flush_);
+      if (ms.count() < 200) return;
+    }
+  }
+  std::fflush(session_fp_);
+  last_session_flush_ = now;
 }
 
 bool RemoteLogger::ensure_session_file()
@@ -405,7 +430,7 @@ void RemoteLogger::flush_var_local(const std::vector<VarEntry> & entries)
       return;
     }
   }
-  std::fflush(session_fp_);
+  maybe_flush_session(false);
 }
 
 void RemoteLogger::flush_img_local(uint64_t ts, const nlohmann::json & meta,
@@ -430,7 +455,7 @@ void RemoteLogger::flush_img_local(uint64_t ts, const nlohmann::json & meta,
     std::fprintf(stderr, "[RemoteLogger] Failed to write img record\n");
     return;
   }
-  std::fflush(session_fp_);
+  maybe_flush_session(false);
 }
 
 void RemoteLogger::try_send_var(const VarEntry & entry)
