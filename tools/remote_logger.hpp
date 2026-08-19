@@ -23,6 +23,7 @@ namespace tools
 ///
 ///   plot / log  ──→ var_buf_   ──→ var_worker_   ──→ .rlog (json) + UDP
 ///   plot_image  ──→ img_ring_  ──→ img_worker_   ──→ .rlog (jpeg) + UDP
+///                   （仅 Mat 头，零拷贝；worker 取最新帧）
 ///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试（独立控制线程）
 class RemoteLogger
 {
@@ -56,7 +57,7 @@ public:
     log(level, fmt::format(fmt::runtime(fmt_str), std::forward<Args>(args)...));
   }
 
-  void plot_image(cv::Mat img, const nlohmann::json & meta);
+  void plot_image(const cv::Mat & img, const nlohmann::json & meta);
   void shutdown();
 
 private:
@@ -113,19 +114,21 @@ private:
   std::mutex var_wake_mtx_;
   std::thread var_worker_;
 
-  // ── 图像环形缓冲（主线程 copyTo 写入槽位，img_worker 异步编码）──
+  // ── 图像环形缓冲（主线程只入队 Mat 头，img_worker 异步编码最新帧）──
   class ImgRingBuffer
   {
   public:
     void reset(size_t cap);
     bool push(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
-    ImgEntry * acquire();
+    ImgEntry * acquire_latest();
     void release();
     bool wait_not_empty(int timeout_ms, const std::atomic<bool> & running);
     void wake();
     void clear();
 
   private:
+    void drop_slot(size_t idx);
+
     std::vector<ImgEntry> slots_;
     size_t cap_{0};
     size_t tail_{0};

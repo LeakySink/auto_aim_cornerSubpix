@@ -195,7 +195,7 @@ void RemoteLogger::log(const std::string & level, const std::string & msg)
   plot(entry);
 }
 
-void RemoteLogger::plot_image(cv::Mat img, const nlohmann::json & meta)
+void RemoteLogger::plot_image(const cv::Mat & img, const nlohmann::json & meta)
 {
   if (!running_) return;
   if (!cfg_.enable_local && !cfg_.enable_remote) return;
@@ -275,7 +275,7 @@ void RemoteLogger::ctrl_worker_loop()
   }
 }
 
-// ── img_ring：预分配槽位，主线程 copyTo，worker 异步编码 ──────────────
+// ── img_ring：主线程只钉 Mat 头（零拷贝），worker 取最新帧编码 ─────────
 
 void RemoteLogger::ImgRingBuffer::reset(size_t cap)
 {
@@ -288,6 +288,12 @@ void RemoteLogger::ImgRingBuffer::reset(size_t cap)
   if (cap_ > 0) slots_.resize(cap_);
 }
 
+void RemoteLogger::ImgRingBuffer::drop_slot(size_t idx)
+{
+  slots_[idx].meta = nlohmann::json{};
+  slots_[idx].img.release();
+}
+
 bool RemoteLogger::ImgRingBuffer::push(uint64_t ts, nlohmann::json meta,
                                        const cv::Mat & img)
 {
@@ -298,7 +304,17 @@ bool RemoteLogger::ImgRingBuffer::push(uint64_t ts, nlohmann::json meta,
     if (cap_ == 0) return false;
 
     if (count_ == cap_) {
-      if (busy_) return false;  // 最旧槽正在编码，丢掉这一帧
+      if (busy_) {
+        if (cap_ == 1) return false;
+        const size_t newest = (tail_ + count_ - 1) % cap_;
+        drop_slot(newest);
+        auto & slot = slots_[newest];
+        slot.ts = ts;
+        slot.meta = std::move(meta);
+        slot.img = img;
+        return true;
+      }
+      drop_slot(tail_);
       tail_ = (tail_ + 1) % cap_;
       --count_;
     }
@@ -307,17 +323,22 @@ bool RemoteLogger::ImgRingBuffer::push(uint64_t ts, nlohmann::json meta,
     auto & slot = slots_[idx];
     slot.ts = ts;
     slot.meta = std::move(meta);
-    img.copyTo(slot.img);
+    slot.img = img;
     ++count_;
   }
   cv_.notify_one();
   return true;
 }
 
-RemoteLogger::ImgEntry * RemoteLogger::ImgRingBuffer::acquire()
+RemoteLogger::ImgEntry * RemoteLogger::ImgRingBuffer::acquire_latest()
 {
   std::lock_guard<std::mutex> lock(mtx_);
   if (count_ == 0 || busy_) return nullptr;
+  while (count_ > 1) {
+    drop_slot(tail_);
+    tail_ = (tail_ + 1) % cap_;
+    --count_;
+  }
   busy_ = true;
   return &slots_[tail_];
 }
@@ -329,7 +350,7 @@ void RemoteLogger::ImgRingBuffer::release()
     busy_ = false;
     return;
   }
-  slots_[tail_].meta = nlohmann::json{};
+  drop_slot(tail_);
   tail_ = (tail_ + 1) % cap_;
   --count_;
   busy_ = false;
@@ -364,7 +385,7 @@ void RemoteLogger::img_worker_loop()
   uint64_t last_keep_ns = 0;
 
   auto consume_one = [&]() -> bool {
-    ImgEntry * entry = img_ring_.acquire();
+    ImgEntry * entry = img_ring_.acquire_latest();
     if (!entry) return false;
     const uint64_t ts = entry->ts;
     if (last_keep_ns == 0 || ts < last_keep_ns ||

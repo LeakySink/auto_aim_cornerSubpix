@@ -7,7 +7,7 @@
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
-- **图像数据**：`plot_image(cv::Mat, meta)` — worker 内 JPEG 压缩后 UDP 发送，并写入同一次运行的本地 `.rlog`（约 30fps）
+- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程只入队 Mat 头（零拷贝）；worker 取最新帧 JPEG 后 UDP 发送，并写入同一次运行的本地 `.rlog`（约 30fps）
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 
 ## 快速开始
@@ -125,7 +125,7 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 本地日志 (`.rlog`)
 
-单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **img_worker** 完成。主线程 `plot_image` 只 `copyTo` 进预分配环形槽后立即返回，**不作帧率限制**；环满则覆盖最旧（正在编码的槽不覆盖）。约 30fps（间隔 < 33ms）的限流在 `img_worker` 编码前丢近邻帧。槽内 `cv::Mat` 复用，稳态不再反复分配。
+单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **img_worker** 完成。主线程 `plot_image` 只把 `cv::Mat` 头写入环形槽（refcount 钉住像素，**零拷贝**），立即返回，不限帧率。环满覆盖最旧；编码中的槽不覆盖，改为替换已入队的最新等待帧。worker 每次取**最新**一槽，丢弃更旧的等待帧，再按约 30fps（间隔 < 33ms）决定是否编码。
 
 格式 magic `RLG2`：
 
@@ -155,14 +155,14 @@ type 0x01 image:
 plot/log→var_buf_   .rlog(json)+UDP    .rlog(jpeg)+UDP   try_register()
 notify              (仅数据)           (仅图像)          send_heartbeat()
 plot_image→img_ring_
-(copyTo 槽位)
+(仅 Mat 头)
 shutdown→join×3→deregister
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
 | `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
-| `img_worker_` | 从环形槽取出 → JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
+| `img_worker_` | 取最新槽 → JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
 | `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-`img_ring_` 为 SPSC 环形缓冲：主线程只写入槽位、不限帧率；`img_worker_` 异步编码，并在编码前按约 30fps 丢近邻帧。worker 每轮在 time budget 内尽量多处理几槽。
+`img_ring_` 为 SPSC 环形缓冲：主线程 150fps+ 只入队 Mat 头（零拷贝、不限帧率）；`img_worker_` 始终编码最新帧，并在编码前按约 30fps 丢近邻帧。
