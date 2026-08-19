@@ -36,6 +36,13 @@
       </select>
     </div>
     <div class="section">
+      <div class="section-title">日志等级</div>
+      <label><input type="checkbox" class="log-lv-cb" value="DEBUG" checked onchange="onLogFilterChange()"> DEBUG</label>
+      <label><input type="checkbox" class="log-lv-cb" value="INFO" checked onchange="onLogFilterChange()"> INFO</label>
+      <label><input type="checkbox" class="log-lv-cb" value="WARN" checked onchange="onLogFilterChange()"> WARN</label>
+      <label><input type="checkbox" class="log-lv-cb" value="ERROR" checked onchange="onLogFilterChange()"> ERROR</label>
+    </div>
+    <div class="section">
       <div class="section-title">数据字段</div>
       <div id="field-list"><span style="color:#404050;font-size:13px">等待数据…</span></div>
     </div>

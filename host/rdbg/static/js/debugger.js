@@ -154,14 +154,7 @@ function ensurePanelDOM(p) {
     var info = document.createElement('div'); info.className = 'panel-img-info'; body.appendChild(info);
     p.imgEl = img; p.placeholder = ph; p.imgInfo = info;
   } else {
-    var logs = document.createElement('div');
-    logs.style.cssText = 'flex:1;overflow-y:auto;padding:4px 0';
-    body.appendChild(logs);
-    var lc = document.createElement('span');
-    lc.style.cssText = 'position:absolute;top:2px;right:6px;color:#505060;font-size:11px;z-index:1';
-    body.appendChild(lc);
-    logs.style.overflowY = 'auto';
-    p.logDiv = logs; p.logCount = lc; p.logEntries = 0;
+    setupLogBody(p, body);
   }
   el.appendChild(body);
   if (p.type === 'plot') {
@@ -438,6 +431,7 @@ function switchPanelType(p, newType) {
   if (oldPid) oldPid.remove();
   p.type = newType;
   p.el.querySelector('.panel-body').innerHTML = '';
+  p.el.querySelector('.panel-body').classList.remove('log-body');
   p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false; p.fieldDiv = null;
   p.imgEl = null; p.placeholder = null; p.imgInfo = null;
   p.logDiv = null; p.logCount = null;
@@ -474,12 +468,7 @@ function switchPanelType(p, newType) {
     p.imgFps = fpsSpan;
     initImagePanel(p);
   } else {
-    var logs = document.createElement('div'); logs.style.cssText = 'flex:1;overflow-y:auto;padding:4px 0';
-    body.appendChild(logs);
-    var lc = document.createElement('span');
-    lc.style.cssText = 'position:absolute;top:2px;right:6px;color:#505060;font-size:11px;z-index:1';
-    body.appendChild(lc);
-    p.logDiv = logs; p.logCount = lc; p.logEntries = 0;
+    setupLogBody(p, body);
   }
   refreshHeaderSelect(p);
 }
@@ -699,6 +688,7 @@ function addPoint(ts, data) {
 function clearPlots() {
   plotData = []; fieldMeta = {}; firstTs = null; lastX = 0; activePanelId = null;
   colorIdx = 0;
+  logBuffer = [];
   document.getElementById('field-list').innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
@@ -706,6 +696,7 @@ function clearPlots() {
       if (p.chart) { p.chart.data.datasets.length = 0; p.chart.update('none'); }
       if (p.legendDiv) p.legendDiv.innerHTML = '';
     }
+  refreshAllLogPanels();
 }
 
 function trimData() {
@@ -761,23 +752,98 @@ function setImage(b64, meta) {
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────
-var logFilter = null;
+var LOG_CAP = 500;
+var logBuffer = [];
+var logLevelOn = { DEBUG: true, INFO: true, WARN: true, ERROR: true };
+
+function normLogLevel(lv) {
+  lv = String(lv || 'INFO').toUpperCase();
+  if (lv === 'WARNING') return 'WARN';
+  if (lv === 'FATAL' || lv === 'CRITICAL') return 'ERROR';
+  if (logLevelOn[lv] === undefined) return 'INFO';
+  return lv;
+}
+
+function logLevelVisible(lv) {
+  return !!logLevelOn[normLogLevel(lv)];
+}
+
+function onLogFilterChange() {
+  document.querySelectorAll('.log-lv-cb').forEach(function(cb) {
+    logLevelOn[cb.value] = cb.checked;
+  });
+  refreshAllLogPanels();
+}
+
+function setupLogBody(p, body) {
+  body.classList.add('log-body');
+  var logs = document.createElement('div');
+  logs.className = 'log-stream';
+  body.appendChild(logs);
+  var lc = document.createElement('span');
+  lc.className = 'log-count';
+  body.appendChild(lc);
+  p.logDiv = logs;
+  p.logCount = lc;
+  replayLogsToPanel(p, true);
+}
+
+function formatLogTs(ts) {
+  var t = new Date(ts / 1e6);
+  return t.toTimeString().slice(0, 8) + '.' + String(t.getMilliseconds()).padStart(3, '0');
+}
+
+function makeLogLine(entry) {
+  var div = document.createElement('div');
+  div.className = 'log-line';
+  var lv = normLogLevel(entry.level);
+  var msg = String(entry.msg == null ? '' : entry.msg);
+  div.innerHTML = '<span class="log-ts">' + formatLogTs(entry.ts) +
+    '</span><span class="log-lv ' + lv + '">' + lv +
+    '</span><span class="log-msg"></span>';
+  div.querySelector('.log-msg').textContent = msg;
+  return div;
+}
+
+function isLogStuckToBottom(el) {
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+}
+
+function replayLogsToPanel(p, stickBottom) {
+  if (!p.logDiv) return;
+  p.logDiv.innerHTML = '';
+  var n = 0;
+  for (var i = 0; i < logBuffer.length; i++) {
+    if (!logLevelVisible(logBuffer[i].level)) continue;
+    p.logDiv.appendChild(makeLogLine(logBuffer[i]));
+    n++;
+  }
+  p.logCount.textContent = n ? String(n) : '';
+  if (stickBottom !== false) p.logDiv.scrollTop = p.logDiv.scrollHeight;
+}
+
+function refreshAllLogPanels() {
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
+      var p = rows[ri].panels[pi];
+      if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, true);
+    }
+}
+
 function addLog(ts, level, msg) {
+  logBuffer.push({ ts: ts, level: level, msg: msg });
+  while (logBuffer.length > LOG_CAP) logBuffer.shift();
+  var visible = logLevelVisible(level);
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
       var p = rows[ri].panels[pi];
       if (p.type !== 'log' || !p.logDiv) continue;
-      var div = document.createElement('div');
-      div.className = 'log-line';
-      var t = new Date(ts / 1e6);
-      var tsStr = t.toTimeString().slice(0,8) + '.' + String(t.getMilliseconds()).padStart(3,'0');
-      div.innerHTML = '<span class="log-ts">' + tsStr + '</span><span class="log-lv ' + level + '">' + level + '</span><span class="log-msg">' + msg + '</span>';
-      p.logDiv.appendChild(div);
-      p.logEntries++;
-      while (p.logDiv.children.length > 500) { p.logDiv.firstChild.remove(); p.logEntries--; }
-      p.logCount.textContent = p.logEntries;
-      if (p.logDiv.scrollTop + p.logDiv.clientHeight >= p.logDiv.scrollHeight - 30)
-        p.logDiv.scrollTop = p.logDiv.scrollHeight;
+      var stick = isLogStuckToBottom(p.logDiv);
+      if (visible) p.logDiv.appendChild(makeLogLine({ ts: ts, level: level, msg: msg }));
+      while (p.logDiv.children.length > LOG_CAP) p.logDiv.firstChild.remove();
+      var n = p.logDiv.children.length;
+      p.logCount.textContent = n ? String(n) : '';
+      if (stick) p.logDiv.scrollTop = p.logDiv.scrollHeight;
     }
 }
 
