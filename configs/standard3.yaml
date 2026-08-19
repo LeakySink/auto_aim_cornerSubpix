@@ -129,3 +129,18 @@ model: "assets/yolo11_buff_int8.xml"
 #####-----buff_aimer参数-----#####
 fire_gap_time: 0.700   # s
 predict_time: 0.120     # s
+
+#####-----remote_logger-----#####
+remote_logger:
+  remote_host: "127.0.0.1"
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500
+  sender_name: "standard3"
+  register_retry_ms: 3000

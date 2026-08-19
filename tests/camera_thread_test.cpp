@@ -18,7 +18,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 #include "tools/thread_pool.hpp"
 
@@ -38,7 +37,6 @@ void detect_frame(tools::Frame && frame, auto_aim::YOLO & yolo)
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  tools::Plotter plotter;
   // tools::Recorder recorder(100);
 
   cv::CommandLineParser cli(argc, argv, keys);
@@ -47,6 +45,8 @@ int main(int argc, char * argv[])
     cli.printMessage();
     return 0;
   }
+
+  tools::RemoteLogger::instance().init(config_path);
 
   // 处理线程函数
   auto process_thread = std::thread([&]() {
@@ -60,7 +60,7 @@ int main(int argc, char * argv[])
       nlohmann::json data;
       data["armor_num"] = armors.size();
 
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
       // cv::resize(img, img, {}, 0.5, 0.5);
       // cv::imshow("reprojection", img);
     }
@@ -112,7 +112,7 @@ int main(int argc, char * argv[])
         yolo_used[yolo_id] = false;
       }
     });
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     auto key = cv::waitKey(1);
     if (key == 'q') break;

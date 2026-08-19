@@ -13,7 +13,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 const std::string keys =
   "{help h usage ? | | 输出命令行参数说明}"
@@ -30,7 +29,7 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>("@config-path");
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
   io::Camera camera(config_path);
   io::DM_IMU dm_imu;
 
@@ -73,7 +72,7 @@ int main(int argc, char * argv[])
 
     data["dt"] = dt;
     data["fps"] = 1 / dt;
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
     // 装甲板原始观测数据
     data["armor_num"] = armors.size();
     if (!armors.empty()) {

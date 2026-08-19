@@ -20,7 +20,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 using namespace std::chrono;
@@ -32,7 +31,6 @@ const std::string keys =
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder;
 
   cv::CommandLineParser cli(argc, argv, keys);
@@ -41,6 +39,8 @@ int main(int argc, char * argv[])
     return 0;
   }
   auto config_path = cli.get<std::string>(0);
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::ROS2 ros2;
   io::CBoard cboard(config_path);
@@ -185,7 +185,7 @@ int main(int argc, char * argv[])
 
     data["bullet_speed"] = cboard.bullet_speed;
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);

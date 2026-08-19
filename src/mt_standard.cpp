@@ -19,7 +19,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 const std::string keys =
@@ -38,8 +37,9 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Camera camera(config_path);
   io::CBoard cboard(config_path);
@@ -56,7 +56,7 @@ int main(int argc, char * argv[])
   auto_buff::BigTarget buff_big_target;
   auto_buff::Aimer buff_aimer(config_path);
 
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard, plotter);
+  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard);
 
   std::atomic<io::Mode> mode{io::Mode::idle};
   auto last_mode{io::Mode::idle};

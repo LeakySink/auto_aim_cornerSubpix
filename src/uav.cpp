@@ -19,7 +19,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 const std::string keys =
@@ -38,8 +37,9 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Camera camera(config_path);
   io::CBoard cboard(config_path);

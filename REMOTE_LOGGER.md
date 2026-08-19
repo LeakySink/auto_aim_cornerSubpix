@@ -15,11 +15,14 @@
 ```cpp
 #include "tools/remote_logger.hpp"
 
-tools::RemoteLogger::Config cfg;
-cfg.remote_host = "192.168.1.100";  // 远程主机 IP
-cfg.sender_name  = "my_robot";      // 发送方名称（空=自动）
-cfg.heartbeat_interval_ms = 500;           // 心跳间隔，0=关闭
+// 从 yaml 的 remote_logger 段读取配置（推荐）
+tools::RemoteLogger::instance().init(config_path);
 
+// 或手动构造 Config（测试程序）
+tools::RemoteLogger::Config cfg;
+cfg.remote_host = "192.168.1.100";
+cfg.sender_name  = "my_robot";
+cfg.heartbeat_interval_ms = 500;
 tools::RemoteLogger::instance().init(cfg);
 
 // 发送数据（库自动处理注册/重试）
@@ -33,26 +36,45 @@ tools::RemoteLogger::instance().shutdown();  // 自动注销
 
 ## 配置项
 
+从 yaml 的 `remote_logger` 段读取，缺键则退出：
+
+```yaml
+remote_logger:
+  remote_host: "127.0.0.1"
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500   # 0=关闭
+  sender_name: "sentry"
+  register_retry_ms: 3000
+```
+
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `remote_host` | "127.0.0.1" | 远程主机 IP |
-| `remote_port` | 9871 | 数据端口（注册后被 host 分配覆盖） |
-| `control_port` | 15000 | 控制端口 |
-| `register_retry_ms` | 3000 | 注册失败重试间隔 |
-| `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`） |
-| `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
-| `log_dir` | "./logs" | 本地日志目录 |
-| `img_width` | 640 | 图像压缩宽度 |
-| `img_quality` | 50 | JPEG 质量 |
+| `control_port` | 15000 | 控制端口（必须，用于注册） |
 | `enable_remote` | true | 启用 UDP 发送 |
 | `enable_local` | true | 启用本地日志 |
+| `log_dir` | "./logs" | 本地日志目录 |
+| `var_buffer_size` | 1024 | 变量缓冲条数 |
+| `img_buffer_size` | 10 | 图像缓冲帧数 |
+| `img_width` | 640 | 图像压缩宽度 |
+| `img_quality` | 50 | JPEG 质量 |
+| `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
+| `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`） |
+| `register_retry_ms` | 3000 | 注册失败重试间隔 |
 
 ## 注册协议
 
-设置 `control_port > 0` 后，库自动在 worker 线程中执行注册：
+远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
 
 ```
-Sender ──{"type":"register","name":"my_robot"}──→ Control (upd_port)
+Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port
 Sender ←──{"type":"register_ack","status":"ok","port":15001}── Control
 Sender ──数据──→ port 15001
 ```

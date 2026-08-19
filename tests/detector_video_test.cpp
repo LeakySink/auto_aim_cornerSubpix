@@ -7,7 +7,7 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/plotter.hpp"
+#include "tools/remote_logger.hpp"
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明 }"
@@ -32,7 +32,7 @@ int main(int argc, char * argv[])
   auto use_tradition = cli.get<bool>("tradition");
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
 
   cv::VideoCapture video(video_path);
 
@@ -67,7 +67,7 @@ int main(int argc, char * argv[])
       data["armor_2_pixel_y"] = armor.points[2].y;
       data["armor_3_pixel_x"] = armor.points[3].x;
       data["armor_3_pixel_y"] = armor.points[3].y;
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
     }
 
     auto key = cv::waitKey(33);

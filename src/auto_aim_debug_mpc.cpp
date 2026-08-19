@@ -16,7 +16,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 using namespace std::chrono_literals;
@@ -28,7 +27,6 @@ const std::string keys =
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  tools::Plotter plotter;
 
   cv::CommandLineParser cli(argc, argv, keys);
   auto config_path = cli.get<std::string>(0);
@@ -36,6 +34,8 @@ int main(int argc, char * argv[])
     cli.printMessage();
     return 0;
   }
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
@@ -108,7 +108,6 @@ int main(int argc, char * argv[])
         data["measure_yaw"] = armor.yaw_raw;
       }
       tools::RemoteLogger::instance().plot(data);
-      plotter.plot(data);
 
       std::this_thread::sleep_for(10ms);
     }
@@ -158,6 +157,7 @@ int main(int argc, char * argv[])
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
   gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+  tools::RemoteLogger::instance().shutdown();
 
   return 0;
 }

@@ -6,9 +6,12 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+
+#include "tools/yaml.hpp"
 
 namespace tools
 {
@@ -36,6 +39,15 @@ void RemoteLogger::init(const Config & cfg)
   }
 
   sender_name_ = resolve_sender();
+  registered_ = false;
+  last_register_ts_ = {};
+  last_hb_ = {};
+  session_file_.clear();
+
+  if (cfg_.enable_remote && cfg_.control_port == 0) {
+    cfg_.enable_remote = false;
+    std::fprintf(stderr, "[RemoteLogger] control_port required, remote disabled\n");
+  }
 
   if (cfg_.enable_remote) {
     sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
@@ -44,7 +56,7 @@ void RemoteLogger::init(const Config & cfg)
       std::fprintf(stderr, "[RemoteLogger] socket() failed\n");
     } else {
       addr_.sin_family = AF_INET;
-      addr_.sin_port = ::htons(cfg_.remote_port);
+      addr_.sin_port = 0;
       addr_.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
     }
   }
@@ -53,11 +65,37 @@ void RemoteLogger::init(const Config & cfg)
   worker_ = std::thread(&RemoteLogger::worker, this);
 }
 
+void RemoteLogger::init(const std::string & config_path)
+{
+  auto yaml = tools::load(config_path);
+  auto node = yaml["remote_logger"];
+  if (!node) {
+    log("ERROR", "[YAML] remote_logger not found!");
+    exit(1);
+  }
+
+  Config cfg;
+  cfg.remote_host = tools::read<std::string>(node, "remote_host");
+  cfg.control_port = tools::read<uint16_t>(node, "control_port");
+  cfg.enable_remote = tools::read<bool>(node, "enable_remote");
+  cfg.enable_local = tools::read<bool>(node, "enable_local");
+  cfg.log_dir = tools::read<std::string>(node, "log_dir");
+  cfg.var_buffer_size = tools::read<size_t>(node, "var_buffer_size");
+  cfg.img_buffer_size = tools::read<size_t>(node, "img_buffer_size");
+  cfg.img_width = tools::read<int>(node, "img_width");
+  cfg.img_quality = tools::read<int>(node, "img_quality");
+  cfg.heartbeat_interval_ms = tools::read<uint32_t>(node, "heartbeat_interval_ms");
+  cfg.sender_name = tools::read<std::string>(node, "sender_name");
+  cfg.register_retry_ms = tools::read<uint32_t>(node, "register_retry_ms");
+
+  init(cfg);
+}
+
 void RemoteLogger::shutdown()
 {
   if (!running_) return;
 
-  if (cfg_.control_port > 0 && registered_) {
+  if (registered_) {
     int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (reg_sock >= 0) {
       sockaddr_in ctrl_addr{};
@@ -82,6 +120,7 @@ void RemoteLogger::shutdown()
       ::close(reg_sock);
     }
   }
+  registered_ = false;
 
   running_ = false;
   cv_.notify_all();
@@ -112,8 +151,6 @@ void RemoteLogger::plot(const nlohmann::json & data)
 
 void RemoteLogger::log(const std::string & level, const std::string & msg)
 {
-  if (!running_) return;
-
   auto ts = now_ns();
   auto t = static_cast<time_t>(ts / 1000000000ULL);
   auto ms = (ts / 1000000ULL) % 1000;
@@ -122,6 +159,7 @@ void RemoteLogger::log(const std::string & level, const std::string & msg)
   std::fprintf(stderr, "%s.%03lu [%s] %s\n", tbuf,
                static_cast<unsigned long>(ms), level.c_str(), msg.c_str());
 
+  if (!running_) return;
   nlohmann::json entry = {{"level", level}, {"msg", msg}};
   plot(entry);
 }
@@ -157,7 +195,7 @@ void RemoteLogger::worker()
   std::vector<VarEntry> var_pending;
   std::vector<ImgEntry> img_pending;
 
-  if (cfg_.control_port > 0 && !registered_) try_register();
+  if (cfg_.enable_remote && !registered_) try_register();
 
   while (running_) {
     {
@@ -174,7 +212,7 @@ void RemoteLogger::worker()
 
     if (!var_pending.empty()) {
       if (cfg_.enable_local) flush_var_local(var_pending);
-      if (cfg_.enable_remote) {
+      if (cfg_.enable_remote && registered_) {
         for (const auto & e : var_pending) try_send_var(e);
       }
       var_pending.clear();
@@ -196,14 +234,14 @@ void RemoteLogger::worker()
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.img_quality};
         cv::imencode(".jpg", resized, jpeg, params);
 
-        if (cfg_.enable_remote) try_send_img(jpeg, e.ts, e.meta);
+        if (cfg_.enable_remote && registered_) try_send_img(jpeg, e.ts, e.meta);
       }
       img_pending.clear();
     }
 
-    if (cfg_.heartbeat_interval_ms > 0) send_heartbeat();
+    if (cfg_.heartbeat_interval_ms > 0 && registered_) send_heartbeat();
 
-    if (cfg_.control_port > 0 && !registered_) try_register();
+    if (cfg_.enable_remote && !registered_) try_register();
   }
 
   {
@@ -252,7 +290,6 @@ bool RemoteLogger::try_register()
       if (resp.value("status", "") == "ok" && resp.contains("port")) {
         uint16_t assigned = resp["port"].get<uint16_t>();
         addr_.sin_port = ::htons(assigned);
-        cfg_.remote_port = assigned;
         registered_ = true;
         std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
                      sender_name_.c_str(), assigned);
@@ -358,7 +395,7 @@ void RemoteLogger::try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
 
 void RemoteLogger::send_udp(const void * data, size_t len)
 {
-  if (sock_ < 0) return;
+  if (sock_ < 0 || !registered_) return;
   ::sendto(sock_, data, len, 0, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
 }
 

@@ -24,7 +24,9 @@ public:
   struct Config
   {
     std::string remote_host = "127.0.0.1";
-    uint16_t remote_port = 9871;
+    uint16_t control_port = 15000;
+    bool enable_remote = true;
+    bool enable_local = true;
     std::string log_dir = "./logs";
     size_t var_buffer_size = 1024;
     size_t img_buffer_size = 10;
@@ -32,15 +34,13 @@ public:
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
     std::string sender_name;
-    uint16_t control_port = 15000;
     uint32_t register_retry_ms = 3000;
-    bool enable_remote = true;
-    bool enable_local = true;
   };
 
   static RemoteLogger & instance();
 
   void init(const Config & cfg);
+  void init(const std::string & config_path);
   void plot(const nlohmann::json & data);
   void log(const std::string & level, const std::string & msg);
 

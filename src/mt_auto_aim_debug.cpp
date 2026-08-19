@@ -17,7 +17,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 const std::string keys =
@@ -36,8 +35,9 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder(100);  //根据实际帧率调整
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
@@ -47,7 +47,7 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard, plotter, true);
+  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard, true);
 
   auto detect_thread = std::thread([&]() {
     cv::Mat img;
@@ -159,7 +159,7 @@ int main(int argc, char * argv[])
     data["gimbal_pitch"] = ypr[1] * 57.3;
     data["bullet_speed"] = cboard.bullet_speed;
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);

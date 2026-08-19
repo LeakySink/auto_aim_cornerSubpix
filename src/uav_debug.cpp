@@ -14,7 +14,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 const std::string keys =
@@ -33,8 +32,9 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Camera camera(config_path);
   io::CBoard cboard(config_path);
@@ -161,7 +161,7 @@ int main(int argc, char * argv[])
       data["cmd_pitch"] = command.pitch * 57.3;
       data["cmd_shoot"] = command.shoot;
     }
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);

@@ -145,3 +145,18 @@ detect:
 aim_time: 0.200 # s
 wait_time: 0.050 # s
 predict_time: 0.300 # s
+
+#####-----remote_logger-----#####
+remote_logger:
+  remote_host: "127.0.0.1"
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500
+  sender_name: "mvs"
+  register_retry_ms: 3000

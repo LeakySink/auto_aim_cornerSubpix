@@ -13,7 +13,6 @@
 int main(int argc, char * argv[])
 {
   std::string host = "127.0.0.1";
-  uint16_t port = 9871;
   uint16_t ctrl_port = 15000;
   std::string name;
   uint32_t hb = 0;
@@ -25,7 +24,6 @@ int main(int argc, char * argv[])
     if (arg == "--help" || arg == "-h") {
       std::printf("Usage: %s [options]\n", argv[0]);
       std::printf("  --host=IP       Remote host IP (default: 127.0.0.1)\n");
-      std::printf("  --port=PORT     Data port      (default: 9871)\n");
       std::printf("  --ctrl-port=P   Control port   (default: 15000)\n");
       std::printf("  --name=NAME     Sender name    (default: auto)\n");
       std::printf("  --hb=MS         Heartbeat ms   (default: 0=off)\n");
@@ -37,7 +35,6 @@ int main(int argc, char * argv[])
     std::string k = (eq != std::string::npos) ? arg.substr(0, eq) : arg;
     std::string v = (eq != std::string::npos) ? arg.substr(eq + 1) : (i + 1 < argc ? argv[++i] : "");
     if (k == "--host") host = v;
-    else if (k == "--port") port = static_cast<uint16_t>(std::stoi(v));
     else if (k == "--ctrl-port") ctrl_port = static_cast<uint16_t>(std::stoi(v));
     else if (k == "--name") name = v;
     else if (k == "--hb") hb = static_cast<uint32_t>(std::stoul(v));
@@ -58,7 +55,6 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::RemoteLogger::Config cfg;
   cfg.remote_host = host;
-  cfg.remote_port = port;
   cfg.control_port = ctrl_port;
   cfg.sender_name = name;
   cfg.heartbeat_interval_ms = hb;
@@ -68,7 +64,7 @@ int main(int argc, char * argv[])
 
   tools::RemoteLogger::instance().init(cfg);
   tools::RemoteLogger::instance().log("INFO", "test started, host=" + host +
-                                             " port=" + std::to_string(port));
+                                             " ctrl_port=" + std::to_string(ctrl_port));
 
   auto interval = std::chrono::microseconds(1000000 / rate);
   auto t0 = std::chrono::steady_clock::now();

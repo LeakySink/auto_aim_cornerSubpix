@@ -1,6 +1,7 @@
 #include "commandgener.hpp"
 
 #include "tools/math_tools.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace auto_aim
 {
@@ -8,9 +9,8 @@ namespace multithread
 {
 
 CommandGener::CommandGener(
-  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::CBoard & cboard,
-  tools::Plotter & plotter, bool debug)
-: shooter_(shooter), aimer_(aimer), cboard_(cboard), plotter_(plotter), stop_(false), debug_(debug)
+  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::CBoard & cboard, bool debug)
+: shooter_(shooter), aimer_(aimer), cboard_(cboard), stop_(false), debug_(debug)
 {
   thread_ = std::thread(&CommandGener::generate_command, this);
 }
@@ -62,7 +62,7 @@ void CommandGener::generate_command()
         data["cmd_pitch"] = command.pitch * 57.3;
         data["shoot"] = command.shoot;
         data["horizon_distance"] = command.horizon_distance;
-        plotter_.plot(data);
+        tools::RemoteLogger::instance().plot(data);
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));  //approximately 500Hz

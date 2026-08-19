@@ -19,7 +19,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
 const std::string keys =
@@ -38,8 +37,9 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
   tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
@@ -85,7 +85,7 @@ int main(int argc, char * argv[])
         gimbal.send(
           plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);
-        plotter.plot(data);
+        tools::RemoteLogger::instance().plot(data);
         std::this_thread::sleep_for(10ms);
       } else
         std::this_thread::sleep_for(200ms);

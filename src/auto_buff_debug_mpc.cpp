@@ -13,7 +13,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 #include "tools/trajectory.hpp"
 
@@ -32,10 +31,11 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  // 初始化绘图器、录制器、退出器
-  tools::Plotter plotter;
+  // 初始化录制器、退出器
   tools::Recorder recorder;
   tools::Exiter exiter;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   // 初始化云台、相机
   io::Gimbal gimbal(config_path);
@@ -152,7 +152,7 @@ int main(int argc, char * argv[])
       data["shoot"] = plan.fire ? 1 : 0;
     }
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);
     cv::imshow("result", img);

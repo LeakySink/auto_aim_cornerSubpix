@@ -7,7 +7,6 @@
 #include "tools/exiter.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 using namespace std::chrono_literals;
 
@@ -29,7 +28,7 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
 
   auto_aim::Planner planner(config_path);
   auto_aim::Target target(d, w, 0.2, 0.1);
@@ -55,7 +54,7 @@ int main(int argc, char * argv[])
     data["plan_pitch_vel"] = plan.pitch_vel;
     data["plan_pitch_acc"] = plan.pitch_acc;
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     std::this_thread::sleep_for(10ms);
   }
