@@ -1,4 +1,4 @@
-"""In-process UDP data backend — stdlib only, replaces C++ udp_backend."""
+"""In-process UDP data backend — stdlib only."""
 
 import base64
 import json
@@ -17,8 +17,8 @@ class UdpBackend:
 
     def __init__(self, timeout_ms=3000):
         self.timeout_ms = timeout_ms
-        self.on_output = None  # callback(line: str)
-        self.on_state = None   # callback()
+        self.on_output = None
+        self.on_state = None
         self._lock = threading.Lock()
         self._sock = None
         self._thread = None

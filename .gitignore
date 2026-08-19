@@ -16,3 +16,5 @@ records_25/
 docs/
 .idea/
 CLAUDE.md
+__pycache__/
+*.py[cod]

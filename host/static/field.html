@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Field Control</title>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/hammer.min.js"></script>
+<script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
+
+<link rel="stylesheet" href="/static/css/field.css">
+</head>
+<body>
+<div id="sidebar">
+  <h3>显示模式</h3>
+  <label><input type="radio" name="fmode" value="slide" checked onchange="onModeChange()"> 滑动</label>
+  <label><input type="radio" name="fmode" value="pause" onchange="onModeChange()"> 暂停</label>
+  <h3>窗口 (秒)</h3>
+  <input type="number" id="fwin" value="30" min="5" max="120" onchange="onModeChange()" style="width:100%;background:#1a1a26;color:#c8c8d0;border:1px solid #303040;border-radius:3px;padding:2px 6px;font:inherit">
+  <button onclick="resetActiveView()" style="margin-top:4px;width:100%;background:#1e1e2a;color:#c8c8d0;border:1px solid #333;border-radius:3px;padding:2px;font:inherit;cursor:pointer">重置视角</button>
+  <h3>数据字段</h3>
+  <div id="field-list"><span style="color:#505060;font-size:12px">等待数据…</span></div>
+</div>
+<div id="tiles"></div>
+
+<script src="/static/js/field.js"></script>
+</body>
+</html>
