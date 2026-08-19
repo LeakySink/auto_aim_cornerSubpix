@@ -27,7 +27,7 @@ def _open_window(url):
 
 def main():
     p = argparse.ArgumentParser(description="Standalone .rlog player (local GUI)")
-    p.add_argument("rlog", help="path to .rlog")
+    p.add_argument("rlog", type=Path, help="path to .rlog")
     p.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
     p.add_argument("--port", type=int, default=8765, help="HTTP port")
     p.add_argument("--max-mb", type=int, default=1024,
@@ -36,7 +36,13 @@ def main():
     args = p.parse_args()
 
     max_bytes = max(64, args.max_mb) << 20
-    session = load_session_or_exit(args.rlog, max_bytes=max_bytes)
+    rlog = args.rlog.expanduser()
+    if not rlog.is_file():
+        rlog = (ROOT / rlog).resolve()
+    if not rlog.is_file():
+        print(f"[replayer] file not found: {args.rlog}", file=sys.stderr)
+        return 1
+    session = load_session_or_exit(str(rlog), max_bytes=max_bytes)
 
     httpd, port = run_server(session, host=args.host, port=args.port)
     if httpd is None:

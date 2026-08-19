@@ -85,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404)
             return
 
-        if path == "/api/meta":
+        if path in ("/api/meta", "/api/session"):
             if self.session is None:
                 self.send_error(503, "session not loaded")
                 return
@@ -123,7 +123,8 @@ class Handler(BaseHTTPRequestHandler):
             fp = _safe(STATIC, rel)
             if fp:
                 ctype = mimetypes.guess_type(str(fp))[0] or "application/octet-stream"
-                self._send(200, fp.read_bytes(), ctype, cache="public, max-age=3600")
+                cache = "no-cache" if fp.suffix.lower() == ".js" else "public, max-age=3600"
+                self._send(200, fp.read_bytes(), ctype, cache=cache)
                 return
 
         if path.startswith("/vendor/"):
