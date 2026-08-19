@@ -23,7 +23,7 @@ namespace tools
 /// RemoteLogger — 主线程只入队，worker 分工：
 ///
 ///   plot / log  ──→ var_buf_    ──→ var_worker_  ──→ .rlog (json) + UDP
-///   plot_image  ──→ 按 name 相位锁 30fps ──→ 每路 mailbox(1) ──→ img_worker_
+///   plot_image  ──→ 按 name 相位锁 30fps ──→ clone ──→ 每路 mailbox(1) ──→ img_worker_
 ///                   未入选帧直接 return              resize 后放全分辨率
 ///                                                   JPEG + .rlog + UDP
 ///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试

@@ -127,7 +127,7 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张）。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时只覆盖该路等待槽。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时只覆盖该路等待槽。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 
@@ -158,7 +158,7 @@ type 0x01 image:
 ──────                         ───────────           ───────────      ─────────────
 plot_image
   按 name 未到 30Hz → return
-  入选 → 该路 mailbox(1) ──► resize 放全分辨率
+  入选 → clone → 该路 mailbox(1) ──► resize 放全分辨率
                                JPEG + .rlog + UDP
 plot/log → var_buf_  ──────────────────────────────► .rlog + UDP
 shutdown → join img+var+ctrl                         JSON             register/hb
@@ -170,4 +170,4 @@ shutdown → join img+var+ctrl                         JSON             register
 | `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP | 入选帧 publish；空闲 poll 50ms |
 | `ctrl_worker_` | 注册、刷新、心跳、host 掉线重连 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-150fps+ 热路径：未入选帧无锁队列、无拷贝。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。
+150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。

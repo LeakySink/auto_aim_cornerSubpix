@@ -325,12 +325,15 @@ void RemoteLogger::ImgMailbox::publish(uint64_t ts, nlohmann::json meta,
                                        const cv::Mat & img)
 {
   const auto name = img_stream_name(meta);
+  // 必须深拷贝：Mat 赋值只拷 header。worker 异步 JPEG 时，调用方会改同一块
+  // 像素（下一帧 camera.read、同帧多路 overlay、resize 显示），多路就会编成同一张图。
+  cv::Mat owned = img.clone();
   {
     std::lock_guard<std::mutex> lock(mtx_);
     auto & slot = slots_[name];
     slot.entry.ts = ts;
     slot.entry.meta = std::move(meta);
-    slot.entry.img = img;
+    slot.entry.img = std::move(owned);
     slot.has = true;
   }
   cv_.notify_one();
