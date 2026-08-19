@@ -3,6 +3,7 @@
 import base64
 import json
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -120,14 +121,27 @@ def run(rlog, host="127.0.0.1", port=8765, max_mb=1024, no_browser=False):
 
     url = f"http://{host}:{bound}/"
     print(f"[replay] {url}", file=sys.stderr)
+    if bound != port:
+        print(
+            f"[replay] 请打开上面的地址（不要用已占用的 :{port} 旧窗口）",
+            file=sys.stderr,
+        )
+
+    def _serve():
+        httpd.serve_forever()
+
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
     if not no_browser:
-        time.sleep(0.15)
+        time.sleep(0.05)
         open_browser(url)
 
     try:
-        httpd.serve_forever()
+        while t.is_alive():
+            t.join(timeout=0.5)
     except KeyboardInterrupt:
         print("\n[replay] shutting down...", file=sys.stderr)
     finally:
+        httpd.shutdown()
         httpd.server_close()
     return 0

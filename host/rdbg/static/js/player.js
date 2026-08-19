@@ -78,33 +78,82 @@ function showFrameAt(t) {
 
   const idx = findFrameIndex(t);
   const fr = session.frames[idx];
-  const url = frameUrls[fr.i];
+  const gen = ++frameGen;
 
-  if (url) {
+  const meta = fr.meta || {};
+  const parts = [];
+  if (meta.cam) parts.push('cam=' + meta.cam);
+  if (meta.name) parts.push(meta.name);
+  parts.push('t=' + fmtTime(fr.t) + 's');
+  parts.push('# frame ' + (idx + 1) + '/' + session.frames.length);
+  metaEl.textContent = parts.join(' · ');
+
+  function apply(url) {
+    if (gen !== frameGen) return;
+    if (!url) {
+      wrap.classList.add('empty');
+      ph.textContent = '图像加载失败';
+      return;
+    }
     wrap.classList.remove('empty');
     if (img.src !== url) img.src = url;
-    const meta = fr.meta || {};
-    const parts = [];
-    if (meta.cam) parts.push('cam=' + meta.cam);
-    if (meta.name) parts.push(meta.name);
-    parts.push('t=' + fmtTime(fr.t) + 's');
-    parts.push('# frame ' + (idx + 1) + '/' + session.frames.length);
-    metaEl.textContent = parts.join(' · ');
-  } else {
+  }
+
+  if (frameUrls[fr.i]) apply(frameUrls[fr.i]);
+  else {
     wrap.classList.add('empty');
-    ph.textContent = '图像加载失败';
-    metaEl.textContent = '';
+    ph.textContent = '加载图像…';
+    loadFrame(fr.i).then(apply);
+  }
+  prefetchAround(idx);
+}
+
+const FRAME_CONC = 4;
+let frameGen = 0;
+const frameInflight = {};
+
+function loadFrame(i) {
+  if (frameUrls[i]) return Promise.resolve(frameUrls[i]);
+  if (frameInflight[i]) return frameInflight[i];
+  frameInflight[i] = fetch('/api/frame/' + i)
+    .then(function(r) {
+      if (!r.ok) throw new Error('frame ' + i);
+      return r.blob();
+    })
+    .then(function(blob) {
+      const url = URL.createObjectURL(blob);
+      frameUrls[i] = url;
+      return url;
+    })
+    .catch(function(err) {
+      console.warn(err);
+      return null;
+    })
+    .finally(function() {
+      delete frameInflight[i];
+    });
+  return frameInflight[i];
+}
+
+function prefetchAround(idx) {
+  const frames = session.frames;
+  for (var d = 1; d <= 3; d++) {
+    if (idx + d < frames.length) loadFrame(frames[idx + d].i);
+    if (idx - d >= 0) loadFrame(frames[idx - d].i);
   }
 }
 
-async function preloadFrames() {
-  frameUrls = new Array(session.frames.length);
-  await Promise.all(session.frames.map(async function(fr) {
-    const r = await fetch('/api/frame/' + fr.i);
-    if (!r.ok) throw new Error('frame ' + fr.i);
-    const blob = await r.blob();
-    frameUrls[fr.i] = URL.createObjectURL(blob);
-  }));
+async function warmupFrames() {
+  if (!session.frames.length) return;
+  var i = 0;
+  async function worker() {
+    while (i < session.frames.length) {
+      var idx = i++;
+      await loadFrame(session.frames[idx].i);
+    }
+  }
+  var n = Math.min(FRAME_CONC, session.frames.length);
+  await Promise.all(Array.from({ length: n }, worker));
 }
 
 function windowSec() {
@@ -311,11 +360,7 @@ async function init() {
       hiddenFields[name] = true;
     });
 
-    if (session.frames.length) {
-      status.textContent = (session.file || 'Replayer') + ' · 加载图像…';
-      await preloadFrames();
-    }
-
+    frameUrls = new Array(session.frames.length);
     showFrameAt(0);
     updateTimeLabel();
 
@@ -329,6 +374,7 @@ async function init() {
 
     bindControls();
     seekTo(0, false);
+    warmupFrames().catch(function(e) { console.warn('warmup', e); });
   } catch (e) {
     console.error(e);
     var msg = (e && e.message) ? String(e.message) : String(e);

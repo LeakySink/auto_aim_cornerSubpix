@@ -125,7 +125,7 @@ def open_browser(url):
         exe = shutil.which(browser)
         if exe:
             subprocess.Popen(
-                [exe, f"--app={url}"],
+                [exe, "--new-window", f"--app={url}"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
