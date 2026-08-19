@@ -1,6 +1,7 @@
 #include "remote_logger.hpp"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -55,6 +56,7 @@ void RemoteLogger::init(const Config & cfg)
   sender_name_ = resolve_sender();
   registered_ = false;
   last_register_ts_ = {};
+  last_ack_ts_ = {};
   last_hb_ = {};
   img_due_ns_.store(0, std::memory_order_relaxed);
   img_mbox_.reset();
@@ -75,9 +77,20 @@ void RemoteLogger::init(const Config & cfg)
       cfg_.enable_remote = false;
       std::fprintf(stderr, "[RemoteLogger] socket() failed\n");
     } else {
-      addr_.sin_family = AF_INET;
-      addr_.sin_port = 0;
-      addr_.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+      sockaddr_in local{};
+      local.sin_family = AF_INET;
+      local.sin_addr.s_addr = htonl(INADDR_ANY);
+      local.sin_port = 0;
+      if (::bind(sock_, reinterpret_cast<sockaddr *>(&local), sizeof(local)) < 0) {
+        ::close(sock_);
+        sock_ = -1;
+        cfg_.enable_remote = false;
+        std::fprintf(stderr, "[RemoteLogger] bind() failed\n");
+      } else {
+        addr_.sin_family = AF_INET;
+        addr_.sin_port = 0;
+        addr_.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+      }
     }
   }
 
@@ -119,37 +132,26 @@ void RemoteLogger::shutdown()
 {
   if (!running_) return;
 
-  if (registered_) {
-    int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (reg_sock >= 0) {
-      sockaddr_in ctrl_addr{};
-      ctrl_addr.sin_family = AF_INET;
-      ctrl_addr.sin_port = ::htons(cfg_.control_port);
-      ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
-
-      nlohmann::json dreg;
-      dreg["type"] = "deregister";
-      dreg["name"] = sender_name_;
-      std::string payload = dreg.dump();
-      ::sendto(reg_sock, payload.data(), payload.size(), 0,
-               reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
-
-      timeval tv{};
-      tv.tv_sec = 1;
-      tv.tv_usec = 0;
-      ::setsockopt(reg_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-      char buf[512];
-      ::recvfrom(reg_sock, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
-      ::close(reg_sock);
-    }
-  }
-  registered_ = false;
-
   running_ = false;
   var_cv_.notify_all();
   img_mbox_.wake();
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
+
+  if (sock_ >= 0 && registered_) {
+    sockaddr_in ctrl_addr{};
+    ctrl_addr.sin_family = AF_INET;
+    ctrl_addr.sin_port = ::htons(cfg_.control_port);
+    ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+
+    nlohmann::json dreg;
+    dreg["type"] = "deregister";
+    dreg["name"] = sender_name_;
+    std::string payload = dreg.dump();
+    ::sendto(sock_, payload.data(), payload.size(), 0,
+             reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
+  }
+  registered_ = false;
+
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
 
@@ -278,17 +280,31 @@ void RemoteLogger::var_worker_loop()
 
 void RemoteLogger::ctrl_worker_loop()
 {
-  try_register();
+  send_register();
 
   while (running_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(kCtrlWorkerPollMs));
-    if (!running_) break;
+    poll_ctrl();
 
-    if (!registered_) {
-      try_register();
-    } else if (cfg_.heartbeat_interval_ms > 0) {
-      send_heartbeat();
+    if (registered_) {
+      auto now = std::chrono::steady_clock::now();
+      std::chrono::steady_clock::time_point ack_ts;
+      {
+        std::lock_guard<std::mutex> lock(remote_mtx_);
+        ack_ts = last_ack_ts_;
+      }
+      auto silent = std::chrono::duration_cast<std::chrono::milliseconds>(now - ack_ts);
+      auto limit = static_cast<int64_t>(cfg_.register_retry_ms) * 2;
+      if (limit < 1000) limit = 1000;
+      if (ack_ts.time_since_epoch().count() > 0 && silent.count() > limit) {
+        registered_ = false;
+        std::fprintf(stderr, "[RemoteLogger] host lost, will re-register\n");
+      }
     }
+
+    send_register();
+    if (registered_ && cfg_.heartbeat_interval_ms > 0) send_heartbeat();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(kCtrlWorkerPollMs));
   }
 }
 
@@ -381,23 +397,23 @@ bool RemoteLogger::encode_and_dispatch_image(ImgEntry & entry)
   return true;
 }
 
-bool RemoteLogger::try_register()
+void RemoteLogger::send_register()
 {
-  if (sock_ < 0) return false;
+  if (sock_ < 0) return;
 
   auto now = std::chrono::steady_clock::now();
   {
     std::lock_guard<std::mutex> lock(remote_mtx_);
+    uint32_t interval =
+      registered_ ? cfg_.register_retry_ms : static_cast<uint32_t>(kCtrlWorkerPollMs);
+    if (interval < 1) interval = 1;
     if (last_register_ts_.time_since_epoch().count() > 0) {
       auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_register_ts_);
-      if (elapsed.count() < static_cast<int64_t>(cfg_.register_retry_ms)) return false;
+      if (elapsed.count() < static_cast<int64_t>(interval)) return;
     }
     last_register_ts_ = now;
   }
-
-  int reg_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
-  if (reg_sock < 0) return false;
 
   sockaddr_in ctrl_addr{};
   ctrl_addr.sin_family = AF_INET;
@@ -408,37 +424,61 @@ bool RemoteLogger::try_register()
   reg["type"] = "register";
   reg["name"] = sender_name_;
   std::string payload = reg.dump();
-  ::sendto(reg_sock, payload.data(), payload.size(), 0,
-           reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
 
-  timeval tv{};
-  tv.tv_sec = 3;
-  tv.tv_usec = 0;
-  ::setsockopt(reg_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  std::lock_guard<std::mutex> lock(remote_mtx_);
+  if (sock_ < 0) return;
+  ::sendto(sock_, payload.data(), payload.size(), 0,
+           reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
+}
+
+void RemoteLogger::poll_ctrl()
+{
+  if (sock_ < 0) return;
 
   char buf[2048];
-  ssize_t n = ::recvfrom(reg_sock, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
-  ::close(reg_sock);
+  int icmp_n = 0;
+  for (;;) {
+    ssize_t n = ::recvfrom(sock_, buf, sizeof(buf) - 1, MSG_DONTWAIT, nullptr, nullptr);
+    if (n > 0) {
+      buf[n] = '\0';
+      handle_ctrl_payload(buf, static_cast<size_t>(n));
+      icmp_n = 0;
+      continue;
+    }
+    if (errno == EINTR) continue;
+    if (errno == ECONNREFUSED || errno == ECONNRESET) {
+      if (++icmp_n > 64) break;
+      continue;
+    }
+    break;
+  }
+}
 
-  if (n <= 0) return false;
-
-  buf[n] = '\0';
+void RemoteLogger::handle_ctrl_payload(const char * buf, size_t n)
+{
   try {
-    auto resp = nlohmann::json::parse(buf);
+    auto resp = nlohmann::json::parse(buf, buf + n);
+    const auto type = resp.value("type", "");
+    if (type == "host_shutdown") {
+      registered_ = false;
+      std::fprintf(stderr, "[RemoteLogger] host shutdown, will re-register\n");
+      return;
+    }
     if (resp.value("status", "") == "ok" && resp.contains("port")) {
       uint16_t assigned = resp["port"].get<uint16_t>();
       {
         std::lock_guard<std::mutex> lock(remote_mtx_);
         addr_.sin_port = ::htons(assigned);
+        last_ack_ts_ = std::chrono::steady_clock::now();
       }
-      registered_ = true;
-      std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
-                   sender_name_.c_str(), assigned);
-      return true;
+      const bool was = registered_.exchange(true);
+      if (!was) {
+        std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
+                     sender_name_.c_str(), assigned);
+      }
     }
   } catch (...) {
   }
-  return false;
 }
 
 void RemoteLogger::send_heartbeat()

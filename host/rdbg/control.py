@@ -109,20 +109,24 @@ class ControlServer:
             name = msg.get("name", "").strip()
 
             if t == "register" and name:
+                refreshed = False
                 with self._lock:
-                    if name in self.senders:
-                        port = 0
+                    existing = self.senders.get(name)
+                    if existing is not None:
+                        existing["addr"] = addr
+                        port = existing["data_port"]
+                        refreshed = True
+                        ack = {"type": "register_ack", "status": "ok", "port": port}
                     else:
                         port = self._next_port()
-                    if port == 0:
-                        err = (f"name '{name}' already registered" if name in self.senders
-                               else "no available data port")
-                        ack = {"type": "register_ack", "status": "error", "message": err}
-                    else:
-                        self.senders[name] = {"addr": addr, "data_port": port}
-                        self._version += 1
-                        ack = {"type": "register_ack", "status": "ok", "port": port}
-                if ack.get("status") == "ok":
+                        if port == 0:
+                            ack = {"type": "register_ack", "status": "error",
+                                   "message": "no available data port"}
+                        else:
+                            self.senders[name] = {"addr": addr, "data_port": port}
+                            self._version += 1
+                            ack = {"type": "register_ack", "status": "ok", "port": port}
+                if ack.get("status") == "ok" and not refreshed:
                     print(f"[control] registered '{name}' -> {addr[0]}:{addr[1]}, data port {ack['port']}")
                 self._send(addr, ack)
 

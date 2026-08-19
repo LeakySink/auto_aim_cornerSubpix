@@ -62,6 +62,8 @@ UDP 端口 15000，JSON 协议。
 
 **注册：** `{"type":"register","name":"robot_alpha"}` → `{"type":"register_ack","status":"ok","port":15001}`
 
+同一 `name` 重复注册是幂等的：返回已分配的数据口并更新来源地址（车上会周期性刷新，因此可先开程序再开 watch）。
+
 **注销：** `{"type":"deregister","name":"robot_alpha"}` → `{"type":"deregister_ack","status":"ok"}`
 
 **Host 关闭：** `{"type":"host_shutdown"}`
@@ -84,7 +86,8 @@ rx.stop()
 
 ```
 poller:
-  发件方变化 → udp.switch(first_sender, port) → SSE state
+  发件方变化 → SSE state
+  有 sender 时确保 UDP 在听（bind 失败会每 0.5s 重试）
 
 GET /                debugger.html
 GET /events          SSE

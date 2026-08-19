@@ -85,7 +85,9 @@ private:
   void ctrl_worker_loop();
 
   bool try_select_img(uint64_t ts);
-  bool try_register();
+  void send_register();
+  void poll_ctrl();
+  void handle_ctrl_payload(const char * buf, size_t n);
   void send_heartbeat();
   std::string resolve_sender() const;
   void inject_sender(nlohmann::json & j) const;
@@ -150,6 +152,7 @@ private:
   std::mutex remote_mtx_;
   std::atomic<bool> registered_{false};
   std::chrono::steady_clock::time_point last_register_ts_{};
+  std::chrono::steady_clock::time_point last_ack_ts_{};
   std::chrono::steady_clock::time_point last_hb_{};
   int sock_{-1};
   sockaddr_in addr_{};

@@ -67,7 +67,7 @@ remote_logger:
 | `img_quality` | 50 | JPEG 质量 |
 | `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
 | `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`） |
-| `register_retry_ms` | 3000 | 注册失败重试间隔 |
+| `register_retry_ms` | 3000 | 已注册时的刷新间隔；未注册时约 200ms 重试。host 超过 2 倍间隔无应答则重注册 |
 
 ## 注册协议
 
@@ -81,7 +81,7 @@ Sender ←──{"type":"register_ack","status":"ok","port":15001}── Control
 Sender ──数据──→ port 15001
 ```
 
-注册失败自动每 `register_retry_ms` 重试，支持 host 后启动。
+注册失败约每 200ms 重试；已连接后每 `register_retry_ms` 向控制口刷新一次。因此可以先开车上程序再开 `./host/watch.sh`，也可以在 watch 重启后自动重连。host 对同一 `name` 的重复注册是幂等的（仍返回原数据口）。
 
 `shutdown()` 时自动发送注销：
 ```
@@ -168,6 +168,6 @@ shutdown → join img+var+ctrl                         JSON             register
 |------|------|------|
 | `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
 | `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP | 入选帧 publish；空闲 poll 50ms |
-| `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
+| `ctrl_worker_` | 注册、刷新、心跳、host 掉线重连 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无锁队列、无拷贝。保存间隔为 `33.3ms ± 一帧相机周期`，与输入帧率是否整除 30 无关。

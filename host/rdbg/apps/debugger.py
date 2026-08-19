@@ -48,13 +48,15 @@ class DebuggerApp:
                 if version != self._last_version or senders != self._last_senders:
                     self._last_version = version
                     self._last_senders = senders
-                    if senders and not self.udp.running:
-                        info = self.control.get_sender_info(senders[0])
-                        if info:
-                            self.udp.switch(senders[0], info["data_port"])
-                    elif not senders and self.udp.running:
-                        self.udp.stop()
                     self.push_state()
+                if senders:
+                    info = self.control.get_sender_info(senders[0])
+                    if info and (not self.udp.running or
+                                 self.udp.active_sender != senders[0] or
+                                 self.udp.active_port != info["data_port"]):
+                        self.udp.switch(senders[0], info["data_port"])
+                elif self.udp.running:
+                    self.udp.stop()
             except Exception:
                 pass
 
