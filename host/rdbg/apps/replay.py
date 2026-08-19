@@ -46,6 +46,8 @@ def _build_events(records):
         msg = to_sse(rec)
         if msg:
             events.append(msg)
+    # File order can interleave img/var with slightly skewed ts; sort for sync.
+    events.sort(key=lambda e: (int(e.get("ts") or 0), 0 if e.get("type") == "image" else 1))
     return events
 
 
