@@ -32,9 +32,7 @@ function initLayout() {
 function relayout() {
   var area = mainArea.getBoundingClientRect();
   var tH = topBar.offsetHeight;
-  var bar = document.getElementById('replay-bar');
-  var bH = (bar && !bar.hidden) ? bar.offsetHeight : 0;
-  var top = tH, availH = area.height - tH - bH, availW = area.width;
+  var top = tH, availH = area.height - tH, availW = area.width;
   // remove old splitters
   mainArea.querySelectorAll('.splitter').forEach(function(el) { el.remove(); });
   // position rows
@@ -325,15 +323,13 @@ function rebuildPanelChart(p) {
     }
     p.chart.data.datasets.push(ds);
   }
-  plotDrawIdx = plotData.length;
   p.chart.update('none');
   renderLegend(p);
   updatePanelView(p);
 }
 
-function pushDataToPanel(p, fromIdx) {
+function pushDataToPanel(p) {
   if (p.type !== 'plot' || !p.chart) return;
-  if (fromIdx == null) fromIdx = Math.max(0, plotData.length - 1);
 
   var existingLabels = {};
   p.chart.data.datasets.forEach(function(ds) { existingLabels[ds.label] = true; });
@@ -342,7 +338,7 @@ function pushDataToPanel(p, fromIdx) {
     if (!p.subscribed[name]) continue;
     if (existingLabels[name]) continue;
     var ds = { label: name, data: [], borderColor: fieldMeta[name].color, borderWidth: 1.8, pointRadius: 0, spanGaps: false, hidden: false };
-    for (var i = 0; i < plotData.length; i++) {
+    for (var i = 0; i < plotData.length - 1; i++) {
       var yv = plotData[i].fields[name];
       ds.data.push({ x: plotData[i].x, y: yv !== undefined ? yv : NaN });
     }
@@ -351,25 +347,17 @@ function pushDataToPanel(p, fromIdx) {
     addedNew = true;
   }
 
-  if (addedNew) {
-    // New series already has full history; still trim below.
-  } else {
-    for (var i = fromIdx; i < plotData.length; i++) {
-      var pt = plotData[i];
-      for (var j = 0; j < p.chart.data.datasets.length; j++) {
-        var ds2 = p.chart.data.datasets[j];
-        var yv2 = pt.fields[ds2.label];
-        ds2.data.push({ x: pt.x, y: yv2 !== undefined ? yv2 : NaN });
-      }
-    }
-  }
+  if (addedNew) p.chart.update('none');
 
+  var last = plotData[plotData.length - 1];
+  if (!last) return;
   var history = parseFloat(document.getElementById('history-sel').value);
-  var cutoff = lastX - history;
-  for (var j = 0; j < p.chart.data.datasets.length; j++) {
-    var dsu = p.chart.data.datasets[j];
-    while (dsu.data.length > 1 && dsu.data[0].x < cutoff) dsu.data.shift();
-    if (dsu.data.length > MAX_PTS) dsu.data.splice(0, dsu.data.length - MAX_PTS);
+  for (var i = 0; i < p.chart.data.datasets.length; i++) {
+    var ds = p.chart.data.datasets[i];
+    var yv = last.fields[ds.label];
+    ds.data.push({ x: last.x, y: yv !== undefined ? yv : NaN });
+    while (ds.data.length > 1 && ds.data[0].x < last.x - history) ds.data.shift();
+    if (ds.data.length > MAX_PTS) ds.data.splice(0, ds.data.length - MAX_PTS);
   }
   renderLegend(p);
   updatePanelView(p);
@@ -414,18 +402,11 @@ function resetAllViews() {
 function showPanelImage(p) {
   if (p.type !== 'image' || !p.imgSel) return;
   var name = p.imgSel.value;
-  if (!name) {
-    var keys = Object.keys(imgSources);
-    if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; }
-  }
+  if (!name) { var keys = Object.keys(imgSources); if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; } }
   var s = imgSources[name];
-  var src = s && (s.src || s.b64);
-  if (src) {
-    p.imgEl.src = src;
-    p.imgEl.style.display = '';
-    p.placeholder.style.display = 'none';
-    p.imgInfo.textContent = (s.kb != null ? s.kb : '?') + ' KB';
-    if (typeof applyImgTransform === 'function') applyImgTransform(p);
+  if (s && s.b64) {
+    p.imgEl.src = s.b64; p.imgEl.style.display = '';
+    p.placeholder.style.display = 'none'; p.imgInfo.textContent = s.kb + ' KB';
   }
 }
 
@@ -571,9 +552,7 @@ function startDrag(splitInfo, e) {
   e.preventDefault();
   var area = mainArea.getBoundingClientRect();
   var tH = topBar.offsetHeight;
-  var bar = document.getElementById('replay-bar');
-  var bH = (bar && !bar.hidden) ? bar.offsetHeight : 0;
-  var availH = area.height - tH - bH, availW = area.width;
+  var availH = area.height - tH, availW = area.width;
   var startX = e.clientX, startY = e.clientY;
 
   function onMove(ev) {
@@ -679,14 +658,10 @@ function rebuildSidebar(p) {
 function ensureField(name) {
   if (fieldMeta[name]) return;
   fieldMeta[name] = { color: getColor() };
-  var autoOn = document.body.classList.contains('replay-mode');
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
       var p = rows[ri].panels[pi];
-      if (p.type === 'plot') {
-        // Replay: auto-enable new series so bulk timeline isn't an empty chart.
-        if (p.subscribed[name] === undefined) p.subscribed[name] = autoOn;
-      }
+      if (p.type === 'plot') p.subscribed[name] = false;
     }
   var ap = activePanelId !== null ? getPanelById(activePanelId) : null;
   if (ap) rebuildSidebar(ap);
@@ -713,37 +688,16 @@ function addPoint(ts, data) {
   }
   plotData.push(pt);
   var history = parseFloat(document.getElementById('history-sel').value);
-  while (plotData.length > 1 && plotData[0].x < lastX - history) {
-    plotData.shift();
-    if (plotDrawIdx > 0) plotDrawIdx--;
-  }
-  if (plotData.length > MAX_PTS) {
-    var drop = plotData.length - MAX_PTS;
-    plotData.splice(0, drop);
-    plotDrawIdx = Math.max(0, plotDrawIdx - drop);
-  }
+  while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
+  if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
 
-  scheduleChartFlush();
-}
-
-var _chartFlushRaf = 0;
-var plotDrawIdx = 0; // next plotData index not yet pushed to chart datasets
-
-function scheduleChartFlush() {
-  if (_chartFlushRaf) return;
-  _chartFlushRaf = requestAnimationFrame(function() {
-    _chartFlushRaf = 0;
-    var from = plotDrawIdx;
-    for (var ri = 0; ri < rows.length; ri++)
-      for (var pi = 0; pi < rows[ri].panels.length; pi++)
-        pushDataToPanel(rows[ri].panels[pi], from);
-    plotDrawIdx = plotData.length;
-  });
+  for (var ri = 0; ri < rows.length; ri++)
+    for (var pi = 0; pi < rows[ri].panels.length; pi++)
+      pushDataToPanel(rows[ri].panels[pi]);
 }
 
 function clearPlots() {
   plotData = []; fieldMeta = {}; firstTs = null; lastX = 0; activePanelId = null;
-  plotDrawIdx = 0;
   colorIdx = 0;
   document.getElementById('field-list').innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
   for (var ri = 0; ri < rows.length; ri++)
@@ -751,7 +705,6 @@ function clearPlots() {
       var p = rows[ri].panels[pi];
       if (p.chart) { p.chart.data.datasets.length = 0; p.chart.update('none'); }
       if (p.legendDiv) p.legendDiv.innerHTML = '';
-      // Keep checkbox preferences across seek/rebuild.
     }
 }
 
@@ -783,15 +736,8 @@ var imgSources = {};
 var imgFpsTracker = {};
 
 function setImage(b64, meta) {
-  if (!b64) return;
-  setImageSrc('data:image/jpeg;base64,' + b64, meta, (b64.length * 0.75 / 1024).toFixed(0));
-}
-
-function setImageSrc(src, meta, kb) {
-  if (!src) return;
   var name = (meta && meta.name) ? meta.name : 'default';
   var now = Date.now();
-  var isNew = !imgSources[name];
 
   if (!imgFpsTracker[name]) imgFpsTracker[name] = [];
   imgFpsTracker[name].push(now);
@@ -802,31 +748,16 @@ function setImageSrc(src, meta, kb) {
     fps = Math.round((imgFpsTracker[name].length - 1) * 1000 / dt);
   }
 
-  // Keep both keys: older cached showPanelImage looked up .b64
-  imgSources[name] = { src: src, b64: src, ts: now, kb: kb != null ? kb : '?' };
+  imgSources[name] = { b64: 'data:image/jpeg;base64,' + b64, ts: now, kb: (b64.length * 0.75 / 1024).toFixed(0) };
 
   for (var ri = 0; ri < rows.length; ri++)
     for (var pi = 0; pi < rows[ri].panels.length; pi++) {
       var p = rows[ri].panels[pi];
       if (p.type !== 'image') continue;
-      if (isNew) refreshImgOptions(p);
+      refreshImgOptions(p);
       if (p.imgFps) p.imgFps.textContent = fps + ' fps';
-      var sel = p.imgSel ? p.imgSel.value : '';
-      if (!sel || sel === name) showPanelImage(p);
+      if (p.imgSel.value === name) showPanelImage(p);
     }
-}
-
-function setImageFromUrl(url, meta) {
-  if (!url) return;
-  // /img/N are unique — keep stable URL so preload / browser cache can hit.
-  setImageSrc(url, meta, '?');
-}
-
-/** Drive chart sliding/centered window to recording time x (seconds since firstTs). */
-function setReplayClockX(x) {
-  if (x == null || !isFinite(x)) return;
-  lastX = x;
-  updateAllCharts();
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────
@@ -854,7 +785,6 @@ function addLog(ts, level, msg) {
 const dot = document.getElementById('dot'), stats = document.getElementById('stats');
 var pktCount = 0, lastPktTime = Date.now(), lastAnyPkt = 0;
 var clientTimeout = 4000;
-var liveEs = null;
 
 function setConnected(c, sender) {
   var st = document.getElementById('status');
@@ -870,48 +800,39 @@ setConnected(false);
 setInterval(function() {
   if (lastAnyPkt && Date.now() - lastAnyPkt > clientTimeout) setConnected(false);
 }, 1000);
-
-function handleDbgMessage(msg) {
-  lastAnyPkt = Date.now();
-  pktCount++;
-  var now = Date.now();
-  if (now - lastPktTime >= 1000) {
-    stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
-    pktCount = 0; lastPktTime = now;
-  }
-  var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
-  if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
-  else if (msg.type === 'image') {
-    if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
-    else if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
-    setConnected(true, snd);
-  }
-  else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
-  else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
-  else if (msg.type === 'state') {
-    var sel = document.getElementById('sender-sel');
-    var cur = sel.value;
-    sel.innerHTML = '';
-    var list = msg.senders || [];
-    for (var i = 0; i < list.length; i++) {
-      var opt = document.createElement('option');
-      opt.value = list[i]; opt.textContent = list[i];
-      sel.appendChild(opt);
+const es = new EventSource('/events');
+es.onmessage = function(e) {
+  try {
+    var msg = JSON.parse(e.data);
+    lastAnyPkt = Date.now();
+    pktCount++;
+    var now = Date.now();
+    if (now - lastPktTime >= 1000) {
+      stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
+      pktCount = 0; lastPktTime = now;
     }
-    if (list.indexOf(cur) >= 0) sel.value = cur;
-    else if (msg.active_sender && list.indexOf(msg.active_sender) >= 0) sel.value = msg.active_sender;
-    else if (list.length > 0) sel.value = list[0];
-  }
-}
-
-function startLiveSSE() {
-  if (liveEs) return;
-  liveEs = new EventSource('/events');
-  liveEs.onmessage = function(e) {
-    try { handleDbgMessage(JSON.parse(e.data)); } catch (err) {}
-  };
-  liveEs.onerror = function() { dot.className = 'dot dead'; };
-}
+    var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
+    if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
+    else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true, snd); }
+    else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
+    else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
+    else if (msg.type === 'state') {
+      var sel = document.getElementById('sender-sel');
+      var cur = sel.value;
+      sel.innerHTML = '';
+      var list = msg.senders || [];
+      for (var i = 0; i < list.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = list[i]; opt.textContent = list[i];
+        sel.appendChild(opt);
+      }
+      if (list.indexOf(cur) >= 0) sel.value = cur;
+      else if (msg.active_sender && list.indexOf(msg.active_sender) >= 0) sel.value = msg.active_sender;
+      else if (list.length > 0) sel.value = list[0];
+    }
+  } catch (err) {}
+};
+es.onerror = function() { dot.className = 'dot dead'; };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', function() { relayout(); });

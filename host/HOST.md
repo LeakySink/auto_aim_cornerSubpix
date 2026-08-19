@@ -10,14 +10,12 @@ Host 端是远程调试系统的接收与可视化端，运行在调试 PC 上�
 host/
   watch.sh                 单车调试入口
   field.sh                 多车场控入口
-  rlog.sh                  本地 .rlog 回放
   HOST.md                  本文件
   FIELD.md                 场控文档
   rdbg/                    Python 包（勿直接当入口）
-    cli.py / control.py / udp.py / sse.py / httputil.py / rlog.py
+    cli.py / control.py / udp.py / sse.py / httputil.py
     apps/debugger.py
     apps/field.py
-    apps/replay.py
     static/                HTML / CSS / JS / vendor
 ```
 
@@ -47,7 +45,6 @@ host/
 ```bash
 ./host/watch.sh          # 单车调试，http://localhost:8080
 ./host/field.sh          # 多车场控，http://localhost:8888
-./host/rlog.sh logs/run_xxx.rlog   # 回放本地日志（含图像），同调试页
 ```
 
 端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`；场控另有 `DATA_PORT`。其余参数原样传给 Python，例如离线下载 JS：
@@ -82,10 +79,6 @@ rx.switch("robot_beta", 15002)
 rx.stop()
 ```
 
-### rlog.py — 本地 .rlog
-
-`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志。`./host/rlog.sh` 回放与直播类似：图像与曲线共用录制时间轴（滑动窗口右边缘=当前时刻）、可拖进度条/倍速/空格暂停；图像预加载并按实际速率播放，落后时丢中间帧防卡顿。
-
 ### apps/debugger.py — 单车编排
 
 ```
@@ -119,8 +112,7 @@ GET /static/...      CSS / JS / vendor
 | field.sh | `HTTP_PORT` | 8888 | HTTP |
 | field.sh | `DATA_PORT` | 20000 | 共享数据端口 |
 | field.sh | `CTRL_PORT` | 15000 | 注册端口 |
-| rlog.sh | `HTTP_PORT` | 8080 | HTTP |
-| watch / field | `--download-assets` | off | 下载离线 JS |
+| 两者 | `--download-assets` | off | 下载离线 JS |
 
 ## 使用示例
 
