@@ -18,5 +18,14 @@ fi
 FILE="$1"
 shift
 
-echo "[replay] http://localhost:$HTTP_PORT  file:$FILE  speed=${SPEED}x"
-exec python3 -m rdbg replay "$FILE" --port "$HTTP_PORT" --speed "$SPEED" "$@"
+ARGS=(--port "$HTTP_PORT")
+has_speed=0
+for a in "$@"; do
+  if [ "$a" = "--speed" ]; then has_speed=1; break; fi
+done
+if [ "$has_speed" = 0 ]; then
+  ARGS+=(--speed "$SPEED")
+fi
+
+echo "[replay] http://localhost:$HTTP_PORT  file:$FILE"
+exec python3 -m rdbg replay "$FILE" "${ARGS[@]}" "$@"
