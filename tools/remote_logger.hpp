@@ -22,7 +22,7 @@ namespace tools
 /// RemoteLogger — 主线程只入队，三个 worker 分工：
 ///
 ///   plot / log  ──→ var_buf_   ──→ var_worker_   ──→ .rlog (json) + UDP
-///   plot_image  ──→ img_buf_   ──→ img_worker_   ──→ .rlog (jpeg) + UDP
+///   plot_image  ──→ img_ring_  ──→ img_worker_   ──→ .rlog (jpeg) + UDP
 ///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试（独立控制线程）
 class RemoteLogger
 {
@@ -95,7 +95,7 @@ private:
   void flush_img_local(uint64_t ts, const nlohmann::json & meta,
                        const std::vector<uint8_t> & jpeg);
 
-  bool encode_and_dispatch_image(ImgEntry & entry);
+  bool encode_and_dispatch_image(const ImgEntry & entry);
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
                     const nlohmann::json & meta);
@@ -113,11 +113,29 @@ private:
   std::mutex var_wake_mtx_;
   std::thread var_worker_;
 
-  // ── 图像队列（主线程写，img_worker 读）────────────────────────────
-  std::vector<ImgEntry> img_buf_;
-  std::mutex img_mtx_;
-  std::condition_variable img_cv_;
-  std::mutex img_wake_mtx_;
+  // ── 图像环形缓冲（主线程 copyTo 写入槽位，img_worker 异步编码）──
+  class ImgRingBuffer
+  {
+  public:
+    void reset(size_t cap);
+    bool push(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
+    ImgEntry * acquire();
+    void release();
+    bool wait_not_empty(int timeout_ms, const std::atomic<bool> & running);
+    void wake();
+    void clear();
+
+  private:
+    std::vector<ImgEntry> slots_;
+    size_t cap_{0};
+    size_t tail_{0};
+    size_t count_{0};
+    bool busy_{false};
+    std::mutex mtx_;
+    std::condition_variable cv_;
+  };
+
+  ImgRingBuffer img_ring_;
   std::thread img_worker_;
   uint64_t last_img_keep_ns_{0};
 

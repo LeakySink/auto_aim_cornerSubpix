@@ -57,6 +57,7 @@ void RemoteLogger::init(const Config & cfg)
   last_register_ts_ = {};
   last_hb_ = {};
   last_img_keep_ns_ = 0;
+  img_ring_.reset(cfg_.img_buffer_size);
   {
     std::lock_guard<std::mutex> lock(session_mtx_);
     close_session_file_unlocked();
@@ -147,7 +148,7 @@ void RemoteLogger::shutdown()
 
   running_ = false;
   var_cv_.notify_all();
-  img_cv_.notify_all();
+  img_ring_.wake();
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
@@ -208,19 +209,12 @@ void RemoteLogger::plot_image(cv::Mat img, const nlohmann::json & meta)
     ts = now_ns();
   }
 
-  {
-    std::lock_guard<std::mutex> lock(img_mtx_);
-    if (last_img_keep_ns_ != 0 && ts >= last_img_keep_ns_ &&
-        ts - last_img_keep_ns_ < kImgMinIntervalNs) {
-      return;
-    }
-    last_img_keep_ns_ = ts;
-    if (img_buf_.size() >= cfg_.img_buffer_size) {
-      img_buf_.erase(img_buf_.begin());
-    }
-    img_buf_.push_back({ts, meta, std::move(img)});
+  if (last_img_keep_ns_ != 0 && ts >= last_img_keep_ns_ &&
+      ts - last_img_keep_ns_ < kImgMinIntervalNs) {
+    return;
   }
-  img_cv_.notify_one();
+  last_img_keep_ns_ = ts;
+  img_ring_.push(ts, meta, img);
 }
 
 uint64_t RemoteLogger::now_ns() const
@@ -287,45 +281,117 @@ void RemoteLogger::ctrl_worker_loop()
   }
 }
 
+// ── img_ring：预分配槽位，主线程 copyTo，worker 异步编码 ──────────────
+
+void RemoteLogger::ImgRingBuffer::reset(size_t cap)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  slots_.clear();
+  cap_ = cap;
+  tail_ = 0;
+  count_ = 0;
+  busy_ = false;
+  if (cap_ > 0) slots_.resize(cap_);
+}
+
+bool RemoteLogger::ImgRingBuffer::push(uint64_t ts, nlohmann::json meta,
+                                       const cv::Mat & img)
+{
+  if (img.empty()) return false;
+
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    if (cap_ == 0) return false;
+
+    if (count_ == cap_) {
+      if (busy_) return false;  // 最旧槽正在编码，丢掉这一帧
+      tail_ = (tail_ + 1) % cap_;
+      --count_;
+    }
+
+    const size_t idx = (tail_ + count_) % cap_;
+    auto & slot = slots_[idx];
+    slot.ts = ts;
+    slot.meta = std::move(meta);
+    img.copyTo(slot.img);
+    ++count_;
+  }
+  cv_.notify_one();
+  return true;
+}
+
+RemoteLogger::ImgEntry * RemoteLogger::ImgRingBuffer::acquire()
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (count_ == 0 || busy_) return nullptr;
+  busy_ = true;
+  return &slots_[tail_];
+}
+
+void RemoteLogger::ImgRingBuffer::release()
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (!busy_ || count_ == 0) {
+    busy_ = false;
+    return;
+  }
+  slots_[tail_].meta = nlohmann::json{};
+  tail_ = (tail_ + 1) % cap_;
+  --count_;
+  busy_ = false;
+}
+
+bool RemoteLogger::ImgRingBuffer::wait_not_empty(int timeout_ms,
+                                                 const std::atomic<bool> & running)
+{
+  std::unique_lock<std::mutex> lock(mtx_);
+  return cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                      [&] { return count_ > 0 || !running.load(); });
+}
+
+void RemoteLogger::ImgRingBuffer::wake() { cv_.notify_all(); }
+
+void RemoteLogger::ImgRingBuffer::clear()
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  for (auto & s : slots_) {
+    s.meta = nlohmann::json{};
+    s.img.release();
+  }
+  tail_ = 0;
+  count_ = 0;
+  busy_ = false;
+}
+
 // ── img_worker：JPEG 编码 → 本地 + UDP（与 var_worker 互不阻塞）────────
 
 void RemoteLogger::img_worker_loop()
 {
   while (running_) {
-    {
-      std::unique_lock<std::mutex> lock(img_wake_mtx_);
-      img_cv_.wait_for(lock, std::chrono::milliseconds(kImgWorkerPollMs));
-    }
+    img_ring_.wait_not_empty(kImgWorkerPollMs, running_);
     if (!running_) break;
 
     const auto budget_end =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(kImgEncodeBudgetMs);
 
     while (running_ && std::chrono::steady_clock::now() < budget_end) {
-      ImgEntry entry;
-      {
-        std::lock_guard<std::mutex> lock(img_mtx_);
-        if (img_buf_.empty()) break;
-        entry = std::move(img_buf_.front());
-        img_buf_.erase(img_buf_.begin());
-      }
-      encode_and_dispatch_image(entry);
+      ImgEntry * entry = img_ring_.acquire();
+      if (!entry) break;
+      encode_and_dispatch_image(*entry);
+      img_ring_.release();
     }
   }
 
   while (true) {
-    ImgEntry entry;
-    {
-      std::lock_guard<std::mutex> lock(img_mtx_);
-      if (img_buf_.empty()) break;
-      entry = std::move(img_buf_.front());
-      img_buf_.erase(img_buf_.begin());
-    }
-    encode_and_dispatch_image(entry);
+    ImgEntry * entry = img_ring_.acquire();
+    if (!entry) break;
+    encode_and_dispatch_image(*entry);
+    img_ring_.release();
   }
+  img_ring_.clear();
 }
 
-bool RemoteLogger::encode_and_dispatch_image(ImgEntry & entry)
+bool RemoteLogger::encode_and_dispatch_image(const ImgEntry & entry)
 {
   if (entry.img.empty() || entry.img.cols <= 0) return false;
 
@@ -345,7 +411,6 @@ bool RemoteLogger::encode_and_dispatch_image(ImgEntry & entry)
     return false;
   }
 
-  entry.img.release();
   resized.release();
 
   if (cfg_.enable_local) flush_img_local(entry.ts, entry.meta, jpeg);

@@ -62,7 +62,7 @@ remote_logger:
 | `enable_local` | true | 启用本地日志 |
 | `log_dir` | "./logs" | 本地日志目录 |
 | `var_buffer_size` | 1024 | 变量缓冲条数 |
-| `img_buffer_size` | 10 | 图像缓冲帧数 |
+| `img_buffer_size` | 10 | 图像环形缓冲槽数（满则覆盖最旧；编码中的槽不覆盖） |
 | `img_width` | 640 | 图像压缩宽度 |
 | `img_quality` | 50 | JPEG 质量 |
 | `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
@@ -125,7 +125,7 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 本地日志 (`.rlog`)
 
-单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **worker** 完成；主线程 `plot_image` 仅入队（间隔小于约 33ms 的帧直接丢弃，约 30fps；缓冲满则丢最旧）。
+单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。JPEG 编码和写盘只在 **img_worker** 完成。主线程 `plot_image` 把像素 `copyTo` 进预分配环形槽后立即返回（间隔小于约 33ms 的帧直接丢弃，约 30fps；环满则覆盖最旧，正在编码的槽不覆盖）。槽内 `cv::Mat` 复用，稳态不再反复分配。
 
 格式 magic `RLG2`：
 
@@ -154,15 +154,15 @@ type 0x01 image:
 ──────              ───────────        ───────────       ─────────────
 plot/log→var_buf_   .rlog(json)+UDP    .rlog(jpeg)+UDP   try_register()
 notify              (仅数据)           (仅图像)          send_heartbeat()
-plot_image→img_buf_
-notify
+plot_image→img_ring_
+(copyTo 槽位)
 shutdown→join×3→deregister
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
 | `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
-| `img_worker_` | JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
+| `img_worker_` | 从环形槽取出 → JPEG 编码 + 写本地 + UDP | `plot_image()` notify；空闲 poll 5ms |
 | `ctrl_worker_` | 注册、心跳、失败重试 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-主线程 `plot_image` 仍限 ~30fps 入队；`img_worker_` 每轮在 time budget 内尽量多编几帧。
+`img_ring_` 为 SPSC 环形缓冲：主线程只写入槽位，`img_worker_` 异步编码。主线程仍限 ~30fps 入队；worker 每轮在 time budget 内尽量多编几帧。
