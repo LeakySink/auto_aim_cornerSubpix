@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from ..httputil import ThreadingHTTPServer, open_browser, serve_page, try_serve_static
 from ..session import load_session_or_exit
+from ..sse import SSEQueue, write_sse
 
 PORT_TRY = 20
 
@@ -24,17 +25,33 @@ def public_meta(session):
         "file": session.get("file", ""),
         "path": session.get("path", ""),
         "sender": session.get("sender", ""),
+        "t0_ns": session.get("t0_ns", 0),
         "duration": session.get("duration", 0),
         "memory_bytes": session.get("memory_bytes", 0),
         "fields": session.get("fields") or [],
         "series": session.get("series") or {},
         "frames": frames,
+        "logs": session.get("logs") or [],
     }
 
 
 class ReplayApp:
     def __init__(self, session):
         self.session = session
+        self.sse = SSEQueue()
+
+    def push_hello(self):
+        name = self.session.get("file") or self.session.get("sender") or "replay"
+        self.sse.put(json.dumps({
+            "type": "state",
+            "active_sender": name,
+            "senders": [name],
+        }))
+        self.sse.put(json.dumps({
+            "type": "status",
+            "connected": True,
+            "sender": name,
+        }))
 
     def handler(self):
         app = self
@@ -57,6 +74,12 @@ class ReplayApp:
                 path = urlparse(self.path).path
                 if path in ("/", "/index.html"):
                     serve_page(self, "replay.html")
+                    return
+                if path == "/events":
+                    write_sse(self, app.sse, on_connect=app.push_hello)
+                    return
+                if path == "/select":
+                    self._send(200, b'{"ok":true}', "application/json")
                     return
                 if path in ("/api/meta", "/api/session"):
                     body = json.dumps(public_meta(app.session), separators=(",", ":"))

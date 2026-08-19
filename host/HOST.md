@@ -109,13 +109,14 @@ GET /static/...      CSS / JS / vendor
 
 ### apps/replay.py — 本地 `.rlog` 回放
 
-与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存（默认上限 1GiB），左图右曲线、底部进度条。
+与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存后，**复用 watch 同一套前端**（`debugger.css` / `debugger.js`）：可拆分面板、切换图像 `name`、筛选日志。底部进度条由 `replay.js` 驱动。
 
 ```
-GET /                replay.html
-GET /api/meta        会话元数据 + 曲线（无 JPEG）
+GET /                replay.html（watch 布局 + 回放条）
+GET /events          SSE 保活（避免 watch 前端断连）
+GET /api/meta        会话元数据 + 曲线 + 日志（无 JPEG）
 GET /api/frame/N     第 N 帧 JPEG
-GET /static/...      CSS / JS / vendor
+GET /static/...      与 watch 相同的 CSS / JS / vendor
 ```
 
 ```bash

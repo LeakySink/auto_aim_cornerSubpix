@@ -20,6 +20,7 @@ def load_session(path, max_bytes=MAX_BYTES):
         raise FileNotFoundError(p)
 
     frames = []
+    logs = []
     series = defaultdict(list)
     t0 = None
     mem = 0
@@ -49,6 +50,12 @@ def load_session(path, max_bytes=MAX_BYTES):
             if "hb" in obj:
                 continue
             if isinstance(obj.get("level"), str) and isinstance(obj.get("msg"), str):
+                logs.append({
+                    "t": t_sec,
+                    "ts": ts,
+                    "level": obj["level"],
+                    "msg": obj["msg"],
+                })
                 continue
             if not sender:
                 frm = obj.get("_from")
@@ -70,10 +77,13 @@ def load_session(path, max_bytes=MAX_BYTES):
         raise ValueError("empty log")
 
     frames.sort(key=lambda f: f["t"])
+    logs.sort(key=lambda e: e["t"])
     duration = frames[-1]["t"] if frames else 0.0
     if series:
         last_t = max(pts[-1][0] for pts in series.values() if pts)
         duration = max(duration, last_t)
+    if logs:
+        duration = max(duration, logs[-1]["t"])
 
     fields = sorted(series.keys())
     return {
@@ -84,6 +94,7 @@ def load_session(path, max_bytes=MAX_BYTES):
         "duration": duration,
         "memory_bytes": mem,
         "frames": frames,
+        "logs": logs,
         "series": {k: series[k] for k in fields},
         "fields": fields,
     }
@@ -101,7 +112,8 @@ def load_session_or_exit(path, max_bytes=MAX_BYTES):
     mb = sess["memory_bytes"] / (1 << 20)
     print(
         f"[replay] loaded {sess['file']}  "
-        f"frames={len(sess['frames'])} fields={len(sess['fields'])}  "
+        f"frames={len(sess['frames'])} logs={len(sess.get('logs') or [])} "
+        f"fields={len(sess['fields'])}  "
         f"duration={sess['duration']:.2f}s  mem≈{mb:.1f}MiB",
         file=sys.stderr,
     )
