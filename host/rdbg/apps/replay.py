@@ -1,6 +1,5 @@
 """Offline .rlog replay — same debugger UI, paced SSE (no UDP)."""
 
-import base64
 import json
 import sys
 import time
@@ -13,18 +12,16 @@ from ..rlog import load, sender_name, to_sse
 
 # Compress idle gaps so long pauses don't feel stuck; still respects --speed.
 _MAX_GAP_S = 0.35
-# Drop intermediate frames only when clearly behind (keep UI responsive).
-_IMG_CATCHUP_S = 0.15
+# When behind, drop dense plot/log samples — never drop images (keep video-like fps).
+_PLOT_CATCHUP_S = 0.02
 
 
 def _record_ts(rec):
-    if rec.get("_rlog") == "img":
-        return int(rec.get("ts") or 0)
     return int(rec.get("ts") or 0)
 
 
 def _prepare(records):
-    """Index images for /img/N; strip jpeg bytes from SSE path."""
+    """Index images for /img/N; strip jpeg bytes from record list."""
     images = []
     out = []
     for rec in records:
@@ -42,18 +39,15 @@ def _prepare(records):
     return out, images
 
 
-def _to_sse(rec, images):
+def _to_sse(rec):
     if rec.get("_rlog") == "img":
-        idx = rec["_img_idx"]
-        jpeg = images[idx] if 0 <= idx < len(images) else b""
         meta = rec.get("meta") or {}
-        # jpg_b64 keeps older/cached debugger.js working; url is optional.
+        # URL only — base64 in SSE cannot sustain ~30fps and turns video into a slideshow.
         return {
             "type": "image",
             "ts": rec.get("ts", 0),
             "meta": meta,
-            "url": f"/img/{idx}",
-            "jpg_b64": base64.b64encode(jpeg).decode("ascii"),
+            "url": f"/img/{rec['_img_idx']}",
         }
     return to_sse(rec)
 
@@ -88,7 +82,6 @@ def _write_replay_sse(handler, records, images, sender, speed):
         t0_rec = None
         t0_wall = time.monotonic()
         prev_ts = None
-        n = len(records)
 
         for i, rec in enumerate(records):
             ts = _record_ts(rec)
@@ -97,34 +90,30 @@ def _write_replay_sse(handler, records, images, sender, speed):
                 prev_ts = ts
 
             target = (ts - t0_rec) / 1e9 / speed
-            # Cap large idle gaps relative to previous sample.
             if prev_ts is not None and ts >= prev_ts:
                 gap = (ts - prev_ts) / 1e9 / speed
                 if gap > _MAX_GAP_S:
-                    # Shift timeline so we don't wait forever on idle.
                     t0_wall -= (gap - _MAX_GAP_S)
 
             now = time.monotonic()
             delay = target - (now - t0_wall)
             is_img = rec.get("_rlog") == "img"
 
-            # Behind schedule: skip intermediate images (keep last before a plot/log).
-            if is_img and delay < -_IMG_CATCHUP_S:
-                # Peek: if next is also image soon, drop this one.
-                if i + 1 < n and records[i + 1].get("_rlog") == "img":
-                    prev_ts = ts
-                    continue
-                # Last image before non-img (or EOF): still send, but don't wait.
-                delay = 0
+            # Stay on the image timeline: drop plot/log when late; always emit images.
+            if (not is_img) and delay < -_PLOT_CATCHUP_S:
+                prev_ts = ts
+                continue
 
             if delay > 0.001:
                 time.sleep(delay)
+            elif is_img and delay < -0.05:
+                # Slightly late on a frame: send immediately, do not skip.
+                pass
 
-            msg = _to_sse(rec, images)
+            msg = _to_sse(rec)
             if msg:
                 emit(msg)
-                # Flush images immediately so the browser can paint without delay.
-                if is_img or i % 16 == 0:
+                if is_img or i % 8 == 0:
                     handler.wfile.flush()
 
             prev_ts = ts
@@ -181,7 +170,7 @@ def run(rlog_path, http_port, speed=1.0):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
             elif try_serve_static(self, self.path):

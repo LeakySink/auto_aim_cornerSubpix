@@ -787,19 +787,9 @@ function setImageSrc(src, meta, kb) {
 
 function setImageFromUrl(url, meta) {
   if (!url) return;
-  // Prefer URL directly (same-origin /img/N); also works if fetch is blocked.
-  setImageSrc(url, meta, '?');
-  fetch(url).then(function(r) {
-    if (!r.ok) throw new Error('img ' + r.status);
-    return r.blob();
-  }).then(function(blob) {
-    var obj = URL.createObjectURL(blob);
-    var prev = imgSources[(meta && meta.name) ? meta.name : 'default'];
-    if (prev && prev.src && prev.src.indexOf('blob:') === 0) {
-      try { URL.revokeObjectURL(prev.src); } catch (e) {}
-    }
-    setImageSrc(obj, meta, (blob.size / 1024).toFixed(0));
-  }).catch(function() { /* keep url src */ });
+  // Bust cache so rapid /img/0,/img/1,... always refresh the <img>.
+  var src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+  setImageSrc(src, meta, '?');
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────
@@ -856,9 +846,8 @@ es.onmessage = function(e) {
     var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
     if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
     else if (msg.type === 'image') {
-      // Prefer embedded jpeg (works with older cached JS); url is optional.
-      if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
-      else if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
+      if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
+      else if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
       setConnected(true, snd);
     }
     else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
