@@ -336,7 +336,7 @@ async function init() {
       '<div style="padding:24px;color:#e57373;line-height:1.6">' +
       '<div style="font-size:16px;margin-bottom:8px">加载失败</div>' +
       '<div style="color:#9090a0;font-size:13px">' + msg + '</div>' +
-      '<div style="color:#606070;font-size:12px;margin-top:12px">请确认终端里 replayer 已启动，并使用最新 logs 下的 .rlog 文件；Ctrl+Shift+R 硬刷新。</div>' +
+      '<div style="color:#606070;font-size:12px;margin-top:12px">请用 ./host/replay.sh &lt;file.rlog&gt; 启动，并 Ctrl+Shift+R 硬刷新。</div>' +
       '</div>';
   }
 }

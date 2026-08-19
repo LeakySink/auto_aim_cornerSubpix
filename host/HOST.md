@@ -10,12 +10,15 @@ Host 端是远程调试系统的接收与可视化端，运行在调试 PC 上�
 host/
   watch.sh                 单车调试入口
   field.sh                 多车场控入口
+  replay.sh                本地 .rlog 回放入口
   HOST.md                  本文件
   FIELD.md                 场控文档
   rdbg/                    Python 包（勿直接当入口）
     cli.py / control.py / udp.py / sse.py / httputil.py
+    rlog.py / session.py   .rlog 解析与预加载
     apps/debugger.py
     apps/field.py
+    apps/replay.py
     static/                HTML / CSS / JS / vendor
 ```
 
@@ -45,6 +48,7 @@ host/
 ```bash
 ./host/watch.sh          # 单车调试，http://localhost:8080
 ./host/field.sh          # 多车场控，http://localhost:8888
+./host/replay.sh logs/run_xxx.rlog   # 本地回放，默认 http://127.0.0.1:8765
 ```
 
 端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`；场控另有 `DATA_PORT`。其余参数原样传给 Python，例如离线下载 JS：
@@ -103,6 +107,24 @@ GET /static/...      CSS / JS / vendor
 | `log` | 日志 |
 | `status` | `{connected, sender}` |
 
+### apps/replay.py — 本地 `.rlog` 回放
+
+与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存（默认上限 1GiB），左图右曲线、底部进度条。
+
+```
+GET /                replay.html
+GET /api/meta        会话元数据 + 曲线（无 JPEG）
+GET /api/frame/N     第 N 帧 JPEG
+GET /static/...      CSS / JS / vendor
+```
+
+```bash
+./host/replay.sh logs/run_xxx.rlog
+./host/replay.sh logs/run_xxx.rlog --port 8766 --no-browser
+```
+
+快捷键：空格播放/暂停，← / → 步进 0.05s。
+
 ## 参数
 
 | 脚本 | 环境变量 | 默认 | 说明 |
@@ -112,7 +134,10 @@ GET /static/...      CSS / JS / vendor
 | field.sh | `HTTP_PORT` | 8888 | HTTP |
 | field.sh | `DATA_PORT` | 20000 | 共享数据端口 |
 | field.sh | `CTRL_PORT` | 15000 | 注册端口 |
-| 两者 | `--download-assets` | off | 下载离线 JS |
+| replay.sh | `--port` | 8765 | HTTP（占用则自动 +1） |
+| replay.sh | `--host` | 127.0.0.1 | HTTP 绑定 |
+| replay.sh | `--max-mb` | 1024 | 预加载内存上限 |
+| 前两者 | `--download-assets` | off | 下载离线 JS |
 
 ## 使用示例
 
@@ -121,4 +146,6 @@ GET /static/...      CSS / JS / vendor
 
 ./build/remote_logger_test --host=127.0.0.1 --ctrl-port=15000 --name=mybot
 ./build/multi_sender_test --ctrl-port=15000
+
+./host/replay.sh logs/run_xxx.rlog
 ```

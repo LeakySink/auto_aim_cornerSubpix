@@ -129,6 +129,8 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 `plot_image` 用采集时间戳对齐到 30Hz 网格（`due += n/30s`），未入选的帧只做一次 atomic 比较后返回，不入队、不加 Mat 引用、不 notify。入选帧把 Mat 头放进深度 1 邮箱（在飞编码 1 张 + 等待最新 1 张）。`img_worker` resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时覆盖等待槽，端到端延时保持在约一帧编码时间。
 
+回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
+
 格式 magic `RLG2`：
 
 ```

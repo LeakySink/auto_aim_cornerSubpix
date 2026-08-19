@@ -4,7 +4,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from rlog import iter_records
+from .rlog import iter_records
 
 MAX_BYTES = 1 << 30  # 1 GiB
 SKIP_KEYS = frozenset({"_from", "ts", "hb"})
@@ -93,14 +93,14 @@ def load_session_or_exit(path, max_bytes=MAX_BYTES):
     try:
         sess = load_session(path, max_bytes=max_bytes)
     except MemoryError as e:
-        print(f"[replayer] {e}", file=sys.stderr)
+        print(f"[replay] {e}", file=sys.stderr)
         raise SystemExit(2) from e
     except (FileNotFoundError, ValueError) as e:
-        print(f"[replayer] {e}", file=sys.stderr)
+        print(f"[replay] {e}", file=sys.stderr)
         raise SystemExit(1) from e
     mb = sess["memory_bytes"] / (1 << 20)
     print(
-        f"[replayer] loaded {sess['file']}  "
+        f"[replay] loaded {sess['file']}  "
         f"frames={len(sess['frames'])} fields={len(sess['fields'])}  "
         f"duration={sess['duration']:.2f}s  mem≈{mb:.1f}MiB",
         file=sys.stderr,
