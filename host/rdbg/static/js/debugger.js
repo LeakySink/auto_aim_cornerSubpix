@@ -791,9 +791,15 @@ function setImageSrc(src, meta, kb) {
 
 function setImageFromUrl(url, meta) {
   if (!url) return;
-  // Bust cache so rapid /img/0,/img/1,... always refresh the <img>.
-  var src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
-  setImageSrc(src, meta, '?');
+  // /img/N are unique — keep stable URL so preload / browser cache can hit.
+  setImageSrc(url, meta, '?');
+}
+
+/** Drive chart sliding/centered window to recording time x (seconds since firstTs). */
+function setReplayClockX(x) {
+  if (x == null || !isFinite(x)) return;
+  lastX = x;
+  updateAllCharts();
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────

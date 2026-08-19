@@ -84,7 +84,7 @@ rx.stop()
 
 ### rlog.py — 本地 .rlog
 
-`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志：旧 magic `RLOG`（仅 JSON）与新 magic `RLG2`（JSON + JPEG）均可。`./host/rlog.sh` 打开回放页：底部进度条可拖拽定位、播放/暂停（空格）、倍速；图像走 `/img/N`。初始倍速可用 `SPEED=2` / `--speed 2`。
+`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志。`./host/rlog.sh` 回放与直播类似：图像与曲线共用录制时间戳（居中滑动窗口）、可拖进度条/倍速/空格暂停；图像预加载并按实际速率播放，落后时丢中间帧防卡顿。
 
 ### apps/debugger.py — 单车编排
 

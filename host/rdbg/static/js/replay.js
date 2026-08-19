@@ -1,12 +1,13 @@
-/** Client-side .rlog player: seek / play-pause / speed. Requires debugger.js.
- *  Playhead follows recording timestamps so image and plots stay in sync.
+/** Client-side .rlog player — live-like sync: charts + images on one clock.
+ *  - Playhead = recording time (actual rate)
+ *  - Sliding/centered window follows playhead (near image ts)
+ *  - Prefetch + decode cache for smooth video
  */
 
 (function() {
-  // Max idle gap (s) between consecutive events on the playhead.
-  // Dense plot/image steps keep real Δt; only long silent jumps are compressed.
-  var GAP_CAP = 0.35;
+  var PREFETCH = 30;
   var rp = null;
+  var imgCache = {}; // idx -> HTMLImageElement
 
   function $(id) { return document.getElementById(id); }
 
@@ -22,20 +23,12 @@
     return s.toFixed(2) + 's';
   }
 
-  /** Advance playhead by each event's real Δt (capped), so plot/image share one clock. */
-  function buildPlayTimes(events, cap) {
-    var t = 0;
-    var lastTs = null;
+  /** Real-time playhead: seconds since first event (same axis as chart x). */
+  function buildPlayTimes(events, t0) {
     var times = new Array(events.length);
     for (var i = 0; i < events.length; i++) {
-      var ts = events[i].ts || 0;
-      if (lastTs != null) {
-        var raw = (ts - lastTs) / 1e9;
-        if (raw < 0) raw = 0;
-        t += Math.min(raw, cap);
-      }
-      times[i] = t;
-      lastTs = ts;
+      times[i] = ((events[i].ts || 0) - t0) / 1e9;
+      if (times[i] < 0) times[i] = 0;
     }
     return times;
   }
@@ -52,12 +45,57 @@
       }
   }
 
-  function applyEvent(e) {
-    if (!e) return;
+  function clearImgCache() {
+    imgCache = {};
+  }
+
+  function prefetchFrom(imgIdx) {
+    if (imgIdx == null || imgIdx < 0) return;
+    var maxIdx = rp.nImg - 1;
+    for (var k = 0; k <= PREFETCH; k++) {
+      var id = imgIdx + k;
+      if (id > maxIdx) break;
+      if (imgCache[id]) continue;
+      var im = new Image();
+      im.decoding = 'async';
+      imgCache[id] = im;
+      im.src = '/img/' + id;
+    }
+  }
+
+  function showImage(e) {
+    if (!e || e.type !== 'image') return;
+    var id = e.idx;
+    prefetchFrom(id);
+    var im = imgCache[id];
+    var meta = e.meta || {};
+
+    function paint(src) {
+      setImageSrc(src, meta, '?');
+    }
+
+    if (im && im.complete && im.naturalWidth > 0) {
+      paint(im.src);
+      return;
+    }
+    if (im) {
+      // Keep previous frame until decode finishes — avoids flicker/stutter.
+      var done = false;
+      im.onload = function() {
+        if (done) return;
+        done = true;
+        if (rp && rp.lastImgIdx === id) paint(im.src);
+      };
+      // If already broken, fall through
+      if (im.complete && im.naturalWidth === 0) paint('/img/' + id);
+      return;
+    }
+    paint('/img/' + id);
+  }
+
+  function applyPlotOrLog(e) {
     if (e.type === 'plot') addPoint(e.ts, e.data || {});
-    else if (e.type === 'image') setImageFromUrl('/img/' + e.idx, e.meta || {});
     else if (e.type === 'log') addLog(e.ts, e.level, e.msg);
-    if (e.ts != null) rp.recTs = e.ts;
   }
 
   function lastImageBefore(idx) {
@@ -65,19 +103,6 @@
       if (rp.events[i].type === 'image') return rp.events[i];
     }
     return null;
-  }
-
-  /** Recording time (s since first event) for a playhead position. */
-  function recTimeAtPlay(playT) {
-    if (!rp || !rp.events.length) return 0;
-    var lo = 0, hi = rp.events.length;
-    while (lo < hi) {
-      var mid = (lo + hi) >> 1;
-      if (rp.playT[mid] <= playT) lo = mid + 1;
-      else hi = mid;
-    }
-    var i = Math.max(0, lo - 1);
-    return ((rp.events[i].ts || 0) - rp.t0) / 1e9;
   }
 
   function updateChrome(playT) {
@@ -89,10 +114,7 @@
       if (el && dur > 0) el.value = String(Math.round(t / dur * 1000));
     }
     var label = $('rp-time');
-    if (label) {
-      label.textContent = fmtTime(t) + ' / ' + fmtTime(dur) +
-        '  ·  t=' + fmtRec(recTimeAtPlay(t));
-    }
+    if (label) label.textContent = fmtTime(t) + ' / ' + fmtTime(dur) + '  ·  t=' + fmtRec(t);
     var btn = $('rp-play');
     if (btn) btn.textContent = rp.playing ? '\u23F8' : '\u25B6';
   }
@@ -104,27 +126,53 @@
     return rp.playAnchor + (now - rp.wallAnchor) * rp.speed;
   }
 
+  /** Keep chart window glued to playhead (same second axis as image ts). */
+  function syncChartWindow(playT) {
+    firstTs = rp.t0;
+    if (typeof setReplayClockX === 'function') setReplayClockX(playT);
+    else if (typeof setReplayViewX === 'function') setReplayViewX(playT);
+    else {
+      lastX = playT;
+      updateAllCharts();
+    }
+  }
+
   function tick() {
     if (!rp || !rp.playing) return;
     var target = currentPlayTime();
     if (target >= rp.duration && rp.idx >= rp.events.length) {
       rp.playing = false;
       rp.playAnchor = rp.duration;
+      syncChartWindow(rp.duration);
       updateChrome(rp.duration);
       return;
     }
-    // Apply events in ts order up to playhead — image and plots share the same clock.
+
+    // Advance events up to playhead. If several images are due, keep only the
+    // latest (drop late frames) so decode cost cannot stall the clock.
+    var pendingImg = null;
     while (rp.idx < rp.events.length && rp.playT[rp.idx] <= target) {
-      applyEvent(rp.events[rp.idx]);
-      rp.idx++;
+      var e = rp.events[rp.idx++];
+      if (e.type === 'image') {
+        pendingImg = e;
+      } else {
+        applyPlotOrLog(e);
+      }
     }
-    if (rp.idx >= rp.events.length) {
+    if (pendingImg) {
+      rp.lastImgIdx = pendingImg.idx;
+      showImage(pendingImg);
+    }
+
+    syncChartWindow(Math.min(target, rp.duration));
+    updateChrome(target);
+
+    if (rp.idx >= rp.events.length && target >= rp.duration) {
       rp.playing = false;
       rp.playAnchor = rp.duration;
       updateChrome(rp.duration);
       return;
     }
-    updateChrome(target);
     rp.raf = requestAnimationFrame(tick);
   }
 
@@ -136,6 +184,8 @@
     }
     rp.playing = true;
     rp.wallAnchor = performance.now() / 1000;
+    var img = lastImageBefore(rp.idx);
+    if (img) prefetchFrom(img.idx);
     updateChrome(rp.playAnchor);
     cancelAnimationFrame(rp.raf);
     rp.raf = requestAnimationFrame(tick);
@@ -148,6 +198,7 @@
       rp.playing = false;
     }
     cancelAnimationFrame(rp.raf);
+    syncChartWindow(rp.playAnchor);
     updateChrome(rp.playAnchor);
   }
 
@@ -168,17 +219,23 @@
     if (opts.rebuild !== false) {
       clearPlots();
       clearLogs();
-      firstTs = null;
-      rp.recTs = null;
+      clearImgCache();
+      firstTs = rp.t0;
+      lastX = 0;
+      rp.lastImgIdx = null;
       var i = 0;
-      // Apply every event up to playhead so chart ts matches last image ts.
+      var lastImg = null;
       while (i < rp.events.length && rp.playT[i] < t) {
-        applyEvent(rp.events[i]);
+        var e = rp.events[i];
+        if (e.type === 'image') lastImg = e;
+        else applyPlotOrLog(e);
         i++;
       }
       rp.idx = i;
-      var img = lastImageBefore(i);
-      if (img) applyEvent(img);
+      if (lastImg) {
+        rp.lastImgIdx = lastImg.idx;
+        showImage(lastImg);
+      }
     } else {
       var lo = 0, hi = rp.events.length;
       while (lo < hi) {
@@ -186,13 +243,17 @@
         if (rp.playT[mid] < t) lo = mid + 1;
         else hi = mid;
       }
-      var img2 = lastImageBefore(lo);
-      if (img2) applyEvent(img2);
       rp.idx = lo;
+      var img2 = lastImageBefore(lo);
+      if (img2) {
+        rp.lastImgIdx = img2.idx;
+        showImage(img2);
+      }
     }
 
     rp.playAnchor = t;
     rp.wallAnchor = performance.now() / 1000;
+    syncChartWindow(t);
     updateChrome(t);
     if (opts.autoplay || (wasPlaying && opts.resume !== false && opts.rebuild !== false)) {
       play();
@@ -205,6 +266,13 @@
     bar.hidden = false;
     document.body.classList.add('replay-mode');
     if (typeof relayout === 'function') relayout();
+
+    // Live-like window: sliding with "now" at the right edge (= image/playhead).
+    var slide = document.querySelector('input[name="mode"][value="sliding"]');
+    if (slide) {
+      slide.checked = true;
+      if (typeof onSettingsChange === 'function') onSettingsChange();
+    }
 
     $('rp-play').onclick = togglePlay;
     $('rp-speed').onchange = function() {
@@ -243,14 +311,14 @@
   }
 
   function startReplay(data) {
-    GAP_CAP = (data.img_cap != null) ? data.img_cap : GAP_CAP;
     var q = new URLSearchParams(location.search);
     var speed = parseFloat(q.get('speed') || data.speed || 1) || 1;
-
     var events = data.events || [];
+    var t0 = events.length ? (events[0].ts || 0) : 0;
+
     rp = {
       events: events,
-      playT: [],
+      playT: buildPlayTimes(events, t0),
       duration: 0,
       idx: 0,
       playing: false,
@@ -259,20 +327,26 @@
       wallAnchor: 0,
       dragging: false,
       raf: 0,
-      t0: events.length ? (events[0].ts || 0) : 0,
-      recTs: null,
+      t0: t0,
+      nImg: data.n_img || 0,
+      lastImgIdx: null,
     };
-    rp.playT = buildPlayTimes(rp.events, GAP_CAP);
     rp.duration = rp.playT.length ? rp.playT[rp.playT.length - 1] : 0;
+    // Count max image idx if needed
+    if (!rp.nImg) {
+      for (var i = 0; i < events.length; i++) {
+        if (events[i].type === 'image' && events[i].idx != null)
+          rp.nImg = Math.max(rp.nImg, events[i].idx + 1);
+      }
+    }
+
+    firstTs = t0;
 
     var sel = $('rp-speed');
     if (sel) {
       var opts = ['0.25', '0.5', '1', '1.5', '2', '4'];
       var want = String(speed);
-      if (opts.indexOf(want) < 0) {
-        want = '1';
-        rp.speed = 1;
-      }
+      if (opts.indexOf(want) < 0) { want = '1'; rp.speed = 1; }
       sel.value = want;
     }
 
@@ -288,6 +362,11 @@
     var st = $('status');
     if (st) st.textContent = '回放 \u2192 ' + (data.file || data.sender || 'rlog');
     clientTimeout = 1e12;
+
+    // Prefetch opening frames
+    for (var j = 0; j < events.length; j++) {
+      if (events[j].type === 'image') { prefetchFrom(events[j].idx); break; }
+    }
 
     bindControls();
     updateChrome(0);
