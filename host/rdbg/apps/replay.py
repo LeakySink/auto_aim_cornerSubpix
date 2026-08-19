@@ -9,9 +9,8 @@ from urllib.parse import urlparse
 from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
 from ..rlog import load, sender_name, to_sse
 
-# Max gap (s) between consecutive timeline events on the playhead.
-# Small plot/image Δt kept as-is so image and charts share recording time.
-IMG_FRAME_CAP_S = 0.35
+# Playhead uses raw recording timestamps on the client (actual rate).
+IMG_FRAME_CAP_S = 0.0
 
 
 def _prepare(records):
