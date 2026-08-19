@@ -29,7 +29,7 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 #replay-bar #rp-play{width:36px;height:28px;background:#1e1e2a;color:#e0e0e8;border:1px solid #333;border-radius:4px;cursor:pointer;font-size:14px;line-height:1}
 #replay-bar #rp-play:hover{background:#2a2a3a}
 #replay-bar #rp-seek{flex:1;accent-color:#4fc3f7;height:4px;cursor:pointer}
-#replay-bar #rp-time{color:#808090;min-width:88px;font-variant-numeric:tabular-nums;flex-shrink:0}
+#replay-bar #rp-time{color:#808090;min-width:140px;font-variant-numeric:tabular-nums;flex-shrink:0;white-space:nowrap}
 #replay-bar .rp-speed-wrap{color:#808090;display:flex;align-items:center;gap:6px;flex-shrink:0}
 #replay-bar #rp-speed{background:#1a1a26;color:#c8c8d0;border:1px solid #303040;border-radius:3px;padding:3px 6px;font:inherit;font-size:13px}
 

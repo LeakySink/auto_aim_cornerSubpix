@@ -1,7 +1,11 @@
-/** Client-side .rlog player: seek / play-pause / speed. Requires debugger.js. */
+/** Client-side .rlog player: seek / play-pause / speed. Requires debugger.js.
+ *  Playhead follows recording timestamps so image and plots stay in sync.
+ */
 
 (function() {
-  var IMG_CAP = 1 / 25;
+  // Max idle gap (s) between consecutive events on the playhead.
+  // Dense plot/image steps keep real Δt; only long silent jumps are compressed.
+  var GAP_CAP = 0.35;
   var rp = null;
 
   function $(id) { return document.getElementById(id); }
@@ -13,21 +17,25 @@
     return m + ':' + (sec < 10 ? '0' : '') + sec;
   }
 
+  function fmtRec(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    return s.toFixed(2) + 's';
+  }
+
+  /** Advance playhead by each event's real Δt (capped), so plot/image share one clock. */
   function buildPlayTimes(events, cap) {
     var t = 0;
-    var lastImgTs = null;
+    var lastTs = null;
     var times = new Array(events.length);
     for (var i = 0; i < events.length; i++) {
-      var e = events[i];
-      if (e.type === 'image') {
-        if (lastImgTs != null) {
-          var raw = (e.ts - lastImgTs) / 1e9;
-          if (raw < 0) raw = 0;
-          t += Math.min(raw, cap);
-        }
-        lastImgTs = e.ts;
+      var ts = events[i].ts || 0;
+      if (lastTs != null) {
+        var raw = (ts - lastTs) / 1e9;
+        if (raw < 0) raw = 0;
+        t += Math.min(raw, cap);
       }
       times[i] = t;
+      lastTs = ts;
     }
     return times;
   }
@@ -49,6 +57,7 @@
     if (e.type === 'plot') addPoint(e.ts, e.data || {});
     else if (e.type === 'image') setImageFromUrl('/img/' + e.idx, e.meta || {});
     else if (e.type === 'log') addLog(e.ts, e.level, e.msg);
+    if (e.ts != null) rp.recTs = e.ts;
   }
 
   function lastImageBefore(idx) {
@@ -56,6 +65,19 @@
       if (rp.events[i].type === 'image') return rp.events[i];
     }
     return null;
+  }
+
+  /** Recording time (s since first event) for a playhead position. */
+  function recTimeAtPlay(playT) {
+    if (!rp || !rp.events.length) return 0;
+    var lo = 0, hi = rp.events.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (rp.playT[mid] <= playT) lo = mid + 1;
+      else hi = mid;
+    }
+    var i = Math.max(0, lo - 1);
+    return ((rp.events[i].ts || 0) - rp.t0) / 1e9;
   }
 
   function updateChrome(playT) {
@@ -67,7 +89,10 @@
       if (el && dur > 0) el.value = String(Math.round(t / dur * 1000));
     }
     var label = $('rp-time');
-    if (label) label.textContent = fmtTime(t) + ' / ' + fmtTime(dur);
+    if (label) {
+      label.textContent = fmtTime(t) + ' / ' + fmtTime(dur) +
+        '  ·  t=' + fmtRec(recTimeAtPlay(t));
+    }
     var btn = $('rp-play');
     if (btn) btn.textContent = rp.playing ? '\u23F8' : '\u25B6';
   }
@@ -88,6 +113,7 @@
       updateChrome(rp.duration);
       return;
     }
+    // Apply events in ts order up to playhead — image and plots share the same clock.
     while (rp.idx < rp.events.length && rp.playT[rp.idx] <= target) {
       applyEvent(rp.events[rp.idx]);
       rp.idx++;
@@ -143,19 +169,17 @@
       clearPlots();
       clearLogs();
       firstTs = null;
+      rp.recTs = null;
       var i = 0;
-      var stride = opts.fast ? 4 : 1;
+      // Apply every event up to playhead so chart ts matches last image ts.
       while (i < rp.events.length && rp.playT[i] < t) {
-        var e = rp.events[i];
-        if (e.type === 'image' || e.type === 'log') applyEvent(e);
-        else if (e.type === 'plot' && (stride === 1 || i % stride === 0)) applyEvent(e);
+        applyEvent(rp.events[i]);
         i++;
       }
       rp.idx = i;
       var img = lastImageBefore(i);
       if (img) applyEvent(img);
     } else {
-      // preview: only swap image
       var lo = 0, hi = rp.events.length;
       while (lo < hi) {
         var mid = (lo + hi) >> 1;
@@ -204,7 +228,7 @@
       if (!rp || !rp.dragging) return;
       rp.dragging = false;
       var t = (parseInt(seek.value, 10) / 1000) * rp.duration;
-      seekTo(t, { rebuild: true, fast: true, autoplay: false });
+      seekTo(t, { rebuild: true, autoplay: false });
     }
     seek.addEventListener('pointerup', endDrag);
     seek.addEventListener('change', endDrag);
@@ -219,12 +243,13 @@
   }
 
   function startReplay(data) {
-    IMG_CAP = data.img_cap || IMG_CAP;
+    GAP_CAP = (data.img_cap != null) ? data.img_cap : GAP_CAP;
     var q = new URLSearchParams(location.search);
     var speed = parseFloat(q.get('speed') || data.speed || 1) || 1;
 
+    var events = data.events || [];
     rp = {
-      events: data.events || [],
+      events: events,
       playT: [],
       duration: 0,
       idx: 0,
@@ -234,8 +259,10 @@
       wallAnchor: 0,
       dragging: false,
       raf: 0,
+      t0: events.length ? (events[0].ts || 0) : 0,
+      recTs: null,
     };
-    rp.playT = buildPlayTimes(rp.events, IMG_CAP);
+    rp.playT = buildPlayTimes(rp.events, GAP_CAP);
     rp.duration = rp.playT.length ? rp.playT[rp.playT.length - 1] : 0;
 
     var sel = $('rp-speed');
@@ -243,7 +270,6 @@
       var opts = ['0.25', '0.5', '1', '1.5', '2', '4'];
       var want = String(speed);
       if (opts.indexOf(want) < 0) {
-        // snap to nearest
         want = '1';
         rp.speed = 1;
       }
@@ -268,7 +294,6 @@
     play();
   }
 
-  // Prefer timeline API (replay server); fall back to live SSE.
   fetch('/api/timeline')
     .then(function(r) {
       if (!r.ok) throw new Error('no timeline');

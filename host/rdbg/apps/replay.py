@@ -9,9 +9,9 @@ from urllib.parse import urlparse
 from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
 from ..rlog import load, sender_name, to_sse
 
-# Max recorded gap (s) between image frames that still advances the playhead.
-# Larger gaps are compressed so bursts stitch into continuous video.
-IMG_FRAME_CAP_S = 1.0 / 25.0
+# Max gap (s) between consecutive timeline events on the playhead.
+# Small plot/image Δt kept as-is so image and charts share recording time.
+IMG_FRAME_CAP_S = 0.35
 
 
 def _prepare(records):
