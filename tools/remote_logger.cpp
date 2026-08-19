@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <string>
+#include <unordered_map>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -32,6 +34,15 @@ constexpr uint32_t kSessionFlushMs = 200;
 constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 50;
 constexpr int kCtrlWorkerPollMs = 200;  // 控制线程轮询间隔
+
+std::string img_stream_name(const nlohmann::json & meta)
+{
+  if (meta.contains("name") && meta["name"].is_string()) {
+    auto s = meta["name"].get<std::string>();
+    if (!s.empty()) return s;
+  }
+  return "default";
+}
 
 }  // namespace
 
@@ -58,7 +69,10 @@ void RemoteLogger::init(const Config & cfg)
   last_register_ts_ = {};
   last_ack_ts_ = {};
   last_hb_ = {};
-  img_due_ns_.store(0, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(img_due_mtx_);
+    img_due_ns_.clear();
+  }
   img_mbox_.reset();
   {
     std::lock_guard<std::mutex> lock(session_mtx_);
@@ -211,23 +225,18 @@ void RemoteLogger::plot_image(const cv::Mat & img, const nlohmann::json & meta)
     ts = now_ns();
   }
 
-  if (!try_select_img(ts)) return;
+  if (!try_select_img(ts, img_stream_name(meta))) return;
   img_mbox_.publish(ts, meta, img);
 }
 
-bool RemoteLogger::try_select_img(uint64_t ts)
+bool RemoteLogger::try_select_img(uint64_t ts, const std::string & name)
 {
-  uint64_t due = img_due_ns_.load(std::memory_order_relaxed);
-  for (;;) {
-    if (due != 0 && ts < due) return false;
-    const uint64_t next =
-      (due == 0) ? ts + kImgSavePeriodNs
-                 : due + ((ts - due) / kImgSavePeriodNs + 1) * kImgSavePeriodNs;
-    if (img_due_ns_.compare_exchange_weak(due, next, std::memory_order_relaxed,
-                                          std::memory_order_relaxed)) {
-      return true;
-    }
-  }
+  std::lock_guard<std::mutex> lock(img_due_mtx_);
+  uint64_t & due = img_due_ns_[name];
+  if (due != 0 && ts < due) return false;
+  due = (due == 0) ? ts + kImgSavePeriodNs
+                   : due + ((ts - due) / kImgSavePeriodNs + 1) * kImgSavePeriodNs;
+  return true;
 }
 
 uint64_t RemoteLogger::now_ns() const
@@ -315,12 +324,14 @@ void RemoteLogger::ImgMailbox::reset() { clear(); }
 void RemoteLogger::ImgMailbox::publish(uint64_t ts, nlohmann::json meta,
                                        const cv::Mat & img)
 {
+  const auto name = img_stream_name(meta);
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    slot_.ts = ts;
-    slot_.meta = std::move(meta);
-    slot_.img = img;
-    has_ = true;
+    auto & slot = slots_[name];
+    slot.entry.ts = ts;
+    slot.entry.meta = std::move(meta);
+    slot.entry.img = img;
+    slot.has = true;
   }
   cv_.notify_one();
 }
@@ -329,15 +340,37 @@ bool RemoteLogger::ImgMailbox::take(ImgEntry & out, int timeout_ms,
                                     const std::atomic<bool> & running)
 {
   std::unique_lock<std::mutex> lock(mtx_);
-  cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-               [&] { return has_ || !running.load(); });
-  if (!has_) return false;
-  out.ts = slot_.ts;
-  out.meta = std::move(slot_.meta);
-  out.img = std::move(slot_.img);
-  slot_.meta = nlohmann::json{};
-  slot_.img.release();
-  has_ = false;
+  cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&] {
+    if (!running.load()) return true;
+    for (const auto & kv : slots_) {
+      if (kv.second.has) return true;
+    }
+    return false;
+  });
+
+  auto pick = slots_.end();
+  auto start = slots_.find(rr_key_);
+  if (start != slots_.end()) ++start;
+  else start = slots_.begin();
+
+  auto it = start;
+  for (size_t n = 0; n < slots_.size(); ++n) {
+    if (it == slots_.end()) it = slots_.begin();
+    if (it->second.has) {
+      pick = it;
+      break;
+    }
+    ++it;
+  }
+  if (pick == slots_.end()) return false;
+
+  out.ts = pick->second.entry.ts;
+  out.meta = std::move(pick->second.entry.meta);
+  out.img = std::move(pick->second.entry.img);
+  pick->second.entry.meta = nlohmann::json{};
+  pick->second.entry.img.release();
+  pick->second.has = false;
+  rr_key_ = pick->first;
   return true;
 }
 
@@ -346,9 +379,13 @@ void RemoteLogger::ImgMailbox::wake() { cv_.notify_all(); }
 void RemoteLogger::ImgMailbox::clear()
 {
   std::lock_guard<std::mutex> lock(mtx_);
-  slot_.meta = nlohmann::json{};
-  slot_.img.release();
-  has_ = false;
+  for (auto & kv : slots_) {
+    kv.second.entry.meta = nlohmann::json{};
+    kv.second.entry.img.release();
+    kv.second.has = false;
+  }
+  slots_.clear();
+  rr_key_.clear();
 }
 
 // ── img_worker：邮箱取帧 → resize 放全分辨率 → JPEG + 本地 + UDP ──

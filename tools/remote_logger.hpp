@@ -14,6 +14,7 @@
 #include <opencv2/core.hpp>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace tools
@@ -22,7 +23,7 @@ namespace tools
 /// RemoteLogger — 主线程只入队，worker 分工：
 ///
 ///   plot / log  ──→ var_buf_    ──→ var_worker_  ──→ .rlog (json) + UDP
-///   plot_image  ──→ 相位锁选 30fps ──→ mailbox(1) ──→ img_worker_
+///   plot_image  ──→ 按 name 相位锁 30fps ──→ 每路 mailbox(1) ──→ img_worker_
 ///                   未入选帧直接 return              resize 后放全分辨率
 ///                                                   JPEG + .rlog + UDP
 ///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试
@@ -84,7 +85,7 @@ private:
   void img_worker_loop();
   void ctrl_worker_loop();
 
-  bool try_select_img(uint64_t ts);
+  bool try_select_img(uint64_t ts, const std::string & name);
   void send_register();
   void poll_ctrl();
   void handle_ctrl_payload(const char * buf, size_t n);
@@ -118,7 +119,7 @@ private:
   std::mutex var_wake_mtx_;
   std::thread var_worker_;
 
-  // ── 图像：相位锁 30fps + 深度 1 邮箱（在飞 1 + 等待 1）──────────
+  // ── 图像：按 name 各 30fps + 每路深度 1 邮箱 ────────────────────
   class ImgMailbox
   {
   public:
@@ -129,13 +130,19 @@ private:
     void clear();
 
   private:
-    ImgEntry slot_;
-    bool has_{false};
+    struct Slot
+    {
+      ImgEntry entry;
+      bool has{false};
+    };
+    std::unordered_map<std::string, Slot> slots_;
+    std::string rr_key_;
     std::mutex mtx_;
     std::condition_variable cv_;
   };
 
-  std::atomic<uint64_t> img_due_ns_{0};
+  std::mutex img_due_mtx_;
+  std::unordered_map<std::string, uint64_t> img_due_ns_;
   ImgMailbox img_mbox_;
   std::thread img_worker_;
 

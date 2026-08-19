@@ -29,7 +29,7 @@ tools::RemoteLogger::instance().init(cfg);
 tools::RemoteLogger::instance().plot({{"pitch", 0.15}, {"yaw", -0.3}});
 tools::RemoteLogger::instance().log("INFO", "target locked");
 tools::RemoteLogger::instance().log("ERROR", "motor {} fail, code={}", 3, 0x1F);
-tools::RemoteLogger::instance().plot_image(frame, {{"cam", "front"}});
+tools::RemoteLogger::instance().plot_image(frame, {{"name", "front"}});
 
 tools::RemoteLogger::instance().shutdown();  // 自动注销
 ```
@@ -127,7 +127,7 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 用采集时间戳对齐到 30Hz 网格（`due += n/30s`），未入选的帧只做一次 atomic 比较后返回，不入队、不加 Mat 引用、不 notify。入选帧把 Mat 头放进深度 1 邮箱（在飞编码 1 张 + 等待最新 1 张）。`img_worker` resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时覆盖等待槽，端到端延时保持在约一帧编码时间。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张）。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时只覆盖该路等待槽。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 
@@ -157,8 +157,8 @@ type 0x01 image:
 主线程                         img_worker_           var_worker_      ctrl_worker_
 ──────                         ───────────           ───────────      ─────────────
 plot_image
-  未到 30Hz 网格 → return
-  入选 → mailbox(1)  ────────► resize 放全分辨率
+  按 name 未到 30Hz → return
+  入选 → 该路 mailbox(1) ──► resize 放全分辨率
                                JPEG + .rlog + UDP
 plot/log → var_buf_  ──────────────────────────────► .rlog + UDP
 shutdown → join img+var+ctrl                         JSON             register/hb
@@ -170,4 +170,4 @@ shutdown → join img+var+ctrl                         JSON             register
 | `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP | 入选帧 publish；空闲 poll 50ms |
 | `ctrl_worker_` | 注册、刷新、心跳、host 掉线重连 | 独立轮询 200ms（`enable_remote` 时启动） |
 
-150fps+ 热路径：未入选帧无锁队列、无拷贝。保存间隔为 `33.3ms ± 一帧相机周期`，与输入帧率是否整除 30 无关。
+150fps+ 热路径：未入选帧无锁队列、无拷贝。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。

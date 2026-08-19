@@ -106,8 +106,14 @@ int main(int argc, char * argv[])
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
     auto last_tick = t0;
+    auto last_debug = t0 - 1s;
+    auto last_info = t0 - 2s;
+    auto last_warn_periodic = t0 - 6s;
+    auto last_error = t0 - 10s;
+    auto last_fatal = t0 - 22s;
+    auto last_lag_warn = t0;
     uint16_t last_bullet_count = 0;
-    int last_debug_s = -1;
+    bool last_control = true;
 
     while (!quit) {
       const auto now = std::chrono::steady_clock::now();
@@ -123,6 +129,8 @@ int main(int argc, char * argv[])
 
       const bool fired = gimbal.bullet_count > last_bullet_count;
       last_bullet_count = gimbal.bullet_count;
+      const double yaw_err = std::abs(plan.yaw - gimbal.yaw);
+      const double pitch_err = std::abs(plan.pitch - gimbal.pitch);
 
       if (fired) {
         tools::RemoteLogger::instance().log(
@@ -130,12 +138,47 @@ int main(int argc, char * argv[])
           gimbal.yaw, gimbal.pitch);
       }
 
-      const int debug_s = static_cast<int>(t);
-      if (debug_s != last_debug_s && debug_s % 2 == 0) {
-        last_debug_s = debug_s;
+      if (now - last_debug >= 500ms) {
+        last_debug = now;
         tools::RemoteLogger::instance().log(
-          "DEBUG", "t={:.1f}s yaw={:.3f} pitch={:.3f} fire={} control={}", t, gimbal.yaw,
-          gimbal.pitch, plan.fire, plan.control);
+          "DEBUG", "t={:.2f}s yaw={:.3f} pitch={:.3f} yaw_err={:.3f} fire={} control={}", t,
+          gimbal.yaw, gimbal.pitch, yaw_err, plan.fire, plan.control);
+      }
+
+      if (now - last_info >= 3s) {
+        last_info = now;
+        tools::RemoteLogger::instance().log(
+          "INFO", "tracker ok t={:.1f}s bullets={} d={:.1f}m w={:.1f}rad/s", t,
+          gimbal.bullet_count, d, w);
+      }
+
+      if (last_control && !plan.control) {
+        tools::RemoteLogger::instance().log("WARN", "planner lost control at t={:.2f}s", t);
+      }
+      last_control = plan.control;
+
+      if (plan.control && yaw_err > 0.12 && now - last_lag_warn >= 1s) {
+        last_lag_warn = now;
+        tools::RemoteLogger::instance().log(
+          "WARN", "tracking lag yaw_err={:.3f} pitch_err={:.3f} t={:.2f}s", yaw_err, pitch_err, t);
+      }
+
+      if (now - last_warn_periodic >= 7s) {
+        last_warn_periodic = now;
+        tools::RemoteLogger::instance().log(
+          "WARN", "gimbal near software limit check t={:.1f}s yaw={:.3f}", t, gimbal.yaw);
+      }
+
+      if (now - last_error >= 11s) {
+        last_error = now;
+        tools::RemoteLogger::instance().log(
+          "ERROR", "simulated detector drop t={:.1f}s, retrying", t);
+      }
+
+      if (now - last_fatal >= 23s) {
+        last_fatal = now;
+        tools::RemoteLogger::instance().log(
+          "FATAL", "simulated serial timeout t={:.1f}s (watch maps this to ERROR)", t);
       }
 
       nlohmann::json data;
@@ -190,26 +233,53 @@ int main(int argc, char * argv[])
 
     solver.set_R_gimbal2world(gimbal.orientation());
 
-    cv::Mat img(img_h, img_w, CV_8UC3, cv::Scalar(20, 20, 30));
+    cv::Mat raw(img_h, img_w, CV_8UC3, cv::Scalar(20, 20, 30));
     tools::draw_text(
-      img, fmt::format("sim t={:.2f}s  d={:.1f}m  w={:.1f}rad/s", sim_t, d, w), {10, 24});
-    tools::draw_point(img, {img_w / 2, img_h / 2}, {60, 60, 80}, 3);
+      raw, fmt::format("sim t={:.2f}s  d={:.1f}m  w={:.1f}rad/s", sim_t, d, w), {10, 24});
+    tools::draw_point(raw, {img_w / 2, img_h / 2}, {60, 60, 80}, 3);
 
     std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
+    cv::Mat armor_img = raw.clone();
     for (const Eigen::Vector4d & xyza : armor_xyza_list) {
       auto image_points = solver.reproject_armor(
         xyza.head(3), xyza[3], target.armor_type, target.name);
-      tools::draw_points(img, image_points, {0, 255, 0});
+      tools::draw_points(armor_img, image_points, {0, 255, 0});
     }
 
+    cv::Mat reproj = armor_img.clone();
     Eigen::Vector4d aim_xyza = planner.debug_xyza;
     auto aim_points = solver.reproject_armor(
       aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
-    tools::draw_points(img, aim_points, {0, 0, 255});
+    tools::draw_points(reproj, aim_points, {0, 0, 255});
 
-    nlohmann::json meta;
-    meta["name"] = "reprojection";
-    tools::RemoteLogger::instance().plot_image(img, meta);
+    cv::Mat hud(240, 400, CV_8UC3, cv::Scalar(16, 16, 24));
+    tools::draw_text(hud, fmt::format("t={:.2f}s", sim_t), {12, 28}, {0, 255, 255}, 0.7, 1);
+    tools::draw_text(
+      hud, fmt::format("yaw={:.3f}  pitch={:.3f}", gimbal.yaw, gimbal.pitch), {12, 56},
+      {180, 180, 200}, 0.6, 1);
+    tools::draw_text(
+      hud, fmt::format("yaw_vel={:.2f}  pitch_vel={:.2f}", gimbal.yaw_vel, gimbal.pitch_vel),
+      {12, 84}, {180, 180, 200}, 0.6, 1);
+    tools::draw_text(
+      hud, fmt::format("bullets={}  speed={:.1f}m/s", gimbal.bullet_count, gimbal.bullet_speed),
+      {12, 112}, {120, 200, 120}, 0.6, 1);
+    const int bar_x = 12, bar_w = 376, bar_h = 14;
+    cv::rectangle(hud, {bar_x, 140}, {bar_x + bar_w, 140 + bar_h}, {40, 40, 50}, -1);
+    const int yaw_px = std::clamp(
+      static_cast<int>((gimbal.yaw / 3.14 + 0.5) * bar_w), 0, bar_w);
+    cv::rectangle(hud, {bar_x, 140}, {bar_x + yaw_px, 140 + bar_h}, {80, 160, 220}, -1);
+    tools::draw_text(hud, "yaw", {12, 176}, {100, 100, 120}, 0.5, 1);
+    cv::rectangle(hud, {bar_x, 188}, {bar_x + bar_w, 188 + bar_h}, {40, 40, 50}, -1);
+    const int pitch_px = std::clamp(
+      static_cast<int>((gimbal.pitch / 0.6 + 0.5) * bar_w), 0, bar_w);
+    cv::rectangle(hud, {bar_x, 188}, {bar_x + pitch_px, 188 + bar_h}, {80, 200, 140}, -1);
+    tools::draw_text(hud, "pitch", {12, 224}, {100, 100, 120}, 0.5, 1);
+
+    auto & rl = tools::RemoteLogger::instance();
+    rl.plot_image(raw, {{"name", "raw"}});
+    rl.plot_image(armor_img, {{"name", "armor"}});
+    rl.plot_image(reproj, {{"name", "reprojection"}});
+    rl.plot_image(hud, {{"name", "hud"}});
 
     const auto elapsed = std::chrono::steady_clock::now() - tick;
     if (elapsed < frame_interval) {
