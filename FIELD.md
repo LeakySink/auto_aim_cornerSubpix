@@ -2,20 +2,22 @@
 
 ## 概述
 
-场控系统用于多机器人同时监控，每个机器人渲染为一个 tile（上方图像 + 下方绘图），横向自动铺满。
+场控系统用于多机器人同时监控，每个机器人渲染为一个 tile（上方图像 + 下方绘图），横向自动铺满。纯 Python 标准库，无需编译。
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | **控制协议** | `host/control.py` | 注册协议，`reuse_ports` 模式统一端口 |
-| **后端管理器** | `host/backend_mgr.py` | 单端口 `udp_backend` 进程 |
+| **UDP 接收** | `host/udp_rx.py` | 单端口收包，按 `_from` 区分发送方 |
 | **场控服务器** | `host/field.py` | HTTP/SSE + 网格前端 |
-| **启动脚本** | `host/field.sh` | 构建 backend + 启动 |
+| **启动脚本** | `host/field.sh` | 启动（可选） |
 
 ## 快速开始
 
 ```bash
 # 启动场控
 ./host/field.sh
+# 或
+python3 host/field.py
 
 # 各机器人发送端（ctrl_port=15000 自动注册）
 ./build/remote_logger_test --name=robot_1 &
@@ -27,10 +29,10 @@
 ## 架构
 
 ```
-发送端A ──注册──→ control.py:15000 ──分配同端口 20000──→ udp_backend:20000
-发送端B ──注册──→ control.py:15000 ──分配同端口 20000──→ udp_backend:20000
+发送端A ──注册──→ control.py:15000 ──分配同端口 20000──→ udp_rx.py:20000
+发送端B ──注册──→ control.py:15000 ──分配同端口 20000──→ udp_rx.py:20000
                                                               │
-                                                              │ stdout pipe
+                                                              │ JSON 回调
                                                               ↓
                                                          field.py (SSE)
                                                               │
@@ -70,4 +72,4 @@
 | `--port` | 8888 | HTTP 端口 |
 | `--data-port` | 20000 | UDP 数据端口 |
 | `--ctrl-port` | 15000 | 控制端口 |
-| `--backend` | `build/udp_backend` | 后端二进制路径 |
+| `--download-assets` | off | 下载前端 JS 供离线使用 |

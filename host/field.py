@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-"""Field Control — multi-robot monitoring grid view."""
+"""Field Control — multi-robot monitoring grid view. Stdlib only."""
 
 import http.server
-import json
-import os
 import queue
 import socketserver
 import sys
-import threading
 
-from backend_mgr import BackendManager
+import assets
 from control import ControlServer
+from udp_rx import UdpBackend
 
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Field Control</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
-  onerror="document.body.innerHTML='Chart.js CDN failed'"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="/chart.js"></script>
+<script src="/hammer.js"></script>
+<script src="/chartjs-plugin-zoom.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0e0e16;color:#c8c8d0;font-family:monospace;display:flex;gap:4px;padding:4px;height:100vh;overflow:hidden}
@@ -274,6 +271,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/': self._html()
         elif self.path == '/events': self._sse()
+        elif assets.try_serve(self, self.path): return
         else: self.send_error(404)
     def _html(self):
         b = HTML.encode()
@@ -295,26 +293,37 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def main():
     import argparse
     p = argparse.ArgumentParser(description='Field Control')
-    p.add_argument('--backend', default='build/udp_backend')
-    p.add_argument('--port', type=int, default=8888);p.add_argument('--data-port', type=int, default=20000)
+    p.add_argument('--port', type=int, default=8888)
+    p.add_argument('--data-port', type=int, default=20000)
     p.add_argument('--ctrl-port', type=int, default=15000)
+    p.add_argument('--download-assets', action='store_true',
+                   help='download Chart.js / Hammer / zoom plugin for offline use')
     args = p.parse_args()
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    binary = os.path.join(script_dir, args.backend)
-    if not os.path.exists(binary):
-        alt = os.path.join(script_dir, 'build', 'udp_backend')
-        if os.path.exists(alt): binary = alt
-        else: print(f"backend not found: {binary}", file=sys.stderr);sys.exit(1)
-    cs = ControlServer(port=args.ctrl_port, data_port_start=args.data_port, data_port_end=args.data_port, reuse_ports=True)
+    if args.download_assets:
+        assets.download_all()
+        return
+    cs = ControlServer(port=args.ctrl_port, data_port_start=args.data_port,
+                       data_port_end=args.data_port, reuse_ports=True)
     cs.start()
-    mgr = BackendManager(binary);mgr.on_output = lambda line: sse_queue.put(line)
+    mgr = UdpBackend()
+    mgr.on_output = lambda line: sse_queue.put(line)
     mgr.start(args.data_port, "field")
-    try: httpd = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
-    except OSError as e: print(f"bind error {e}", file=sys.stderr);mgr.stop();cs.stop();sys.exit(1)
+    try:
+        httpd = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
+    except OSError as e:
+        print(f"bind error {e}", file=sys.stderr)
+        mgr.stop()
+        cs.stop()
+        sys.exit(1)
     print(f"http://localhost:{args.port}  data:{args.data_port}  ctrl:{args.ctrl_port}")
-    try: httpd.serve_forever()
-    except KeyboardInterrupt: print("\nshutdown")
-    finally: httpd.server_close();mgr.stop();cs.stop()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nshutdown")
+    finally:
+        httpd.server_close()
+        mgr.stop()
+        cs.stop()
 
 if __name__ == '__main__':
     main()

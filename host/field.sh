@@ -3,12 +3,6 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ ! -f "$DIR/build/udp_backend" ]; then
-  echo "[field] building C++ backend..."
-  cmake -B "$DIR/build" "$DIR" -DCMAKE_BUILD_TYPE=Release
-  make -C "$DIR/build" -j$(nproc)
-fi
-
 HTTP_PORT="${HTTP_PORT:-8888}"
 DATA_PORT="${DATA_PORT:-20000}"
 CTRL_PORT="${CTRL_PORT:-15000}"

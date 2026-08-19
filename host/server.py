@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """
 Remote Debugger - Python frontend server
-Serves the web UI and streams data from the C++ UDP backend via SSE.
+Serves the web UI and streams UDP data via SSE. Stdlib only.
 
-Usage: python3 server.py [--backend PATH] [--port PORT] [--udp-port PORT]
+Usage: python3 server.py [--port PORT] [--control-port PORT]
 """
 
 import http.server
 import json
-import os
 import queue
 import socketserver
-import subprocess
 import sys
 import threading
 import time
 
+import assets
 from control import ControlServer
-from backend_mgr import BackendManager
+from udp_rx import UdpBackend
 
 # ── HTML frontend (single-page app) ──────────────────────────────────────────
 
@@ -27,10 +26,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Remote Debugger</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
-  onerror="var s=document.createElement('script');s.src='/chart.js';document.head.appendChild(s);s.onerror=function(){document.body.innerHTML='<h1 style=color:red;text-align:center;padding-top:40vh>Chart.js failed to load.<br>Check your network or run:<br><code>python3 server.py --download-chartjs</code></h1>'}"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="/chart.js"></script>
+<script src="/hammer.js"></script>
+<script src="/chartjs-plugin-zoom.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;background:#0f0f14;color:#c8c8d0;overflow:hidden;font-size:16px}
@@ -1018,7 +1016,7 @@ def reader_thread(proc):
 # ── State management ─────────────────────────────────────────────────────────
 
 control_server = None
-backend_mgr = None
+udp_backend = None
 _poller_thread = None
 _last_cs_version = -1
 _last_senders = []
@@ -1028,7 +1026,7 @@ def push_state():
     snames = control_server.get_senders() if control_server else []
     state = {
         "type": "state",
-        "active_sender": backend_mgr.active_sender if backend_mgr else "",
+        "active_sender": udp_backend.active_sender if udp_backend else "",
         "senders": snames,
     }
     sse_queue.put(json.dumps(state))
@@ -1044,12 +1042,12 @@ def poller():
             if v != _last_cs_version or snames != _last_senders:
                 _last_cs_version = v
                 _last_senders = snames
-                if snames and not backend_mgr.running:
+                if snames and not udp_backend.running:
                     info = control_server.get_sender_info(snames[0])
                     if info:
-                        backend_mgr.switch(snames[0], info["data_port"])
-                elif not snames and backend_mgr.running:
-                    backend_mgr.stop()
+                        udp_backend.switch(snames[0], info["data_port"])
+                elif not snames and udp_backend.running:
+                    udp_backend.stop()
                 push_state()
         except Exception:
             pass
@@ -1060,7 +1058,7 @@ def do_select(name):
         return
     info = control_server.get_sender_info(name)
     if info:
-        backend_mgr.switch(name, info["data_port"])
+        udp_backend.switch(name, info["data_port"])
     push_state()
 
 
@@ -1077,7 +1075,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/': self._serve_html()
         elif self.path == '/events': self._serve_sse()
-        elif self.path == '/chart.js': self._serve_chartjs()
+        elif assets.try_serve(self, self.path): return
         elif self.path.startswith('/select'): self._handle_select()
         else: self.send_error(404)
 
@@ -1100,18 +1098,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(body)
-
-    def _serve_chartjs(self):
-        chart_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chart.umd.min.js')
-        if os.path.exists(chart_path):
-            with open(chart_path, 'rb') as f: body = f.read()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/javascript')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_error(404, 'chart.js not found locally, use --download-chartjs')
 
     def _serve_sse(self):
         self.send_response(200)
@@ -1136,42 +1122,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     import argparse
     p = argparse.ArgumentParser(description='Remote Debugger Frontend')
-    p.add_argument('--backend', default='build/udp_backend', help='path to C++ backend binary')
     p.add_argument('--port', type=int, default=8080, help='HTTP server port')
-    p.add_argument('--udp-port', type=int, default=9871, help='default UDP data port (fallback)')
     p.add_argument('--control-port', type=int, default=15000, help='UDP control port')
-    p.add_argument('--download-chartjs', action='store_true', help='download Chart.js locally for offline use')
+    p.add_argument('--download-assets', action='store_true',
+                   help='download Chart.js / Hammer / zoom plugin for offline use')
     args = p.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    binary = os.path.join(script_dir, args.backend)
-    if not os.path.exists(binary):
-        alt = os.path.join(script_dir, 'build', 'udp_backend')
-        if os.path.exists(alt): binary = alt
-        else:
-            print(f"[server] backend not found at {binary}", file=sys.stderr)
-            sys.exit(1)
-
-    if args.download_chartjs:
-        import urllib.request
-        url = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
-        dst = os.path.join(script_dir, 'chart.umd.min.js')
-        print(f"[server] downloading {url} ...", file=sys.stderr)
-        urllib.request.urlretrieve(url, dst)
-        print(f"[server] saved to {dst} ({os.path.getsize(dst)} bytes)", file=sys.stderr)
+    if args.download_assets:
+        assets.download_all()
         return
 
-    global control_server, backend_mgr
+    global control_server, udp_backend
     control_server = ControlServer(port=args.control_port)
     control_server.start()
 
-    backend_mgr = BackendManager(binary)
-    backend_mgr.on_output = lambda line: sse_queue.put(line)
-    backend_mgr.on_state = lambda: push_state()
+    udp_backend = UdpBackend()
+    udp_backend.on_output = lambda line: sse_queue.put(line)
+    udp_backend.on_state = lambda: push_state()
 
     _poller_thread = threading.Thread(target=poller, daemon=True)
     _poller_thread.start()
-    push_state()  # initial state for SSE clients
+    push_state()
 
     try:
         httpd = ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
@@ -1188,7 +1159,7 @@ def main():
         print("\n[server] shutting down...", file=sys.stderr)
     finally:
         httpd.server_close()
-        backend_mgr.stop()
+        udp_backend.stop()
         control_server.stop()
 
 
