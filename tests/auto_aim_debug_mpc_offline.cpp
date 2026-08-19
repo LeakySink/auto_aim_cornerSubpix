@@ -3,9 +3,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <vector>
+
+#include <yaml-cpp/yaml.h>
 
 #include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -81,6 +85,13 @@ int main(int argc, char * argv[])
   auto_aim::Solver solver(config_path);
   auto_aim::Planner planner(config_path);
   auto_aim::Target target(d, w, 0.2, 0.1);
+  target.name = auto_aim::ArmorName::three;
+  target.armor_type = auto_aim::ArmorType::small;
+
+  // 画布与相机主点对齐：宽=2*cx、高=2*cy，否则重投影会偏出 640x480
+  const auto camera_matrix = YAML::LoadFile(config_path)["camera_matrix"].as<std::vector<double>>();
+  const int img_w = std::max(640, static_cast<int>(std::lround(2.0 * camera_matrix[2])));
+  const int img_h = std::max(480, static_cast<int>(std::lround(2.0 * camera_matrix[5])));
 
   SimGimbal gimbal;
   gimbal.bullet_speed = static_cast<float>(bullet_speed);
@@ -160,9 +171,10 @@ int main(int argc, char * argv[])
 
     solver.set_R_gimbal2world(gimbal.orientation());
 
-    cv::Mat img(480, 640, CV_8UC3, cv::Scalar(20, 20, 30));
+    cv::Mat img(img_h, img_w, CV_8UC3, cv::Scalar(20, 20, 30));
     tools::draw_text(
       img, fmt::format("sim t={:.2f}s  d={:.1f}m  w={:.1f}rad/s", sim_t, d, w), {10, 24});
+    tools::draw_point(img, {img_w / 2, img_h / 2}, {60, 60, 80}, 3);
 
     std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
     for (const Eigen::Vector4d & xyza : armor_xyza_list) {
