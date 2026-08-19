@@ -1,6 +1,6 @@
 #!/bin/bash
 # Replay a local .rlog in the debugger UI.
-# Usage: ./host/rlog.sh logs/var_xxx.rlog
+# Usage: ./host/rlog.sh logs/run_xxx.rlog
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}"

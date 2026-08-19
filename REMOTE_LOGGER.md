@@ -7,7 +7,7 @@
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
-- **图像数据**：`plot_image(cv::Mat, meta)` — JPEG 压缩后 UDP 发送
+- **图像数据**：`plot_image(cv::Mat, meta)` — worker 内 JPEG 压缩后 UDP 发送，并可写入同一次运行的本地 `.rlog`
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 
 ## 快速开始
@@ -73,7 +73,7 @@ remote_logger:
 
 远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
 
-可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。本地 `.rlog` 回放：`./host/rlog.sh logs/var_xxx.rlog`。
+可视化 Host 端见 [`host/HOST.md`](host/HOST.md)，启动：`./host/watch.sh`。场控见 [`host/FIELD.md`](host/FIELD.md)。本地 `.rlog` 回放：`./host/rlog.sh logs/run_xxx.rlog`。
 
 ```
 Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port
@@ -125,14 +125,25 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 
 ## 本地日志 (`.rlog`)
 
+单次 `init()` → `shutdown()` 运行写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像按时间交错追加。JPEG 编码与写盘只在 **worker** 线程完成；主线程 `plot_image` 仅入队（缓冲满则丢最旧帧）。
+
+新格式 magic `RLG2`（旧 `RLOG` 仅含 JSON，Host 仍可读）：
+
 ```
 +------------------+
-| magic (4B): RLOG |
+| magic (4B): RLG2 |
 +------------------+
+| type   (1B)      |  0x00 = json, 0x01 = image
 | ts_ns  (8B)      |
-| len    (4B)      |
-| json   (len B)   |
+| ... payload ...  |
 +------------------+
+
+type 0x00 json:
+  len (4B) + json (len B)
+
+type 0x01 image:
+  meta_len (4B) + meta JSON + jpg_len (4B) + jpeg bytes
+  （本地无 UDP 60KB 上限）
 ```
 
 ## 线程模型
@@ -141,9 +152,9 @@ Sender ──{"type":"deregister","name":"my_robot"}──→ Control
 主线程                         worker 线程
 ──────                         ──────────
 init() ──start──→              try_register() (重试)
-plot() ──push──→ var_buf_      swap → 写本地 .rlog
+plot() ──push──→ var_buf_      swap → 写本地 .rlog (json)
 log()  ──push──→ var_buf_      swap → UDP 发送
-         ──print──→ stderr     swap img → 压缩 → UDP
+         ──print──→ stderr     swap img → 压缩 → 写本地 / UDP
 img()  ──push──→ img_buf_      heartbeat
-shutdown() ──stop──→           deregister
+shutdown() ──stop──→           刷剩余 + deregister
 ```

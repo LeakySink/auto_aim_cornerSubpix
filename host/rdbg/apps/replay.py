@@ -57,7 +57,11 @@ def run(rlog_path, http_port):
     records = load(path)
     sender = sender_name(records, fallback=path.stem)
     lines = _sse_messages(records, sender)
-    print(f"[replay] {path}  {len(records)} records  sender={sender}", file=sys.stderr)
+    n_img = sum(1 for r in records if r.get("_rlog") == "img")
+    print(
+        f"[replay] {path}  {len(records)} records ({n_img} images)  sender={sender}",
+        file=sys.stderr,
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):

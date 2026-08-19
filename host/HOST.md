@@ -47,7 +47,7 @@ host/
 ```bash
 ./host/watch.sh          # 单车调试，http://localhost:8080
 ./host/field.sh          # 多车场控，http://localhost:8888
-./host/rlog.sh logs/var_xxx.rlog   # 回放本地日志，同调试页
+./host/rlog.sh logs/run_xxx.rlog   # 回放本地日志（含图像），同调试页
 ```
 
 端口可用环境变量覆盖：`HTTP_PORT`、`CTRL_PORT`；场控另有 `DATA_PORT`。其余参数原样传给 Python，例如离线下载 JS：
@@ -84,7 +84,7 @@ rx.stop()
 
 ### rlog.py — 本地 .rlog
 
-`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志，返回带 `ts` 的 dict 列表。`./host/rlog.sh` 灌进与 UDP 相同的 SSE `plot`/`log`，打开同一套调试页。文件里没有图像。
+`load(path)` 读 C++ `RemoteLogger` 写出的二进制日志：旧 magic `RLOG`（仅 JSON）与新 magic `RLG2`（JSON + JPEG）均可。`./host/rlog.sh` 灌进与 UDP 相同的 SSE `plot` / `log` / `image`，打开同一套调试页。
 
 ### apps/debugger.py — 单车编排
 
