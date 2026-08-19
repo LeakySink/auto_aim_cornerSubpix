@@ -11,7 +11,8 @@ SPEED="${SPEED:-1}"
 if [ $# -lt 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
   echo "Usage: $0 <file.rlog> [--speed N] [--port PORT]"
   echo "  HTTP_PORT  default 8080"
-  echo "  SPEED      default 1 (realtime); e.g. SPEED=2 or --speed 2"
+  echo "  SPEED      initial speed (default 1); UI can change 0.25x–4x"
+  echo "  底部进度条：拖拽定位 / 播放暂停(空格) / 倍速"
   exit 1
 fi
 

@@ -1,8 +1,7 @@
-"""Offline .rlog replay — same debugger UI, paced SSE (no UDP)."""
+"""Offline .rlog replay — timeline API + client-side player controls."""
 
 import json
 import sys
-import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,17 +9,12 @@ from urllib.parse import urlparse
 from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
 from ..rlog import load, sender_name, to_sse
 
-# Max wait between successive image frames. Larger recorded gaps are compressed
-# so short camera bursts stitch into continuous video (~30fps).
-_IMG_FRAME_CAP_S = 1.0 / 25.0
-
-
-def _record_ts(rec):
-    return int(rec.get("ts") or 0)
+# Max recorded gap (s) between image frames that still advances the playhead.
+# Larger gaps are compressed so bursts stitch into continuous video.
+IMG_FRAME_CAP_S = 1.0 / 25.0
 
 
 def _prepare(records):
-    """Index images for /img/N; strip jpeg bytes from record list."""
     images = []
     out = []
     for rec in records:
@@ -38,91 +32,31 @@ def _prepare(records):
     return out, images
 
 
-def _to_sse(rec):
-    if rec.get("_rlog") == "img":
-        meta = rec.get("meta") or {}
-        return {
-            "type": "image",
-            "ts": rec.get("ts", 0),
-            "meta": meta,
-            "url": f"/img/{rec['_img_idx']}",
-        }
-    return to_sse(rec)
+def _build_events(records):
+    events = []
+    for rec in records:
+        if rec.get("_rlog") == "img":
+            events.append({
+                "type": "image",
+                "ts": rec.get("ts", 0),
+                "idx": rec["_img_idx"],
+                "meta": rec.get("meta") or {},
+            })
+            continue
+        msg = to_sse(rec)
+        if msg:
+            events.append(msg)
+    return events
 
 
-def _write_replay_sse(handler, records, images, sender, speed):
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Connection", "keep-alive")
-    handler.send_header("Access-Control-Allow-Origin", "*")
+def _json_response(handler, obj, code=200):
+    body = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
-
-    def emit(obj):
-        handler.wfile.write(
-            f"data: {json.dumps(obj, separators=(',', ':'))}\n\n".encode()
-        )
-
-    try:
-        emit({"type": "state", "active_sender": sender, "senders": [sender]})
-        emit({"type": "status", "connected": True, "sender": sender})
-        handler.wfile.flush()
-
-        if not records:
-            keep = {"type": "status", "connected": True, "sender": sender}
-            while True:
-                time.sleep(2)
-                emit(keep)
-                handler.wfile.flush()
-            return
-
-        speed = max(0.05, float(speed))
-        # Image-driven clock: sleep only between frames; plots/logs flush with no wait
-        # so camera bursts (~30fps) play as continuous video instead of a slideshow.
-        last_img_ts = None
-        last_img_wall = None
-        n_plot = 0
-
-        for i, rec in enumerate(records):
-            is_img = rec.get("_rlog") == "img"
-            ts = _record_ts(rec)
-
-            if is_img:
-                if last_img_ts is not None and last_img_wall is not None:
-                    raw_s = (ts - last_img_ts) / 1e9
-                    if raw_s < 0:
-                        raw_s = 0
-                    # Compress long gaps between camera bursts into one frame time.
-                    wait = min(raw_s, _IMG_FRAME_CAP_S) / speed
-                    delay = wait - (time.monotonic() - last_img_wall)
-                    if delay > 0.0005:
-                        time.sleep(delay)
-
-                msg = _to_sse(rec)
-                if msg:
-                    emit(msg)
-                    handler.wfile.flush()
-                last_img_ts = ts
-                last_img_wall = time.monotonic()
-            else:
-                msg = _to_sse(rec)
-                if msg:
-                    emit(msg)
-                    n_plot += 1
-                    if n_plot % 24 == 0:
-                        handler.wfile.flush()
-
-        handler.wfile.flush()
-        emit({"type": "status", "connected": True, "sender": sender})
-        handler.wfile.flush()
-
-        keep = {"type": "status", "connected": True, "sender": sender}
-        while True:
-            time.sleep(2)
-            emit(keep)
-            handler.wfile.flush()
-    except Exception:
-        pass
+    handler.wfile.write(body)
 
 
 def run(rlog_path, http_port, speed=1.0):
@@ -133,10 +67,21 @@ def run(rlog_path, http_port, speed=1.0):
 
     raw = load(path)
     records, images = _prepare(raw)
+    events = _build_events(records)
     sender = sender_name(raw, fallback=path.stem)
+    timeline = {
+        "mode": "replay",
+        "sender": sender,
+        "file": path.name,
+        "img_cap": IMG_FRAME_CAP_S,
+        "speed": float(speed) if speed else 1.0,
+        "events": events,
+        "n_img": len(images),
+        "n_events": len(events),
+    }
     print(
-        f"[replay] {path}  {len(records)} records ({len(images)} images)  "
-        f"sender={sender}  speed={speed}x  (image-paced video)",
+        f"[replay] {path}  {len(events)} events ({len(images)} images)  "
+        f"sender={sender}",
         file=sys.stderr,
     )
 
@@ -145,15 +90,29 @@ def run(rlog_path, http_port, speed=1.0):
             pass
 
         def do_GET(self):
-            parsed = urlparse(self.path)
-            route = parsed.path
+            route = urlparse(self.path).path
             if route == "/":
                 serve_page(self, "debugger.html")
+            elif route == "/api/timeline":
+                _json_response(self, timeline)
             elif route == "/events":
-                _write_replay_sse(self, records, images, sender, speed)
+                # Live SSE not used in replay; keep a quiet stream for old clients.
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                try:
+                    payload = json.dumps(
+                        {"type": "status", "connected": True, "sender": sender},
+                        separators=(",", ":"),
+                    )
+                    self.wfile.write(f"data: {payload}\n\n".encode())
+                    self.wfile.flush()
+                except Exception:
+                    pass
             elif route.startswith("/img/"):
                 try:
-                    idx = int(route.rsplit("/", 1)[-1])
+                    idx = int(route.rsplit("/", 1)[-1].split("?")[0])
                 except ValueError:
                     self.send_error(404)
                     return

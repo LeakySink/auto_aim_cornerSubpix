@@ -32,7 +32,9 @@ function initLayout() {
 function relayout() {
   var area = mainArea.getBoundingClientRect();
   var tH = topBar.offsetHeight;
-  var top = tH, availH = area.height - tH, availW = area.width;
+  var bar = document.getElementById('replay-bar');
+  var bH = (bar && !bar.hidden) ? bar.offsetHeight : 0;
+  var top = tH, availH = area.height - tH - bH, availW = area.width;
   // remove old splitters
   mainArea.querySelectorAll('.splitter').forEach(function(el) { el.remove(); });
   // position rows
@@ -559,7 +561,9 @@ function startDrag(splitInfo, e) {
   e.preventDefault();
   var area = mainArea.getBoundingClientRect();
   var tH = topBar.offsetHeight;
-  var availH = area.height - tH, availW = area.width;
+  var bar = document.getElementById('replay-bar');
+  var bH = (bar && !bar.hidden) ? bar.offsetHeight : 0;
+  var availH = area.height - tH - bH, availW = area.width;
   var startX = e.clientX, startY = e.clientY;
 
   function onMove(ev) {
@@ -817,6 +821,7 @@ function addLog(ts, level, msg) {
 const dot = document.getElementById('dot'), stats = document.getElementById('stats');
 var pktCount = 0, lastPktTime = Date.now(), lastAnyPkt = 0;
 var clientTimeout = 4000;
+var liveEs = null;
 
 function setConnected(c, sender) {
   var st = document.getElementById('status');
@@ -832,43 +837,48 @@ setConnected(false);
 setInterval(function() {
   if (lastAnyPkt && Date.now() - lastAnyPkt > clientTimeout) setConnected(false);
 }, 1000);
-const es = new EventSource('/events');
-es.onmessage = function(e) {
-  try {
-    var msg = JSON.parse(e.data);
-    lastAnyPkt = Date.now();
-    pktCount++;
-    var now = Date.now();
-    if (now - lastPktTime >= 1000) {
-      stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
-      pktCount = 0; lastPktTime = now;
+
+function handleDbgMessage(msg) {
+  lastAnyPkt = Date.now();
+  pktCount++;
+  var now = Date.now();
+  if (now - lastPktTime >= 1000) {
+    stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
+    pktCount = 0; lastPktTime = now;
+  }
+  var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
+  if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
+  else if (msg.type === 'image') {
+    if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
+    else if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
+    setConnected(true, snd);
+  }
+  else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
+  else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
+  else if (msg.type === 'state') {
+    var sel = document.getElementById('sender-sel');
+    var cur = sel.value;
+    sel.innerHTML = '';
+    var list = msg.senders || [];
+    for (var i = 0; i < list.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = list[i]; opt.textContent = list[i];
+      sel.appendChild(opt);
     }
-    var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
-    if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
-    else if (msg.type === 'image') {
-      if (msg.url) setImageFromUrl(msg.url, msg.meta || {});
-      else if (msg.jpg_b64) setImage(msg.jpg_b64, msg.meta || {});
-      setConnected(true, snd);
-    }
-    else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
-    else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
-    else if (msg.type === 'state') {
-      var sel = document.getElementById('sender-sel');
-      var cur = sel.value;
-      sel.innerHTML = '';
-      var list = msg.senders || [];
-      for (var i = 0; i < list.length; i++) {
-        var opt = document.createElement('option');
-        opt.value = list[i]; opt.textContent = list[i];
-        sel.appendChild(opt);
-      }
-      if (list.indexOf(cur) >= 0) sel.value = cur;
-      else if (msg.active_sender && list.indexOf(msg.active_sender) >= 0) sel.value = msg.active_sender;
-      else if (list.length > 0) sel.value = list[0];
-    }
-  } catch (err) {}
-};
-es.onerror = function() { dot.className = 'dot dead'; };
+    if (list.indexOf(cur) >= 0) sel.value = cur;
+    else if (msg.active_sender && list.indexOf(msg.active_sender) >= 0) sel.value = msg.active_sender;
+    else if (list.length > 0) sel.value = list[0];
+  }
+}
+
+function startLiveSSE() {
+  if (liveEs) return;
+  liveEs = new EventSource('/events');
+  liveEs.onmessage = function(e) {
+    try { handleDbgMessage(JSON.parse(e.data)); } catch (err) {}
+  };
+  liveEs.onerror = function() { dot.className = 'dot dead'; };
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', function() { relayout(); });
