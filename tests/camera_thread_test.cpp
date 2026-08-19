@@ -18,7 +18,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/recorder.hpp"
 #include "tools/thread_pool.hpp"
 
 const std::string keys =
@@ -37,7 +36,6 @@ void detect_frame(tools::Frame && frame, auto_aim::YOLO & yolo)
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  // tools::Recorder recorder(100);
 
   cv::CommandLineParser cli(argc, argv, keys);
   auto config_path = cli.get<std::string>(0);

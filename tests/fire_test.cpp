@@ -5,7 +5,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/recorder.hpp"
 #include "tools/trajectory.hpp"
 
 // 定义命令行参数
@@ -23,8 +22,6 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  // 初始化录制器、退出器
-  tools::Recorder recorder;
   tools::Exiter exiter;
 
   tools::RemoteLogger::instance().init(config_path);

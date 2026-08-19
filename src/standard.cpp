@@ -16,7 +16,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/recorder.hpp"
 
 using namespace std::chrono;
 
@@ -34,7 +33,6 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Recorder recorder;
 
   tools::RemoteLogger::instance().init(config_path);
 
@@ -63,8 +61,6 @@ int main(int argc, char * argv[])
       tools::RemoteLogger::instance().log("INFO", "Switch to {}", io::MODES[mode]);
       last_mode = mode;
     }
-
-    // recorder.record(img, q, t);
 
     solver.set_R_gimbal2world(q);
 

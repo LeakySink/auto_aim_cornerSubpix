@@ -17,7 +17,6 @@
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/recorder.hpp"
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
@@ -35,7 +34,6 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Recorder recorder(100);  //根据实际帧率调整
 
   tools::RemoteLogger::instance().init(config_path);
 
