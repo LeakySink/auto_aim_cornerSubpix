@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <fmt/format.h>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -77,7 +78,13 @@ private:
   void send_heartbeat();
   std::string resolve_sender() const;
   void inject_sender(nlohmann::json & j) const;
+  bool ensure_session_file();
+  void close_session_file();
+  void maybe_flush_session(bool force = false);
   void flush_var_local(const std::vector<VarEntry> & entries);
+  void flush_img_local(uint64_t ts, const nlohmann::json & meta,
+                       const std::vector<uint8_t> & jpeg);
+  bool process_one_image();
   void try_send_var(const VarEntry & entry);
   void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
                      const nlohmann::json & meta);
@@ -103,6 +110,9 @@ private:
   int sock_{-1};
   sockaddr_in addr_{};
   std::string session_file_;
+  FILE * session_fp_{nullptr};
+  std::chrono::steady_clock::time_point last_session_flush_{};
+  uint64_t last_img_keep_ns_{0};
   std::string sender_name_;
 };
 
