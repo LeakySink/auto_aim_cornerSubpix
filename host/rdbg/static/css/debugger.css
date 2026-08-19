@@ -57,8 +57,8 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 
 .splitter{position:absolute;z-index:4;background:#252530}
 .splitter:hover,.splitter.active{background:#4a6a8a}
-.splitter-h{left:0;right:0;height:3px;cursor:row-resize}
-.splitter-v{top:0;bottom:0;width:3px;cursor:col-resize}
+.splitter-h{height:3px;cursor:row-resize}
+.splitter-v{width:3px;cursor:col-resize}
 
 .log-line{padding:0 8px;display:flex;gap:8px;font-size:13px;line-height:1.5;align-items:flex-start}
 .log-ts{color:#404050;flex-shrink:0}

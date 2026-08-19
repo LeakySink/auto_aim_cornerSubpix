@@ -7,76 +7,145 @@ toggleBtn.addEventListener('click', function() {
   setTimeout(relayout, 200);
 });
 
-// ── Layout engine ─────────────────────────────────────────────────────────────
+// ── Layout engine (nested tiling) ─────────────────────────────────────────────
 const mainArea = document.getElementById('main-area');
 const topBar = document.getElementById('top-bar');
+const SPLIT_PX = 3;
 
-let rows = [];
+var layoutRoot = null;
 let panelIdSeq = 0;
+var panelMap = {};
 
 function newPanelId() { return panelIdSeq++; }
 
+function makePanel(type) {
+  var p = { id: newPanelId(), type: type || 'image' };
+  panelMap[p.id] = p;
+  return p;
+}
+
+function forEachPanel(fn) {
+  function walk(n) {
+    if (!n) return;
+    if (n.type === 'leaf') fn(n.panel);
+    else for (var i = 0; i < n.children.length; i++) walk(n.children[i]);
+  }
+  walk(layoutRoot);
+}
+
+function countLeaves(n) {
+  if (!n) return 0;
+  if (n.type === 'leaf') return 1;
+  var c = 0;
+  for (var i = 0; i < n.children.length; i++) c += countLeaves(n.children[i]);
+  return c;
+}
+
+function findPanelNode(panelId) {
+  function walk(node, parent, index) {
+    if (node.type === 'leaf') {
+      if (node.panel.id === panelId) return { node: node, parent: parent, index: index };
+      return null;
+    }
+    for (var i = 0; i < node.children.length; i++) {
+      var f = walk(node.children[i], node, i);
+      if (f) return f;
+    }
+    return null;
+  }
+  return layoutRoot ? walk(layoutRoot, null, 0) : null;
+}
+
+function normalizeRatios(children) {
+  var s = 0, i;
+  for (i = 0; i < children.length; i++) s += children[i].ratio;
+  if (s <= 0) {
+    for (i = 0; i < children.length; i++) children[i].ratio = 1 / children.length;
+    return;
+  }
+  for (i = 0; i < children.length; i++) children[i].ratio /= s;
+}
+
+function childSizes(node, totalPx) {
+  var n = node.children.length;
+  var inner = Math.max(0, totalPx - (n - 1) * SPLIT_PX);
+  var totalR = 0, i;
+  for (i = 0; i < n; i++) totalR += node.children[i].ratio;
+  if (totalR <= 0) totalR = n;
+  var sizes = [], used = 0;
+  for (i = 0; i < n; i++) {
+    var sz = (i === n - 1) ? (inner - used) : Math.floor(inner * node.children[i].ratio / totalR);
+    if (sz < 0) sz = 0;
+    sizes.push(sz);
+    used += sz;
+  }
+  return sizes;
+}
+
 function initLayout() {
-  var id0 = newPanelId(), id1 = newPanelId();
-  rows = [
-    { ratio: 1.0, panels: [
-      { id: id0, type: 'image', ratio: 0.4 },
-      { id: id1, type: 'plot', ratio: 0.6 }
-    ]}
-  ];
-  panelMap[id0] = null;
-  panelMap[id1] = null;
+  layoutRoot = {
+    type: 'split',
+    dir: 'h',
+    children: [
+      { type: 'leaf', ratio: 0.4, panel: makePanel('image') },
+      { type: 'leaf', ratio: 0.6, panel: makePanel('plot') }
+    ]
+  };
   relayout();
 }
 
 function relayout() {
   var area = mainArea.getBoundingClientRect();
   var tH = topBar.offsetHeight;
-  var top = tH, availH = area.height - tH, availW = area.width;
-  // remove old splitters
   mainArea.querySelectorAll('.splitter').forEach(function(el) { el.remove(); });
-  // position rows
-  var y = top;
   var splitters = [];
-  for (var ri = 0; ri < rows.length; ri++) {
-    var row = rows[ri];
-    var rh = Math.floor(availH * row.ratio);
-    var x = 0;
-    for (var pi = 0; pi < row.panels.length; pi++) {
-      var p = row.panels[pi];
-      var pw = Math.floor(availW * p.ratio);
-      ensurePanelDOM(p);
-      p.el.style.left = x + 'px';
-      p.el.style.top = y + 'px';
-      p.el.style.width = pw + 'px';
-      p.el.style.height = (rh - (ri < rows.length - 1 ? 3 : 0)) + 'px';
-      x += pw;
-      if (pi < row.panels.length - 1) {
-        splitters.push({ type: 'v', left: x, top: y, height: rh, rowIdx: ri, panelIdx: pi });
-        x += 3;
-      }
-    }
-    y += rh;
-    if (ri < rows.length - 1) {
-      splitters.push({ type: 'h', top: y, rowIdx: ri });
-      y += 3;
-    }
-  }
-  // create splitter DOM
+  if (layoutRoot) layoutNode(layoutRoot, 0, tH, area.width, Math.max(0, area.height - tH), splitters);
   splitters.forEach(function(s) {
     var el = document.createElement('div');
-    el.className = 'splitter ' + (s.type === 'h' ? 'splitter-h' : 'splitter-v');
-    if (s.type === 'v') {
-      el.style.left = s.left + 'px';
-      el.style.top = s.top + 'px';
-      el.style.height = s.height + 'px';
-    } else {
-      el.style.top = s.top + 'px';
-    }
+    el.className = 'splitter ' + (s.dir === 'h' ? 'splitter-v' : 'splitter-h');
+    el.style.left = s.left + 'px';
+    el.style.top = s.top + 'px';
+    el.style.width = s.width + 'px';
+    el.style.height = s.height + 'px';
     el.addEventListener('mousedown', function(e) { startDrag(s, e); });
     mainArea.appendChild(el);
   });
   updateAllCharts();
+}
+
+function layoutNode(node, x, y, w, h, splitters) {
+  if (node.type === 'leaf') {
+    var p = node.panel;
+    ensurePanelDOM(p);
+    p.el.style.left = x + 'px';
+    p.el.style.top = y + 'px';
+    p.el.style.width = w + 'px';
+    p.el.style.height = h + 'px';
+    return;
+  }
+  var horiz = node.dir === 'h';
+  var sizes = childSizes(node, horiz ? w : h);
+  var cursor = horiz ? x : y;
+  for (var i = 0; i < node.children.length; i++) {
+    var sz = sizes[i];
+    if (horiz) layoutNode(node.children[i], cursor, y, sz, h, splitters);
+    else layoutNode(node.children[i], x, cursor, w, sz, splitters);
+    if (i < node.children.length - 1) {
+      var next = sizes[i + 1];
+      if (horiz) {
+        splitters.push({
+          dir: 'h', left: cursor + sz, top: y, width: SPLIT_PX, height: h,
+          node: node, index: i, origin: cursor, span: sz + SPLIT_PX + next
+        });
+      } else {
+        splitters.push({
+          dir: 'v', left: x, top: cursor + sz, width: w, height: SPLIT_PX,
+          node: node, index: i, origin: cursor, span: sz + SPLIT_PX + next
+        });
+      }
+    }
+    cursor += sz + SPLIT_PX;
+  }
 }
 
 function ensurePanelDOM(p) {
@@ -121,15 +190,15 @@ function ensurePanelDOM(p) {
   var sp = document.createElement('span'); sp.style.flex = '1'; hdr.appendChild(sp);
 
   var dirs = [
-    { sym: '\u25c0', title: '向左拆分' },
-    { sym: '\u25b2', title: '向上拆分' },
-    { sym: '\u25bc', title: '向下拆分' },
-    { sym: '\u25b6', title: '向右拆分' },
+    { sym: '\u25c0', title: '向左拆分', side: 'left' },
+    { sym: '\u25b2', title: '向上拆分', side: 'up' },
+    { sym: '\u25bc', title: '向下拆分', side: 'down' },
+    { sym: '\u25b6', title: '向右拆分', side: 'right' },
   ];
   dirs.forEach(function(d) {
     var btn = document.createElement('button');
     btn.className = 'dir-btn'; btn.textContent = d.sym; btn.title = d.title;
-    btn.onclick = function() { splitPanel(p.id, d.row, d.col); };
+    btn.onclick = function() { splitPanel(p.id, d.side); };
     hdr.appendChild(btn);
   });
 
@@ -373,23 +442,19 @@ function updatePanelView(p) {
 }
 
 function updateAllCharts() {
-  for (var i = 0; i < rows.length; i++)
-    for (var j = 0; j < rows[i].panels.length; j++)
-      updatePanelView(rows[i].panels[j]);
+  forEachPanel(function(p) { updatePanelView(p); });
 }
 
 function resetAllViews() {
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.type === 'plot' && p.chart) {
-        p.manualView = false;
-        if (p.chart.resetZoom) p.chart.resetZoom();
-        updatePanelView(p);
-      } else if (p.type === 'image') {
-        resetImgView(p);
-      }
+  forEachPanel(function(p) {
+    if (p.type === 'plot' && p.chart) {
+      p.manualView = false;
+      if (p.chart.resetZoom) p.chart.resetZoom();
+      updatePanelView(p);
+    } else if (p.type === 'image') {
+      resetImgView(p);
     }
+  });
 }
 
 function showPanelImage(p) {
@@ -478,93 +543,127 @@ function refreshHeaderSelect(p) {
   if (sel) sel.value = p.type;
 }
 
-function splitPanel(panelId, rowDir, colDir) {
-  for (var ri = 0; ri < rows.length; ri++) {
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      if (rows[ri].panels[pi].id !== panelId) continue;
-      if (colDir !== 0) {
-        var old = rows[ri].panels[pi];
-        var half = old.ratio / 2;
-        old.ratio = half;
-        var nid = newPanelId();
-        panelMap[nid] = null;
-        var np = { id: nid, type: 'image', ratio: half };
-        if (colDir > 0) rows[ri].panels.splice(pi + 1, 0, np);
-        else rows[ri].panels.splice(pi, 0, np);
+function splitPanel(panelId, side) {
+  var found = findPanelNode(panelId);
+  if (!found) return;
+  var wantDir = (side === 'left' || side === 'right') ? 'h' : 'v';
+  var before = (side === 'left' || side === 'up');
+  var src = found.node.panel;
+  var np = makePanel(src.type);
+  var newLeaf = { type: 'leaf', ratio: 0.5, panel: np };
+  var parent = found.parent;
+
+  if (parent && parent.dir === wantDir) {
+    var half = found.node.ratio / 2;
+    found.node.ratio = half;
+    newLeaf.ratio = half;
+    parent.children.splice(found.index + (before ? 0 : 1), 0, newLeaf);
+  } else {
+    var keep = { type: 'leaf', ratio: 0.5, panel: src };
+    var wrapped = {
+      type: 'split',
+      dir: wantDir,
+      ratio: found.node.ratio,
+      children: before ? [newLeaf, keep] : [keep, newLeaf]
+    };
+    if (!parent) layoutRoot = wrapped;
+    else parent.children[found.index] = wrapped;
+  }
+  relayout();
+}
+
+function replaceNode(target, replacement) {
+  replacement.ratio = target.ratio;
+  if (layoutRoot === target) {
+    layoutRoot = replacement;
+    flattenSplit(layoutRoot);
+    collapseUnary(layoutRoot, null, 0);
+    return;
+  }
+  function walk(n) {
+    if (!n || n.type !== 'split') return false;
+    for (var i = 0; i < n.children.length; i++) {
+      if (n.children[i] === target) {
+        n.children[i] = replacement;
+        flattenSplit(n);
+        collapseUnary(layoutRoot, null, 0);
+        return true;
       }
-      if (rowDir !== 0) {
-        var nid = newPanelId();
-        panelMap[nid] = null;
-        var nr = { ratio: rows[ri].ratio / 2, panels: [{ id: nid, type: 'image', ratio: 1.0 }] };
-        rows[ri].ratio = nr.ratio;
-        if (rowDir > 0) rows.splice(ri + 1, 0, nr);
-        else rows.splice(ri, 0, nr);
-      }
-      relayout();
-      return;
+      if (walk(n.children[i])) return true;
     }
+    return false;
+  }
+  walk(layoutRoot);
+}
+
+function flattenSplit(n) {
+  if (!n || n.type !== 'split') return;
+  var out = [], i, j;
+  for (i = 0; i < n.children.length; i++) {
+    flattenSplit(n.children[i]);
+    var ch = n.children[i];
+    if (ch.type === 'split' && ch.dir === n.dir) {
+      var sub = ch.children;
+      var rs = 0;
+      for (j = 0; j < sub.length; j++) rs += sub[j].ratio;
+      for (j = 0; j < sub.length; j++) {
+        sub[j].ratio = ch.ratio * (rs > 0 ? sub[j].ratio / rs : 1 / sub.length);
+        out.push(sub[j]);
+      }
+    } else {
+      out.push(ch);
+    }
+  }
+  n.children = out;
+  if (n.children.length > 1) normalizeRatios(n.children);
+}
+
+function collapseUnary(n, parent, idx) {
+  if (!n || n.type !== 'split') return;
+  for (var i = n.children.length - 1; i >= 0; i--) collapseUnary(n.children[i], n, i);
+  if (n.children.length === 1) {
+    var only = n.children[0];
+    only.ratio = parent ? n.ratio : 1;
+    if (!parent) layoutRoot = only;
+    else parent.children[idx] = only;
   }
 }
 
 function removePanel(panelId) {
-  if (rows.length === 1 && rows[0].panels.length === 1) return;
-  for (var ri = 0; ri < rows.length; ri++) {
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      if (rows[ri].panels[pi].id !== panelId) continue;
-      var p = rows[ri].panels[pi];
-      if (p.chart) p.chart.destroy();
-      if (p.el) p.el.remove();
-      delete panelMap[p.id];
-      if (rows[ri].panels.length === 1) {
-        rows.splice(ri, 1);
-        if (rows.length > 0) {
-          var total = 0;
-          for (var i = 0; i < rows.length; i++) total += rows[i].ratio;
-          for (var i = 0; i < rows.length; i++) rows[i].ratio /= total;
-        }
-      } else {
-        var remain = rows[ri].panels.length - 1;
-        var freed = rows[ri].panels[pi].ratio;
-        rows[ri].panels.splice(pi, 1);
-        var total = 0;
-        for (var i = 0; i < rows[ri].panels.length; i++) total += rows[ri].panels[i].ratio;
-        for (var i = 0; i < rows[ri].panels.length; i++) rows[ri].panels[i].ratio = rows[ri].panels[i].ratio / total + freed / remain;
-      }
-      relayout();
-      return;
-    }
+  if (countLeaves(layoutRoot) <= 1) return;
+  var found = findPanelNode(panelId);
+  if (!found) return;
+  var p = found.node.panel;
+  if (p.chart) p.chart.destroy();
+  if (p.el) p.el.remove();
+  delete panelMap[p.id];
+  if (activePanelId === p.id) activePanelId = null;
+  if (!found.parent) return;
+  found.parent.children.splice(found.index, 1);
+  if (found.parent.children.length === 1) {
+    replaceNode(found.parent, found.parent.children[0]);
+  } else {
+    normalizeRatios(found.parent.children);
   }
+  relayout();
 }
 
-// ── Dragging ──────────────────────────────────────────────────────────────────
-function startDrag(splitInfo, e) {
+function startDrag(info, e) {
   e.preventDefault();
-  var area = mainArea.getBoundingClientRect();
-  var tH = topBar.offsetHeight;
-  var availH = area.height - tH, availW = area.width;
-  var startX = e.clientX, startY = e.clientY;
-
+  var c0 = info.node.children[info.index];
+  var c1 = info.node.children[info.index + 1];
+  if (!c0 || !c1) return;
+  var total = c0.ratio + c1.ratio;
+  var origin = info.origin, span = info.span;
+  if (span < 1) return;
   function onMove(ev) {
-    if (splitInfo.type === 'v') {
-      var dx = ev.clientX - startX;
-      var row = rows[splitInfo.rowIdx];
-      var p0 = row.panels[splitInfo.panelIdx], p1 = row.panels[splitInfo.panelIdx + 1];
-      var total = p0.ratio + p1.ratio;
-      var new0 = total * (splitInfo.left + dx) / availW;
-      new0 = Math.max(0.05, Math.min(total - 0.05, new0));
-      p0.ratio = new0; p1.ratio = total - new0;
-      var sum = 0; for (var i = 0; i < row.panels.length; i++) sum += row.panels[i].ratio;
-      for (var i = 0; i < row.panels.length; i++) row.panels[i].ratio /= sum;
-    } else {
-      var dy = ev.clientY - startY;
-      var r0 = rows[splitInfo.rowIdx], r1 = rows[splitInfo.rowIdx + 1];
-      var total = r0.ratio + r1.ratio;
-      var new0 = total * (splitInfo.top - tH + dy) / availH;
-      new0 = Math.max(0.05, Math.min(total - 0.05, new0));
-      r0.ratio = new0; r1.ratio = total - new0;
-      var sum = 0; for (var i = 0; i < rows.length; i++) sum += rows[i].ratio;
-      for (var i = 0; i < rows.length; i++) rows[i].ratio /= sum;
-    }
+    var pos = (info.dir === 'h' ? ev.clientX : ev.clientY) - origin;
+    var r0 = total * (pos / span);
+    var min = total * 0.08;
+    if (r0 < min) r0 = min;
+    if (r0 > total - min) r0 = total - min;
+    c0.ratio = r0;
+    c1.ratio = total - r0;
     relayout();
   }
   function onUp() {
@@ -580,7 +679,6 @@ const COLORS = ['#4fc3f7','#ffb74d','#81c784','#e57373','#ba68c8','#4dd0e1','#ff
 var fieldMeta = {}, colorIdx = 0, xField = 'ts', firstTs = null, lastX = 0;
 var plotData = [], activePanelId = null;
 const MAX_PTS = 50000;
-var panelMap = {};
 
 function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
 
@@ -588,20 +686,15 @@ function onSenderChange() {
   var name = document.getElementById('sender-sel').value;
   if (!name) return;
   plotData = [];
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.chart) p.chart.data.datasets.length = 0;
-      rebuildPanelChart(p);
-    }
+  forEachPanel(function(p) {
+    if (p.chart) p.chart.data.datasets.length = 0;
+    rebuildPanelChart(p);
+  });
   fetch('/select?sender=' + encodeURIComponent(name));
 }
 
 function getPanelById(id) {
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++)
-      if (rows[ri].panels[pi].id === id) return rows[ri].panels[pi];
-  return null;
+  return panelMap[id] || null;
 }
 
 function activatePanel(p) {
@@ -613,11 +706,9 @@ function activatePanel(p) {
   }
   activePanelId = p.id;
   rebuildSidebar(p);
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var rp = rows[ri].panels[pi];
-      if (rp.el) rp.el.classList.toggle('active', rp.id === p.id);
-    }
+  forEachPanel(function(rp) {
+    if (rp.el) rp.el.classList.toggle('active', rp.id === p.id);
+  });
 }
 
 function rebuildSidebar(p) {
@@ -647,19 +738,15 @@ function rebuildSidebar(p) {
 function ensureField(name) {
   if (fieldMeta[name]) return;
   fieldMeta[name] = { color: getColor() };
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.type === 'plot') p.subscribed[name] = false;
-    }
+  forEachPanel(function(p) {
+    if (p.type === 'plot') p.subscribed[name] = false;
+  });
   var ap = activePanelId !== null ? getPanelById(activePanelId) : null;
   if (ap) rebuildSidebar(ap);
 }
 
 function rebuildAllCharts() {
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++)
-      rebuildPanelChart(rows[ri].panels[pi]);
+  forEachPanel(function(p) { rebuildPanelChart(p); });
 }
 
 function addPoint(ts, data) {
@@ -680,9 +767,7 @@ function addPoint(ts, data) {
   while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
   if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
 
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++)
-      pushDataToPanel(rows[ri].panels[pi]);
+  forEachPanel(function(p) { pushDataToPanel(p); });
 }
 
 function clearPlots() {
@@ -690,12 +775,10 @@ function clearPlots() {
   colorIdx = 0;
   logBuffer = [];
   document.getElementById('field-list').innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.chart) { p.chart.data.datasets.length = 0; p.chart.update('none'); }
-      if (p.legendDiv) p.legendDiv.innerHTML = '';
-    }
+  forEachPanel(function(p) {
+    if (p.chart) { p.chart.data.datasets.length = 0; p.chart.update('none'); }
+    if (p.legendDiv) p.legendDiv.innerHTML = '';
+  });
   refreshAllLogPanels();
 }
 
@@ -703,23 +786,19 @@ function trimData() {
   var history = parseFloat(document.getElementById('history-sel').value);
   if (lastX === 0) return;
   while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (!p.chart) continue;
-      var cutoff = lastX - history;
-      for (var j = 0; j < p.chart.data.datasets.length; j++) {
-        var ds = p.chart.data.datasets[j];
-        while (ds.data.length > 1 && ds.data[0].x < cutoff) ds.data.shift();
-      }
-      updatePanelView(p);
+  forEachPanel(function(p) {
+    if (!p.chart) return;
+    var cutoff = lastX - history;
+    for (var j = 0; j < p.chart.data.datasets.length; j++) {
+      var ds = p.chart.data.datasets[j];
+      while (ds.data.length > 1 && ds.data[0].x < cutoff) ds.data.shift();
     }
+    updatePanelView(p);
+  });
 }
 
 function onSettingsChange() {
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++)
-      updatePanelView(rows[ri].panels[pi]);
+  forEachPanel(function(p) { updatePanelView(p); });
 }
 
 // ── Image ────────────────────────────────────────────────────────────────────
@@ -741,14 +820,12 @@ function setImage(b64, meta) {
 
   imgSources[name] = { b64: 'data:image/jpeg;base64,' + b64, ts: now, kb: (b64.length * 0.75 / 1024).toFixed(0) };
 
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.type !== 'image') continue;
-      refreshImgOptions(p);
-      if (p.imgFps) p.imgFps.textContent = fps + ' fps';
-      if (p.imgSel.value === name) showPanelImage(p);
-    }
+  forEachPanel(function(p) {
+    if (p.type !== 'image') return;
+    refreshImgOptions(p);
+    if (p.imgFps) p.imgFps.textContent = fps + ' fps';
+    if (p.imgSel.value === name) showPanelImage(p);
+  });
 }
 
 // ── Log ──────────────────────────────────────────────────────────────────────
@@ -855,28 +932,24 @@ function replayLogsToPanel(p, stickBottom) {
 }
 
 function refreshAllLogPanels() {
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, true);
-    }
+  forEachPanel(function(p) {
+    if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, true);
+  });
 }
 
 function addLog(ts, level, msg) {
   logBuffer.push({ ts: ts, level: level, msg: msg });
   while (logBuffer.length > LOG_CAP) logBuffer.shift();
   var visible = logLevelVisible(level);
-  for (var ri = 0; ri < rows.length; ri++)
-    for (var pi = 0; pi < rows[ri].panels.length; pi++) {
-      var p = rows[ri].panels[pi];
-      if (p.type !== 'log' || !p.logDiv) continue;
-      var stick = isLogStuckToBottom(p.logDiv);
-      if (visible) p.logDiv.appendChild(makeLogLine({ ts: ts, level: level, msg: msg }));
-      while (p.logDiv.children.length > LOG_CAP) p.logDiv.firstChild.remove();
-      var n = p.logDiv.children.length;
-      p.logCount.textContent = n ? String(n) : '';
-      if (stick) p.logDiv.scrollTop = p.logDiv.scrollHeight;
-    }
+  forEachPanel(function(p) {
+    if (p.type !== 'log' || !p.logDiv) return;
+    var stick = isLogStuckToBottom(p.logDiv);
+    if (visible) p.logDiv.appendChild(makeLogLine({ ts: ts, level: level, msg: msg }));
+    while (p.logDiv.children.length > LOG_CAP) p.logDiv.firstChild.remove();
+    var n = p.logDiv.children.length;
+    p.logCount.textContent = n ? String(n) : '';
+    if (stick) p.logDiv.scrollTop = p.logDiv.scrollHeight;
+  });
 }
 
 // ── SSE ──────────────────────────────────────────────────────────────────────
