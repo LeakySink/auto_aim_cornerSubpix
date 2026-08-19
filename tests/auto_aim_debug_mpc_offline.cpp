@@ -81,6 +81,9 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   tools::RemoteLogger::instance().init(config_path);
+  tools::RemoteLogger::instance().log(
+    "INFO", "mpc offline started d={:.1f}m w={:.1f}rad/s v={:.1f}m/s fps={} config={}", d, w,
+    bullet_speed, fps, config_path);
 
   auto_aim::Solver solver(config_path);
   auto_aim::Planner planner(config_path);
@@ -104,11 +107,13 @@ int main(int argc, char * argv[])
     auto t0 = std::chrono::steady_clock::now();
     auto last_tick = t0;
     uint16_t last_bullet_count = 0;
+    int last_debug_s = -1;
 
     while (!quit) {
       const auto now = std::chrono::steady_clock::now();
       const double dt = tools::delta_time(now, last_tick);
       last_tick = now;
+      const double t = tools::delta_time(now, t0);
 
       auto target_opt = target_queue.front();
       auto plan = planner.plan(target_opt, gimbal.bullet_speed);
@@ -119,8 +124,22 @@ int main(int argc, char * argv[])
       const bool fired = gimbal.bullet_count > last_bullet_count;
       last_bullet_count = gimbal.bullet_count;
 
+      if (fired) {
+        tools::RemoteLogger::instance().log(
+          "INFO", "fired bullet={} t={:.2f}s yaw={:.3f} pitch={:.3f}", gimbal.bullet_count, t,
+          gimbal.yaw, gimbal.pitch);
+      }
+
+      const int debug_s = static_cast<int>(t);
+      if (debug_s != last_debug_s && debug_s % 2 == 0) {
+        last_debug_s = debug_s;
+        tools::RemoteLogger::instance().log(
+          "DEBUG", "t={:.1f}s yaw={:.3f} pitch={:.3f} fire={} control={}", t, gimbal.yaw,
+          gimbal.pitch, plan.fire, plan.control);
+      }
+
       nlohmann::json data;
-      data["t"] = tools::delta_time(now, t0);
+      data["t"] = t;
 
       data["gimbal_yaw"] = gimbal.yaw;
       data["gimbal_yaw_vel"] = gimbal.yaw_vel;
@@ -200,6 +219,9 @@ int main(int argc, char * argv[])
 
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
+  tools::RemoteLogger::instance().log(
+    "INFO", "mpc offline stopped t={:.2f}s bullets={}",
+    tools::delta_time(std::chrono::steady_clock::now(), loop_t0), gimbal.bullet_count);
   tools::RemoteLogger::instance().shutdown();
 
   return 0;
