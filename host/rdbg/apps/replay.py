@@ -10,10 +10,9 @@ from urllib.parse import urlparse
 from ..httputil import ThreadingHTTPServer, serve_page, try_serve_static
 from ..rlog import load, sender_name, to_sse
 
-# Compress idle gaps so long pauses don't feel stuck; still respects --speed.
-_MAX_GAP_S = 0.35
-# When behind, drop dense plot/log samples — never drop images (keep video-like fps).
-_PLOT_CATCHUP_S = 0.02
+# Max wait between successive image frames. Larger recorded gaps are compressed
+# so short camera bursts stitch into continuous video (~30fps).
+_IMG_FRAME_CAP_S = 1.0 / 25.0
 
 
 def _record_ts(rec):
@@ -42,7 +41,6 @@ def _prepare(records):
 def _to_sse(rec):
     if rec.get("_rlog") == "img":
         meta = rec.get("meta") or {}
-        # URL only — base64 in SSE cannot sustain ~30fps and turns video into a slideshow.
         return {
             "type": "image",
             "ts": rec.get("ts", 0),
@@ -79,44 +77,40 @@ def _write_replay_sse(handler, records, images, sender, speed):
             return
 
         speed = max(0.05, float(speed))
-        t0_rec = None
-        t0_wall = time.monotonic()
-        prev_ts = None
+        # Image-driven clock: sleep only between frames; plots/logs flush with no wait
+        # so camera bursts (~30fps) play as continuous video instead of a slideshow.
+        last_img_ts = None
+        last_img_wall = None
+        n_plot = 0
 
         for i, rec in enumerate(records):
-            ts = _record_ts(rec)
-            if t0_rec is None:
-                t0_rec = ts
-                prev_ts = ts
-
-            target = (ts - t0_rec) / 1e9 / speed
-            if prev_ts is not None and ts >= prev_ts:
-                gap = (ts - prev_ts) / 1e9 / speed
-                if gap > _MAX_GAP_S:
-                    t0_wall -= (gap - _MAX_GAP_S)
-
-            now = time.monotonic()
-            delay = target - (now - t0_wall)
             is_img = rec.get("_rlog") == "img"
+            ts = _record_ts(rec)
 
-            # Stay on the image timeline: drop plot/log when late; always emit images.
-            if (not is_img) and delay < -_PLOT_CATCHUP_S:
-                prev_ts = ts
-                continue
+            if is_img:
+                if last_img_ts is not None and last_img_wall is not None:
+                    raw_s = (ts - last_img_ts) / 1e9
+                    if raw_s < 0:
+                        raw_s = 0
+                    # Compress long gaps between camera bursts into one frame time.
+                    wait = min(raw_s, _IMG_FRAME_CAP_S) / speed
+                    delay = wait - (time.monotonic() - last_img_wall)
+                    if delay > 0.0005:
+                        time.sleep(delay)
 
-            if delay > 0.001:
-                time.sleep(delay)
-            elif is_img and delay < -0.05:
-                # Slightly late on a frame: send immediately, do not skip.
-                pass
-
-            msg = _to_sse(rec)
-            if msg:
-                emit(msg)
-                if is_img or i % 8 == 0:
+                msg = _to_sse(rec)
+                if msg:
+                    emit(msg)
                     handler.wfile.flush()
-
-            prev_ts = ts
+                last_img_ts = ts
+                last_img_wall = time.monotonic()
+            else:
+                msg = _to_sse(rec)
+                if msg:
+                    emit(msg)
+                    n_plot += 1
+                    if n_plot % 24 == 0:
+                        handler.wfile.flush()
 
         handler.wfile.flush()
         emit({"type": "status", "connected": True, "sender": sender})
@@ -142,7 +136,7 @@ def run(rlog_path, http_port, speed=1.0):
     sender = sender_name(raw, fallback=path.stem)
     print(
         f"[replay] {path}  {len(records)} records ({len(images)} images)  "
-        f"sender={sender}  speed={speed}x",
+        f"sender={sender}  speed={speed}x  (image-paced video)",
         file=sys.stderr,
     )
 
