@@ -101,7 +101,8 @@ def try_serve_static(handler, raw_path):
     if path.startswith("/static/"):
         fp = _safe_file(path[len("/static/"):])
         if fp:
-            send_file(handler, fp)
+            cache = "no-cache" if "/vendor/" not in path else "public, max-age=3600"
+            send_file(handler, fp, cache=cache)
             return True
         handler.send_error(404)
         return True

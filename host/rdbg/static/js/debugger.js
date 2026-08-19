@@ -768,21 +768,53 @@ function logLevelVisible(lv) {
   return !!logLevelOn[normLogLevel(lv)];
 }
 
-function onLogFilterChange() {
+function syncLogFilterUI() {
   document.querySelectorAll('.log-lv-cb').forEach(function(cb) {
-    logLevelOn[cb.value] = cb.checked;
+    cb.checked = !!logLevelOn[cb.value];
   });
+}
+
+function onLogFilterChange(ev) {
+  var t = ev && ev.target;
+  if (t && t.classList && t.classList.contains('log-lv-cb')) {
+    logLevelOn[t.value] = t.checked;
+  } else {
+    document.querySelectorAll('.log-lv-cb').forEach(function(cb) {
+      logLevelOn[cb.value] = cb.checked;
+    });
+  }
+  syncLogFilterUI();
   refreshAllLogPanels();
 }
 
+document.addEventListener('change', function(ev) {
+  if (ev.target && ev.target.classList && ev.target.classList.contains('log-lv-cb')) {
+    onLogFilterChange(ev);
+  }
+});
+
 function setupLogBody(p, body) {
   body.classList.add('log-body');
+  var bar = document.createElement('div');
+  bar.className = 'log-toolbar';
+  ['DEBUG', 'INFO', 'WARN', 'ERROR'].forEach(function(lv) {
+    var lab = document.createElement('label');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'log-lv-cb';
+    cb.value = lv;
+    cb.checked = !!logLevelOn[lv];
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(lv));
+    bar.appendChild(lab);
+  });
+  var lc = document.createElement('span');
+  lc.className = 'log-count';
+  bar.appendChild(lc);
+  body.appendChild(bar);
   var logs = document.createElement('div');
   logs.className = 'log-stream';
   body.appendChild(logs);
-  var lc = document.createElement('span');
-  lc.className = 'log-count';
-  body.appendChild(lc);
   p.logDiv = logs;
   p.logCount = lc;
   replayLogsToPanel(p, true);
