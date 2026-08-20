@@ -1,4 +1,5 @@
-// ── Sidebar toggle ────────────────────────────────────────────────────────────
+// Layout shell — tiling, type switch, SSE. Panel internals live in plugins/*.js.
+
 const sidebar = document.getElementById('sidebar');
 const toggleBtn = document.getElementById('sidebar-toggle');
 toggleBtn.addEventListener('click', function() {
@@ -7,7 +8,6 @@ toggleBtn.addEventListener('click', function() {
   setTimeout(relayout, 200);
 });
 
-// ── Layout engine (nested tiling) ─────────────────────────────────────────────
 const mainArea = document.getElementById('main-area');
 const topBar = document.getElementById('top-bar');
 const SPLIT_PX = 3;
@@ -110,7 +110,7 @@ function relayout() {
     el.addEventListener('mousedown', function(e) { startDrag(s, e); });
     mainArea.appendChild(el);
   });
-  updateAllCharts();
+  if (typeof updateAllCharts === 'function') updateAllCharts();
 }
 
 function layoutNode(node, x, y, w, h, splitters) {
@@ -148,6 +148,56 @@ function layoutNode(node, x, y, w, h, splitters) {
   }
 }
 
+function panelTypeSel(p) {
+  return p.el ? p.el.querySelector('select.panel-type') : null;
+}
+
+function fillTypeSelect(sel, current) {
+  sel.innerHTML = '';
+  var specs = Rdbg.list();
+  var seen = {};
+  for (var i = 0; i < specs.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = specs[i].id;
+    opt.textContent = specs[i].title;
+    if (specs[i].id === current) opt.selected = true;
+    sel.appendChild(opt);
+    seen[specs[i].id] = true;
+  }
+  if (current && !seen[current]) {
+    var extra = document.createElement('option');
+    extra.value = current;
+    extra.textContent = current;
+    extra.selected = true;
+    sel.appendChild(extra);
+  }
+}
+
+function mountPlugin(p) {
+  var spec = Rdbg.get(p.type);
+  if (!spec) return;
+  var hdr = p.el.querySelector('.panel-header');
+  var typeSel = panelTypeSel(p);
+  var body = p.el.querySelector('.panel-body');
+  if (spec.setupHeader) spec.setupHeader(p, hdr, typeSel);
+  if (spec.setupBody) spec.setupBody(p, body);
+  if (spec.init) spec.init(p);
+}
+
+function clearPanelContent(p) {
+  var spec = Rdbg.get(p.type);
+  if (spec && spec.destroy) spec.destroy(p);
+  if (!p.el) return;
+  var body = p.el.querySelector('.panel-body');
+  if (body) {
+    body.innerHTML = '';
+    body.classList.remove('log-body');
+  }
+  p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false; p.fieldDiv = null;
+  p.imgEl = null; p.placeholder = null; p.imgInfo = null; p.imgSel = null; p.imgFps = null;
+  p.logDiv = null; p.logCount = null;
+}
+
 function ensurePanelDOM(p) {
   if (p.el) return;
   var el = document.createElement('div');
@@ -155,37 +205,11 @@ function ensurePanelDOM(p) {
   var hdr = document.createElement('div');
   hdr.className = 'panel-header';
 
-  if (p.type === 'plot') {
-    var pidLabel = document.createElement('span');
-    pidLabel.className = 'panel-id';
-    pidLabel.textContent = 'P' + p.id;
-    pidLabel.title = '点击切换设置';
-    pidLabel.onclick = function(e) { e.stopPropagation(); activatePanel(p); };
-    hdr.appendChild(pidLabel);
-  }
-
   var typeSel = document.createElement('select');
-  [{v:'plot',t:'绘图'},{v:'image',t:'图像'},{v:'log',t:'日志'}].forEach(function(o) {
-    var opt = document.createElement('option');
-    opt.value = o.v; opt.textContent = o.t;
-    if (o.v === p.type) opt.selected = true;
-    typeSel.appendChild(opt);
-  });
+  typeSel.className = 'panel-type';
+  fillTypeSelect(typeSel, p.type);
   typeSel.onchange = function() { switchPanelType(p, typeSel.value); };
   hdr.appendChild(typeSel);
-
-  if (p.type === 'image') {
-    var imgSel = document.createElement('select');
-    imgSel.style.cssText = 'max-width:130px;margin-left:4px';
-    imgSel.onchange = function() { showPanelImage(p); };
-    hdr.appendChild(imgSel);
-    p.imgSel = imgSel;
-    var fpsSpan = document.createElement('span');
-    fpsSpan.style.cssText = 'color:#606070;font-size:12px;margin-left:6px;flex-shrink:0';
-    fpsSpan.textContent = '0 fps';
-    hdr.appendChild(fpsSpan);
-    p.imgFps = fpsSpan;
-  }
 
   var sp = document.createElement('span'); sp.style.flex = '1'; hdr.appendChild(sp);
 
@@ -210,336 +234,18 @@ function ensurePanelDOM(p) {
 
   var body = document.createElement('div');
   body.className = 'panel-body';
-  if (p.type === 'plot') {
-    var cvs = document.createElement('canvas');
-    body.appendChild(cvs);
-    var legend = document.createElement('div');
-    legend.className = 'plot-legend';
-    body.appendChild(legend);
-    p.legendDiv = legend; p.chartEl = cvs;
-  } else if (p.type === 'image') {
-    var img = document.createElement('img'); img.style.display = 'none'; body.appendChild(img);
-    var ph = document.createElement('span'); ph.className = 'placeholder'; ph.textContent = '等待中\u2026'; body.appendChild(ph);
-    var info = document.createElement('div'); info.className = 'panel-img-info'; body.appendChild(info);
-    p.imgEl = img; p.placeholder = ph; p.imgInfo = info;
-  } else {
-    setupLogBody(p, body);
-  }
   el.appendChild(body);
-  if (p.type === 'plot') {
-    body.addEventListener('click', function() { activatePanel(p); });
-  }
   mainArea.appendChild(el);
   p.el = el;
-  initPanelContent(p);
-}
-
-function initPanelContent(p) {
-  if (p.type === 'plot') initPlotPanel(p);
-  else if (p.type === 'image') initImagePanel(p);
-}
-
-function initPlotPanel(p) {
-  if (!p.chartEl) return;
-  p.manualView = false;
-  p.lastMouseX = 0;
-  p.subscribed = {};
-  for (var n in fieldMeta) p.subscribed[n] = false;
-  if (activePanelId === null) activatePanel(p);
-  var win = parseFloat(document.getElementById('win-size').value) || 10;
-  p.chart = new Chart(p.chartEl.getContext('2d'), {
-    type: 'line', data: { datasets: [] },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      interaction: { mode: 'nearest', intersect: false },
-      plugins: {
-        legend: { display: false },
-        zoom: {
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: function() { return p.lastMouseX < 50 ? 'y' : 'x'; },
-            overScaleMode: 'y',
-            onZoomStart: function() { p.manualView = true; }
-          },
-          pan: {
-            enabled: true,
-            mode: 'x',
-            overScaleMode: 'y',
-            onPanStart: function() { p.manualView = true; }
-          },
-          limits: { x: { min: 0 } }
-        }
-      },
-      scales: {
-        x: { type: 'linear', title:{display:true,text:'time (s)',color:'#606070',font:{size:12}}, ticks:{color:'#505060',font:{size:11}}, grid:{color:'#202030'}, min:0, max:win },
-        y: { title:{display:true,text:'value',color:'#606070',font:{size:12}}, ticks:{color:'#505060',font:{size:11}}, grid:{color:'#202030'} }
-      }
-    }
-  });
-  p.chart.canvas.addEventListener('mousemove', function(e) {
-    var r = p.chart.canvas.getBoundingClientRect();
-    p.lastMouseX = e.clientX - r.left;
-  });
-  renderLegend(p);
-  rebuildPanelChart(p);
-}
-
-function initImagePanel(p) {
-  if (!p.imgEl) return;
-  p.imgScale = 1;
-  p.imgTx = 0; p.imgTy = 0;
-  p.imgDragging = false;
-
-  var body = p.el.querySelector('.panel-body');
-  body.addEventListener('wheel', function(e) {
-    e.preventDefault();
-    var s0 = p.imgScale;
-    p.imgScale *= e.deltaY > 0 ? 0.9 : 1.1;
-    if (p.imgScale < 0.1) p.imgScale = 0.1;
-    if (p.imgScale > 15) p.imgScale = 15;
-    var r = body.getBoundingClientRect();
-    var mx = e.clientX - r.left - r.width / 2;
-    var my = e.clientY - r.top - r.height / 2;
-    p.imgTx = mx + (p.imgTx - mx) * p.imgScale / s0;
-    p.imgTy = my + (p.imgTy - my) * p.imgScale / s0;
-    applyImgTransform(p);
-  });
-  body.addEventListener('mousedown', function(e) {
-    if (e.button !== 0) return;
-    p.imgDragging = true;
-    p.imgDragX = e.clientX - p.imgTx;
-    p.imgDragY = e.clientY - p.imgTy;
-    body.style.cursor = 'grabbing';
-  });
-  window.addEventListener('mousemove', function(e) {
-    if (!p.imgDragging) return;
-    p.imgTx = e.clientX - p.imgDragX;
-    p.imgTy = e.clientY - p.imgDragY;
-    applyImgTransform(p);
-  });
-  window.addEventListener('mouseup', function() {
-    if (p.imgDragging) {
-      p.imgDragging = false;
-      body.style.cursor = '';
-    }
-  });
-  p.imgEl.addEventListener('dragstart', function(e) { e.preventDefault(); });
-
-  refreshImgOptions(p);
-  if (Object.keys(imgSources).length > 0) showPanelImage(p);
-}
-
-function applyImgTransform(p) {
-  if (!p.imgEl) return;
-  p.imgEl.style.transform = 'translate(-50%,-50%) translate(' + p.imgTx.toFixed(1) + 'px,' + p.imgTy.toFixed(1) + 'px) scale(' + p.imgScale.toFixed(3) + ')';
-}
-
-function resetImgView(p) {
-  if (p.type !== 'image') return;
-  p.imgScale = 1; p.imgTx = 0; p.imgTy = 0;
-  applyImgTransform(p);
-}
-
-function renderLegend(p) {
-  if (!p || !p.legendDiv || p.type !== 'plot') return;
-  if (!p.chart) return;
-  p.legendDiv.innerHTML = '';
-  for (var n in fieldMeta) {
-    if (!p.subscribed[n]) continue;
-    for (var i = 0; i < p.chart.data.datasets.length; i++) {
-      if (p.chart.data.datasets[i].label === n) { idx = i; break; }
-    }
-    var visible = idx >= 0 ? p.chart.isDatasetVisible(idx) : true;
-    var item = document.createElement('div');
-    item.className = 'item';
-    var box = document.createElement('div');
-    box.className = 'box ' + (visible ? 'on' : 'off');
-    box.style.setProperty('--c', fieldMeta[n].color);
-    item.appendChild(box);
-    item.appendChild(document.createTextNode(n));
-    item.setAttribute('data-idx', idx);
-    item.onclick = function(e) {
-      e.stopPropagation();
-      var i = parseInt(this.getAttribute('data-idx'));
-      if (i >= 0 && p.chart) {
-        p.chart.data.datasets[i].hidden = !p.chart.data.datasets[i].hidden;
-        p.chart.update();
-        renderLegend(p);
-      }
-    };
-    item.style.cssText = 'min-height:18px;padding:2px 0';
-    p.legendDiv.appendChild(item);
-  }
-}
-
-function rebuildPanelChart(p) {
-  if (!p.chart) return;
-  p.chart.data.datasets.length = 0;
-  for (var name in fieldMeta) {
-    if (!p.subscribed[name]) continue;
-    var ds = { label: name, data: [], borderColor: fieldMeta[name].color, borderWidth: 1.8, pointRadius: 0, spanGaps: false, hidden: false };
-    for (var i = 0; i < plotData.length; i++) {
-      var yv = plotData[i].fields[name];
-      ds.data.push({ x: plotData[i].x, y: yv !== undefined ? yv : NaN });
-    }
-    p.chart.data.datasets.push(ds);
-  }
-  p.chart.update('none');
-  renderLegend(p);
-  updatePanelView(p);
-}
-
-function pushDataToPanel(p) {
-  if (p.type !== 'plot' || !p.chart) return;
-
-  var existingLabels = {};
-  p.chart.data.datasets.forEach(function(ds) { existingLabels[ds.label] = true; });
-  var addedNew = false;
-  for (var name in fieldMeta) {
-    if (!p.subscribed[name]) continue;
-    if (existingLabels[name]) continue;
-    var ds = { label: name, data: [], borderColor: fieldMeta[name].color, borderWidth: 1.8, pointRadius: 0, spanGaps: false, hidden: false };
-    for (var i = 0; i < plotData.length - 1; i++) {
-      var yv = plotData[i].fields[name];
-      ds.data.push({ x: plotData[i].x, y: yv !== undefined ? yv : NaN });
-    }
-    p.chart.data.datasets.push(ds);
-    existingLabels[name] = true;
-    addedNew = true;
-  }
-
-  if (addedNew) p.chart.update('none');
-
-  var last = plotData[plotData.length - 1];
-  if (!last) return;
-  var history = parseFloat(document.getElementById('history-sel').value);
-  for (var i = 0; i < p.chart.data.datasets.length; i++) {
-    var ds = p.chart.data.datasets[i];
-    var yv = last.fields[ds.label];
-    ds.data.push({ x: last.x, y: yv !== undefined ? yv : NaN });
-    while (ds.data.length > 1 && ds.data[0].x < last.x - history) ds.data.shift();
-    if (ds.data.length > MAX_PTS) ds.data.splice(0, ds.data.length - MAX_PTS);
-  }
-  renderLegend(p);
-  updatePanelView(p);
-}
-
-function updatePanelView(p) {
-  if (!p.chart || lastX === 0) return;
-  if (p.manualView) { p.chart.update('none'); return; }
-  var mode = document.querySelector('input[name="mode"]:checked').value;
-  var win = parseFloat(document.getElementById('win-size').value) || 10;
-  if (mode === 'paused') { p.chart.update('none'); return; }
-  else if (mode === 'centered') {
-    p.chart.options.scales.x.min = lastX - win / 2;
-    p.chart.options.scales.x.max = lastX + win / 2;
-  } else {
-    p.chart.options.scales.x.min = Math.max(0, lastX - win);
-    p.chart.options.scales.x.max = Math.max(win, lastX);
-  }
-  p.chart.update('none');
-}
-
-function updateAllCharts() {
-  forEachPanel(function(p) { updatePanelView(p); });
-}
-
-function resetAllViews() {
-  forEachPanel(function(p) {
-    if (p.type === 'plot' && p.chart) {
-      p.manualView = false;
-      if (p.chart.resetZoom) p.chart.resetZoom();
-      updatePanelView(p);
-    } else if (p.type === 'image') {
-      resetImgView(p);
-    }
-  });
-}
-
-function showPanelImage(p) {
-  if (p.type !== 'image' || !p.imgSel) return;
-  var name = p.imgSel.value;
-  if (!name) { var keys = Object.keys(imgSources); if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; } }
-  var s = imgSources[name];
-  if (s && s.b64) {
-    p.imgEl.src = s.b64; p.imgEl.style.display = '';
-    p.placeholder.style.display = 'none'; p.imgInfo.textContent = s.kb + ' KB';
-  }
-}
-
-function refreshImgOptions(p) {
-  if (!p || !p.imgSel) return;
-  var cur = p.imgSel.value;
-  p.imgSel.innerHTML = '';
-  var keys = Object.keys(imgSources);
-  if (keys.length === 0) {
-    p.imgSel.appendChild(Object.assign(document.createElement('option'), {value:'',textContent:'\u2014'}));
-    return;
-  }
-  for (var i = 0; i < keys.length; i++) {
-    var opt = document.createElement('option');
-    opt.value = keys[i]; opt.textContent = keys[i];
-    p.imgSel.appendChild(opt);
-  }
-  if (cur && imgSources[cur]) p.imgSel.value = cur;
-  else p.imgSel.value = keys[0];
+  mountPlugin(p);
 }
 
 function switchPanelType(p, newType) {
   if (p.type === newType) return;
-  if (p.type === 'plot' && p.chart) { p.chart.destroy(); p.chart = null; }
-  if (p.type === 'image') { p.imgDragging = false; }
-  if (p.imgSel) { p.imgSel.remove(); p.imgSel = null; }
-  if (p.imgFps) { p.imgFps.remove(); p.imgFps = null; }
-  var oldPid = p.el.querySelector('.panel-id');
-  if (oldPid) oldPid.remove();
+  clearPanelContent(p);
   p.type = newType;
-  p.el.querySelector('.panel-body').innerHTML = '';
-  p.el.querySelector('.panel-body').classList.remove('log-body');
-  p.legendDiv = null; p.chartEl = null; p.chart = null; p.manualView = false; p.fieldDiv = null;
-  p.imgEl = null; p.placeholder = null; p.imgInfo = null;
-  p.logDiv = null; p.logCount = null;
-  var body = p.el.querySelector('.panel-body');
-  if (newType === 'plot') {
-    var typeSel = p.el.querySelector('.panel-header select');
-    var pidLabel = document.createElement('span');
-    pidLabel.className = 'panel-id';
-    pidLabel.textContent = 'P' + p.id;
-    pidLabel.title = '点击切换设置';
-    pidLabel.onclick = function(e) { e.stopPropagation(); activatePanel(p); };
-    typeSel.parentNode.insertBefore(pidLabel, typeSel);
-    var cvs = document.createElement('canvas'); body.appendChild(cvs);
-    var legend = document.createElement('div'); legend.className = 'plot-legend';
-    body.appendChild(legend);
-    body.addEventListener('click', function() { activatePanel(p); });
-    p.legendDiv = legend; p.chartEl = cvs;
-    initPlotPanel(p);
-  } else if (newType === 'image') {
-    var img = document.createElement('img'); img.style.display = 'none'; body.appendChild(img);
-    var ph = document.createElement('span'); ph.className = 'placeholder'; ph.textContent = 'Waiting\u2026'; body.appendChild(ph);
-    var info = document.createElement('div'); info.className = 'panel-img-info'; body.appendChild(info);
-    p.imgEl = img; p.placeholder = ph; p.imgInfo = info;
-    var typeSel = p.el.querySelector('.panel-header select');
-    var imgSel = document.createElement('select');
-    imgSel.style.cssText = 'max-width:130px;margin-left:4px';
-    imgSel.onchange = function() { showPanelImage(p); };
-    typeSel.insertAdjacentElement('afterend', imgSel);
-    p.imgSel = imgSel;
-    var fpsSpan = document.createElement('span');
-    fpsSpan.style.cssText = 'color:#606070;font-size:12px;margin-left:6px;flex-shrink:0';
-    fpsSpan.textContent = '0 fps';
-    imgSel.insertAdjacentElement('afterend', fpsSpan);
-    p.imgFps = fpsSpan;
-    initImagePanel(p);
-  } else {
-    setupLogBody(p, body);
-  }
-  refreshHeaderSelect(p);
-}
-
-function refreshHeaderSelect(p) {
-  var sel = p.el.querySelector('.panel-header select');
+  mountPlugin(p);
+  var sel = panelTypeSel(p);
   if (sel) sel.value = p.type;
 }
 
@@ -634,10 +340,11 @@ function removePanel(panelId) {
   var found = findPanelNode(panelId);
   if (!found) return;
   var p = found.node.panel;
-  if (p.chart) p.chart.destroy();
+  var spec = Rdbg.get(p.type);
+  if (spec && spec.destroy) spec.destroy(p);
   if (p.el) p.el.remove();
   delete panelMap[p.id];
-  if (activePanelId === p.id) activePanelId = null;
+  if (typeof activePanelId !== 'undefined' && activePanelId === p.id) activePanelId = null;
   if (!found.parent) return;
   found.parent.children.splice(found.index, 1);
   if (found.parent.children.length === 1) {
@@ -674,13 +381,12 @@ function startDrag(info, e) {
   document.addEventListener('mouseup', onUp);
 }
 
-// ── Data ─────────────────────────────────────────────────────────────────────
-const COLORS = ['#4fc3f7','#ffb74d','#81c784','#e57373','#ba68c8','#4dd0e1','#fff176','#a1887f','#90a4ae','#f48fb1','#ef5350','#26c6da','#7e57c2','#66bb6a','#ff7043'];
-var fieldMeta = {}, colorIdx = 0, xField = 'ts', firstTs = null, lastX = 0;
-var plotData = [], activePanelId = null;
-const MAX_PTS = 50000;
-
-function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
+function resetAllViews() {
+  forEachPanel(function(p) {
+    var spec = Rdbg.get(p.type);
+    if (spec && spec.reset) spec.reset(p);
+  });
+}
 
 function onSenderChange() {
   var name = document.getElementById('sender-sel').value;
@@ -688,277 +394,31 @@ function onSenderChange() {
   plotData = [];
   forEachPanel(function(p) {
     if (p.chart) p.chart.data.datasets.length = 0;
-    rebuildPanelChart(p);
+    if (typeof rebuildPanelChart === 'function') rebuildPanelChart(p);
   });
   fetch('/select?sender=' + encodeURIComponent(name));
-}
-
-function getPanelById(id) {
-  return panelMap[id] || null;
-}
-
-function activatePanel(p) {
-  if (!p || p.type !== 'plot') return;
-  var old = activePanelId !== null ? getPanelById(activePanelId) : null;
-  if (old && old !== p && old.fieldDiv) {
-    var cbs = old.fieldDiv.querySelectorAll('input');
-    for (var i = 0; i < cbs.length; i++) old.subscribed[cbs[i].value] = cbs[i].checked;
-  }
-  activePanelId = p.id;
-  rebuildSidebar(p);
-  forEachPanel(function(rp) {
-    if (rp.el) rp.el.classList.toggle('active', rp.id === p.id);
-  });
-}
-
-function rebuildSidebar(p) {
-  var fl = document.getElementById('field-list');
-  fl.innerHTML = '';
-  if (!p || Object.keys(fieldMeta).length === 0) {
-    fl.innerHTML = '<span style=\"color:#404050;font-size:13px\">等待数据…</span>';
-    return;
-  }
-  for (var name in fieldMeta) {
-    var lb = document.createElement('label');
-    lb.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:14px;padding:1px 0;color:#a0a0b0;cursor:pointer';
-    var cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.value = name;
-    cb.checked = p.subscribed[name] || false;
-    cb.onchange = function() {
-      p.subscribed[this.value] = this.checked;
-      rebuildPanelChart(p);
-    };
-    lb.appendChild(cb);
-    lb.appendChild(document.createTextNode(' ' + name));
-    fl.appendChild(lb);
-  }
-  p.fieldDiv = fl;
-}
-
-function ensureField(name) {
-  if (fieldMeta[name]) return;
-  fieldMeta[name] = { color: getColor() };
-  forEachPanel(function(p) {
-    if (p.type === 'plot') p.subscribed[name] = false;
-  });
-  var ap = activePanelId !== null ? getPanelById(activePanelId) : null;
-  if (ap) rebuildSidebar(ap);
-}
-
-function rebuildAllCharts() {
-  forEachPanel(function(p) { rebuildPanelChart(p); });
-}
-
-function addPoint(ts, data) {
-  var xv;
-  if (xField === 'ts') { if (firstTs === null) firstTs = ts; xv = (ts - firstTs) / 1e9; }
-  else if (data[xField] !== undefined) xv = data[xField];
-  else xv = lastX + 0.02;
-  lastX = xv;
-
-  var pt = { x: xv, fields: {} };
-  for (var k in data) {
-    if (k === xField || typeof data[k] !== 'number') continue;
-    ensureField(k);
-    pt.fields[k] = data[k];
-  }
-  plotData.push(pt);
-  var history = parseFloat(document.getElementById('history-sel').value);
-  while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
-  if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
-
-  forEachPanel(function(p) { pushDataToPanel(p); });
 }
 
 function clearPlots() {
   plotData = []; fieldMeta = {}; firstTs = null; lastX = 0; activePanelId = null;
   colorIdx = 0;
   logBuffer = [];
-  document.getElementById('field-list').innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
+  var fl = document.getElementById('field-list');
+  if (fl) fl.innerHTML = '<span style="color:#404050;font-size:13px">等待数据\u2026</span>';
   forEachPanel(function(p) {
     if (p.chart) { p.chart.data.datasets.length = 0; p.chart.update('none'); }
     if (p.legendDiv) p.legendDiv.innerHTML = '';
   });
-  refreshAllLogPanels();
+  if (typeof refreshAllLogPanels === 'function') refreshAllLogPanels();
 }
 
-function trimData() {
-  var history = parseFloat(document.getElementById('history-sel').value);
-  if (lastX === 0) return;
-  while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
-  forEachPanel(function(p) {
-    if (!p.chart) return;
-    var cutoff = lastX - history;
-    for (var j = 0; j < p.chart.data.datasets.length; j++) {
-      var ds = p.chart.data.datasets[j];
-      while (ds.data.length > 1 && ds.data[0].x < cutoff) ds.data.shift();
-    }
-    updatePanelView(p);
-  });
-}
-
-function onSettingsChange() {
-  forEachPanel(function(p) { updatePanelView(p); });
-}
-
-// ── Image ────────────────────────────────────────────────────────────────────
-var imgSources = {};
-var imgFpsTracker = {};
-
-function setImage(b64, meta) {
-  var name = (meta && meta.name) ? meta.name : 'default';
-  var now = Date.now();
-
-  if (!imgFpsTracker[name]) imgFpsTracker[name] = [];
-  imgFpsTracker[name].push(now);
-  while (imgFpsTracker[name].length > 10) imgFpsTracker[name].shift();
-  var fps = 0;
-  if (imgFpsTracker[name].length >= 2) {
-    var dt = now - imgFpsTracker[name][0];
-    fps = Math.round((imgFpsTracker[name].length - 1) * 1000 / dt);
-  }
-
-  imgSources[name] = { b64: 'data:image/jpeg;base64,' + b64, ts: now, kb: (b64.length * 0.75 / 1024).toFixed(0) };
-
-  forEachPanel(function(p) {
-    if (p.type !== 'image') return;
-    refreshImgOptions(p);
-    if (p.imgFps) p.imgFps.textContent = fps + ' fps';
-    if (p.imgSel.value === name) showPanelImage(p);
-  });
-}
-
-// ── Log ──────────────────────────────────────────────────────────────────────
-var LOG_CAP = 500;
-var logBuffer = [];
-var logLevelOn = { DEBUG: true, INFO: true, WARN: true, ERROR: true };
-
-function normLogLevel(lv) {
-  lv = String(lv || 'INFO').toUpperCase();
-  if (lv === 'WARNING') return 'WARN';
-  if (lv === 'FATAL' || lv === 'CRITICAL') return 'ERROR';
-  if (logLevelOn[lv] === undefined) return 'INFO';
-  return lv;
-}
-
-function logLevelVisible(lv) {
-  return !!logLevelOn[normLogLevel(lv)];
-}
-
-function syncLogFilterUI() {
-  document.querySelectorAll('.log-lv-cb').forEach(function(cb) {
-    cb.checked = !!logLevelOn[cb.value];
-  });
-}
-
-function onLogFilterChange(ev) {
-  var t = ev && ev.target;
-  if (t && t.classList && t.classList.contains('log-lv-cb')) {
-    logLevelOn[t.value] = t.checked;
-  } else {
-    document.querySelectorAll('.log-lv-cb').forEach(function(cb) {
-      logLevelOn[cb.value] = cb.checked;
-    });
-  }
-  syncLogFilterUI();
-  refreshAllLogPanels();
-}
-
-document.addEventListener('change', function(ev) {
-  if (ev.target && ev.target.classList && ev.target.classList.contains('log-lv-cb')) {
-    onLogFilterChange(ev);
-  }
-});
-
-function setupLogBody(p, body) {
-  body.classList.add('log-body');
-  var bar = document.createElement('div');
-  bar.className = 'log-toolbar';
-  ['DEBUG', 'INFO', 'WARN', 'ERROR'].forEach(function(lv) {
-    var lab = document.createElement('label');
-    var cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'log-lv-cb';
-    cb.value = lv;
-    cb.checked = !!logLevelOn[lv];
-    lab.appendChild(cb);
-    lab.appendChild(document.createTextNode(lv));
-    bar.appendChild(lab);
-  });
-  var lc = document.createElement('span');
-  lc.className = 'log-count';
-  bar.appendChild(lc);
-  body.appendChild(bar);
-  var logs = document.createElement('div');
-  logs.className = 'log-stream';
-  body.appendChild(logs);
-  p.logDiv = logs;
-  p.logCount = lc;
-  replayLogsToPanel(p, true);
-}
-
-function formatLogTs(ts) {
-  var t = new Date(ts / 1e6);
-  return t.toTimeString().slice(0, 8) + '.' + String(t.getMilliseconds()).padStart(3, '0');
-}
-
-function makeLogLine(entry) {
-  var div = document.createElement('div');
-  div.className = 'log-line';
-  var lv = normLogLevel(entry.level);
-  var msg = String(entry.msg == null ? '' : entry.msg);
-  div.innerHTML = '<span class="log-ts">' + formatLogTs(entry.ts) +
-    '</span><span class="log-lv ' + lv + '">' + lv +
-    '</span><span class="log-msg"></span>';
-  div.querySelector('.log-msg').textContent = msg;
-  return div;
-}
-
-function isLogStuckToBottom(el) {
-  return el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
-}
-
-function replayLogsToPanel(p, stickBottom) {
-  if (!p.logDiv) return;
-  p.logDiv.innerHTML = '';
-  var n = 0;
-  for (var i = 0; i < logBuffer.length; i++) {
-    if (!logLevelVisible(logBuffer[i].level)) continue;
-    p.logDiv.appendChild(makeLogLine(logBuffer[i]));
-    n++;
-  }
-  p.logCount.textContent = n ? String(n) : '';
-  if (stickBottom !== false) p.logDiv.scrollTop = p.logDiv.scrollHeight;
-}
-
-function refreshAllLogPanels() {
-  forEachPanel(function(p) {
-    if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, true);
-  });
-}
-
-function addLog(ts, level, msg) {
-  logBuffer.push({ ts: ts, level: level, msg: msg });
-  while (logBuffer.length > LOG_CAP) logBuffer.shift();
-  var visible = logLevelVisible(level);
-  forEachPanel(function(p) {
-    if (p.type !== 'log' || !p.logDiv) return;
-    var stick = isLogStuckToBottom(p.logDiv);
-    if (visible) p.logDiv.appendChild(makeLogLine({ ts: ts, level: level, msg: msg }));
-    while (p.logDiv.children.length > LOG_CAP) p.logDiv.firstChild.remove();
-    var n = p.logDiv.children.length;
-    p.logCount.textContent = n ? String(n) : '';
-    if (stick) p.logDiv.scrollTop = p.logDiv.scrollHeight;
-  });
-}
-
-// ── SSE ──────────────────────────────────────────────────────────────────────
 const dot = document.getElementById('dot'), stats = document.getElementById('stats');
 var pktCount = 0, lastPktTime = Date.now(), lastAnyPkt = 0;
 var clientTimeout = 4000;
 
 function setConnected(c, sender) {
   var st = document.getElementById('status');
+  if (!st || !dot) return;
   if (c) {
     dot.className = 'dot';
     st.textContent = sender ? '已连接 \u2192 ' + sender : '已连接';
@@ -979,7 +439,7 @@ es.onmessage = function(e) {
     pktCount++;
     var now = Date.now();
     if (now - lastPktTime >= 1000) {
-      stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
+      if (stats) stats.textContent = Math.round(pktCount * 1000 / (now - lastPktTime)) + ' pkt/s';
       pktCount = 0; lastPktTime = now;
     }
     var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
@@ -989,6 +449,7 @@ es.onmessage = function(e) {
     else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
     else if (msg.type === 'state') {
       var sel = document.getElementById('sender-sel');
+      if (!sel) return;
       var cur = sel.value;
       sel.innerHTML = '';
       var list = msg.senders || [];
@@ -1003,8 +464,7 @@ es.onmessage = function(e) {
     }
   } catch (err) {}
 };
-es.onerror = function() { dot.className = 'dot dead'; };
+es.onerror = function() { if (dot) dot.className = 'dot dead'; };
 
-// ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', function() { relayout(); });
 initLayout();
