@@ -20,6 +20,10 @@ host/
     apps/debugger.py       薄入口：壳 + live
     apps/replay.py         薄入口：壳 + replay
     static/                HTML / CSS / JS / vendor
+      js/rdbg.js           面板注册表
+      js/plugins/          plot / image / log
+      js/debugger.js       分屏壳 + SSE
+      js/replay.js         回放进度条
 ```
 
 ## 架构
@@ -105,7 +109,9 @@ GET /static/...      CSS / JS / vendor
 
 ### 前端
 
-只做渲染：SSE `state` 更新下拉框，`plot` / `image` / `log` 画图，下拉框请求 `/select`。
+`debugger.js` 只做分屏和 SSE。面板是插件：`static/js/plugins/{plot,image,log}.js` 调用 `Rdbg.registerPanel`。下拉框从注册表生成。加一种视图：新插件文件 + 在 html 里加一行 `<script>`。
+
+SSE `state` 更新发送方下拉框；`plot` / `image` / `log` 交给对应插件；下拉框请求 `/select`。
 
 | type | 说明 |
 |------|------|
@@ -117,7 +123,7 @@ GET /static/...      CSS / JS / vendor
 
 ### sources/replay.py — 本地 `.rlog` 回放
 
-与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存后，**复用 watch 同一套前端**（`debugger.css` / `debugger.js`）：可拆分面板、切换图像 `name`、筛选日志。底部进度条由 `replay.js` 驱动。
+与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存后，**复用 watch 同一套壳和面板插件**。底部进度条由 `replay.js` 驱动。
 
 ```
 GET /                replay.html（watch 布局 + 回放条）
