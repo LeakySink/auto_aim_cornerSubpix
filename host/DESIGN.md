@@ -2,7 +2,7 @@
 
 给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
-本文约定：路径相对 `host/`。包名 `rdbg`，靠 `watch.sh` / `replay.sh` 把 `host/` 加进 `PYTHONPATH` 后 `python3 -m rdbg …`。
+本文约定：路径相对 `host/`。包名 `rdbg`。Unix 用 `watch.sh` / `replay.sh`，Windows 用 `watch.bat` / `replay.bat`，把 `host/` 加进 `PYTHONPATH` 后跑 `python -m rdbg …`。`run.py` 只看 `sys.platform`，Windows 调 `.bat`，否则调 `.sh`。
 
 ---
 
@@ -10,7 +10,9 @@
 
 ```
 host/
-  watch.sh / replay.sh     唯一对外入口
+  watch.sh / replay.sh     Unix 入口
+  watch.bat / replay.bat   Windows 入口
+  run.py                   按平台转发到上面
   HOST.md                  使用者
   DESIGN.md                本文件
   rdbg/                    Python 包（不要直接当脚本跑）

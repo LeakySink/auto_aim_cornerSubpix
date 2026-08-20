@@ -8,7 +8,9 @@
 
 ```
 host/
-  watch.sh / replay.sh     入口
+  watch.sh / replay.sh     Unix 入口
+  watch.bat / replay.bat   Windows 入口
+  run.py                   按平台选上面两者
   HOST.md / DESIGN.md
   rdbg/
     http/     路由 · SSE · 静态
@@ -23,9 +25,26 @@ watch 与 replay 是两个进程，共用 HTTP 壳和面板插件，数据源不
 
 ## 快速开始
 
+Unix：
+
 ```bash
 ./host/watch.sh                          # http://localhost:8080  控制口 15000
 ./host/replay.sh logs/run_xxx.rlog       # 默认 http://127.0.0.1:8765
+```
+
+Windows：
+
+```bat
+host\watch.bat
+host\replay.bat logs\run_xxx.rlog
+```
+
+不想记平台时：
+
+```bash
+python3 host/run.py                      # 等价于 watch
+python3 host/run.py watch --no-browser
+python3 host/run.py replay logs/run_xxx.rlog
 ```
 
 ```bash
