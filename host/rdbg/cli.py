@@ -1,7 +1,22 @@
-"""CLI: invoked by host/*.sh via python -m rdbg"""
+"""CLI: python -m rdbg, or host/watch.py / host/replay.py"""
 
 import argparse
+import os
 import sys
+
+
+def _has_flag(argv, flag):
+    return any(a == flag or a.startswith(flag + "=") for a in argv)
+
+
+def expand_watch_env(argv):
+    """Insert HTTP_PORT / CTRL_PORT unless the flag is already present."""
+    out = list(argv)
+    if os.environ.get("HTTP_PORT") and not _has_flag(out, "--port"):
+        out = ["--port", os.environ["HTTP_PORT"]] + out
+    if os.environ.get("CTRL_PORT") and not _has_flag(out, "--control-port"):
+        out = ["--control-port", os.environ["CTRL_PORT"]] + out
+    return out
 
 
 def _parser():
@@ -33,6 +48,9 @@ def main(argv=None):
         argv = ["watch"]
     elif argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
         argv = ["watch"] + argv
+
+    if argv and argv[0] in ("watch", "debugger"):
+        argv = [argv[0]] + expand_watch_env(argv[1:])
 
     args = _parser().parse_args(argv)
     if getattr(args, "download_assets", False):

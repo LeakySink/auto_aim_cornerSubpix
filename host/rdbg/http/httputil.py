@@ -120,8 +120,12 @@ def download_vendor():
 
 
 def open_browser(url):
-    # Chrome/GTK 会往终端刷一堆无关警告，必须与 watch 的 stdout 隔离。
-    for browser in ("google-chrome", "chromium-browser", "chromium", "microsoft-edge"):
+    # 隔离 Chrome/GTK/Edge 日志，避免刷爆 watch 终端。
+    names = (
+        "google-chrome", "chromium-browser", "chromium",
+        "microsoft-edge", "msedge", "chrome",
+    )
+    for browser in names:
         exe = shutil.which(browser)
         if exe:
             subprocess.Popen(
