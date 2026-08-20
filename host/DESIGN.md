@@ -2,7 +2,7 @@
 
 给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
-本文约定：路径相对 `host/`。包名 `rdbg`。跨平台入口是 `watch.py` / `replay.py`（`.sh` / `.cmd` 只负责找到 Python）。也可以 `PYTHONPATH=host python3 -m rdbg watch`。
+本文约定：路径相对 `host/`。包名 `rdbg`，靠 `watch.sh` / `replay.sh` 把 `host/` 加进 `PYTHONPATH` 后 `python3 -m rdbg …`。
 
 ---
 
@@ -10,13 +10,11 @@
 
 ```
 host/
-  watch.py / replay.py     跨平台入口
-  watch.sh / replay.sh     Unix 包装 → *.py
-  watch.cmd / replay.cmd   Windows 包装 → *.py
+  watch.sh / replay.sh     唯一对外入口
   HOST.md                  使用者
   DESIGN.md                本文件
   rdbg/                    Python 包（不要直接当脚本跑）
-    cli.py / launch.py     子命令；watch.py / replay.py 引导
+    cli.py                 子命令
     http/                  HTTP 壳：路由、SSE、静态
     net/                   线上协议：注册口 + 数据 UDP
     log/                   .rlog 解析与预加载
@@ -101,7 +99,7 @@ class FooSource:
 
 ### 4.1 `rdbg.cli`
 
-`python3 -m rdbg <cmd>`（需 `PYTHONPATH` 含 `host/`）。日常用 `host/watch.py` / `host/replay.py`，效果相同。
+`python3 -m rdbg <cmd>`
 
 | cmd | 含义 |
 |---|---|
