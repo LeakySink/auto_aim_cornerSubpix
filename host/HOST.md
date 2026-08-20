@@ -12,10 +12,13 @@ host/
   replay.sh                本地 .rlog 回放入口
   HOST.md                  本文件
   rdbg/                    Python 包（勿直接当入口）
+    shell.py               HTTP 壳：路由表 + SSE + 静态
+    sources/live.py        watch 数据源（UDP 注册/收包）
+    sources/replay.py      replay 数据源（预加载 .rlog）
     cli.py / control.py / udp.py / sse.py / httputil.py
-    rlog.py / session.py   .rlog 解析与预加载
-    apps/debugger.py
-    apps/replay.py
+    rlog.py / session.py
+    apps/debugger.py       薄入口：壳 + live
+    apps/replay.py         薄入口：壳 + replay
     static/                HTML / CSS / JS / vendor
 ```
 
@@ -23,21 +26,22 @@ host/
 
 ```
                     UDP (注册)           UDP (数据)
-发送端 ──────────────────→ control.py ───→ udp.py (线程)
-  │                            │                    │
-  │                            │ poller             │ on_output
-  │                            ↓                    ↓
-  │                     apps/debugger.py ←──── sse_queue
-  │                            │
-  │                     SSE + /static/*
-  │                            ↓
-  │                         浏览器
-  └── RemoteLogger API
+发送端 ──────────────────→ control.py ───→ udp.py
+  │                                              │
+  │                         sources/live.py ←────┘
+  │                                │
+  │                         shell.py (路由 / SSE / 静态)
+  │                                │
+  └── .rlog ── sources/replay.py ──┘
+                                   ↓
+                                浏览器
 ```
+
+watch 与 replay 是两个进程、两套数据源，共用 HTTP 壳和同一套前端面板。加一种数据源：实现 `attach(shell)` / `start()` / `stop()`，不必改 Handler。
 
 **关键设计原则：**
 - 纯 Python 标准库，用 `./host/watch.sh` / `./host/replay.sh` 启动
-- 前端 HTML / CSS / JS 与后端分离
+- HTTP 壳与数据源分离；前端 HTML / CSS / JS 与后端分离
 - 状态通过 `{"type":"state",...}` SSE 推送
 
 ## 快速开始
@@ -82,7 +86,11 @@ rx.switch("robot_beta", 15002)
 rx.stop()
 ```
 
-### apps/debugger.py — 单车编排
+### shell.py — HTTP 壳
+
+路由表 + SSE + 静态文件。数据源通过 `page()` / `route()` / `sse_route()` 注册，不各自写 Handler。
+
+### sources/live.py — 单车实时
 
 ```
 poller:
@@ -107,7 +115,7 @@ GET /static/...      CSS / JS / vendor
 | `log` | 日志 |
 | `status` | `{connected, sender}` |
 
-### apps/replay.py — 本地 `.rlog` 回放
+### sources/replay.py — 本地 `.rlog` 回放
 
 与 watch **独立进程**，不占用控制口、不收 UDP。预加载到内存后，**复用 watch 同一套前端**（`debugger.css` / `debugger.js`）：可拆分面板、切换图像 `name`、筛选日志。底部进度条由 `replay.js` 驱动。
 
