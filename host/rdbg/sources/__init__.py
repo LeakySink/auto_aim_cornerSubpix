@@ -1,6 +1,5 @@
-"""Data-source plugins for the HTTP shell.
+"""Data-source plugins.
 
-A source implements:
-  attach(shell)  register pages and routes
-  start() / stop()
+Contract: id, attach(shell), start(), stop().
+See host/DESIGN.md.
 """

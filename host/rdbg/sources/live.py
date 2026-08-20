@@ -4,8 +4,8 @@ import json
 import threading
 import time
 
-from ..control import ControlServer
-from ..udp import UdpBackend
+from ..net.control import ControlServer
+from ..net.udp import UdpBackend
 
 
 class LiveSource:
@@ -22,7 +22,7 @@ class LiveSource:
     def attach(self, shell):
         self.shell = shell
         self.udp.on_output = lambda line: shell.sse.put(line)
-        shell.page("/", "debugger.html")
+        shell.page("/", "watch.html")
         shell.sse_route("/events", on_connect=self.push_state)
         shell.route("/select", self._handle_select)
 

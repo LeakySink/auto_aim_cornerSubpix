@@ -4,8 +4,8 @@ import sys
 import time
 from pathlib import Path
 
-from ..httputil import open_browser
-from ..shell import Shell
+from ..http.httputil import open_browser
+from ..http.shell import Shell
 from ..sources.replay import ReplaySource, load_or_exit
 
 PORT_TRY = 20

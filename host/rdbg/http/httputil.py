@@ -9,8 +9,8 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-PKG_DIR = Path(__file__).resolve().parent
-STATIC_DIR = PKG_DIR / "static"
+RDBG_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = RDBG_DIR / "static"
 VENDOR_DIR = STATIC_DIR / "vendor"
 
 MIME = {

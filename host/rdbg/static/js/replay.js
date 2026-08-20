@@ -1,4 +1,4 @@
-// Replay driver — uses watch (debugger.js) globals, does not change that file.
+// Replay driver — uses watch (shell.js) globals, does not change that file.
 (function() {
   var duration = 0;
   var t0ns = 0;

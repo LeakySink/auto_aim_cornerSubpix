@@ -3,7 +3,7 @@
 import base64
 import json
 
-from ..session import load_session_or_exit
+from ..log.session import load_session_or_exit
 
 
 def public_meta(session):

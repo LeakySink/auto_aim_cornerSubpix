@@ -11,12 +11,12 @@ def _parser():
     )
     sub = p.add_subparsers(dest="cmd")
 
-    dbg = sub.add_parser("debugger", help="single-robot debugger (default)")
-    dbg.add_argument("--port", type=int, default=8080, help="HTTP port")
-    dbg.add_argument("--control-port", type=int, default=15000, help="UDP control port")
-    dbg.add_argument("--download-assets", action="store_true",
-                     help="download Chart.js / Hammer / zoom for offline use")
-    dbg.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    watch = sub.add_parser("watch", aliases=["debugger"], help="live UDP debugger")
+    watch.add_argument("--port", type=int, default=8080, help="HTTP port")
+    watch.add_argument("--control-port", type=int, default=15000, help="UDP control port")
+    watch.add_argument("--download-assets", action="store_true",
+                       help="download Chart.js / Hammer / zoom for offline use")
+    watch.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
     rpl = sub.add_parser("replay", help="play local .rlog file")
     rpl.add_argument("rlog", help="path to .rlog")
@@ -30,18 +30,18 @@ def _parser():
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        argv = ["debugger"]
+        argv = ["watch"]
     elif argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
-        argv = ["debugger"] + argv
+        argv = ["watch"] + argv
 
     args = _parser().parse_args(argv)
     if getattr(args, "download_assets", False):
-        from .httputil import download_vendor
+        from .http.httputil import download_vendor
         download_vendor()
         return 0
 
-    if args.cmd == "debugger":
-        from .apps.debugger import run
+    if args.cmd in ("watch", "debugger"):
+        from .apps.watch import run
         return run(args.port, args.control_port, args.no_browser)
 
     if args.cmd == "replay":
