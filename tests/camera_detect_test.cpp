@@ -7,7 +7,7 @@
 #include "tasks/auto_aim/detector.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 const std::string keys =
@@ -51,7 +51,7 @@ int main(int argc, char * argv[])
 
     auto now = std::chrono::steady_clock::now();
     auto dt = tools::delta_time(now, last);
-    tools::logger()->info("{:.2f} fps", 1 / dt);
+    tools::RemoteLogger::instance().log("INFO", "{:.2f} fps", 1 / dt);
 
     auto key = cv::waitKey(33);
     if (key == 'q') break;

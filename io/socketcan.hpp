@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <thread>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 using namespace std::chrono_literals;
 
@@ -55,7 +55,7 @@ public:
     if (daemon_thread_.joinable()) daemon_thread_.join();
     if (read_thread_.joinable()) read_thread_.join();
     close();
-    tools::logger()->info("SocketCAN destructed.");
+    tools::RemoteLogger::instance().log("INFO", "SocketCAN destructed.");
   }
 
   void write(can_frame * frame) const
@@ -113,14 +113,14 @@ private:
         try {
           read();
         } catch (const std::exception & e) {
-          tools::logger()->warn("SocketCAN::read() failed: {}", e.what());
+          tools::RemoteLogger::instance().log("WARN", "SocketCAN::read() failed: {}", e.what());
           ok_ = false;
           break;
         }
       }
     });
 
-    tools::logger()->info("SocketCAN opened.");
+    tools::RemoteLogger::instance().log("INFO", "SocketCAN opened.");
   }
 
   void try_open()
@@ -128,7 +128,7 @@ private:
     try {
       open();
     } catch (const std::exception & e) {
-      tools::logger()->warn("SocketCAN::open() failed: {}", e.what());
+      tools::RemoteLogger::instance().log("WARN", "SocketCAN::open() failed: {}", e.what());
     }
   }
 

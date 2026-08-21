@@ -14,4 +14,7 @@ watchdog.sh
 records_24/
 records_25/
 docs/
-*.md
+.idea/
+CLAUDE.md
+__pycache__/
+*.py[cod]

@@ -10,9 +10,8 @@
 #include "buff_detector.hpp"
 #include "buff_type.hpp"
 #include "tools/extended_kalman_filter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/ransac_sine_fitter.hpp"
 
 namespace auto_buff

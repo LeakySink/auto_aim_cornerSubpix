@@ -17,10 +17,8 @@
 #include "tasks/auto_buff/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 
 const std::string keys =
   "{help h usage ? | | 输出命令行参数说明}"
@@ -38,8 +36,8 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
-  tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Camera camera(config_path);
   io::CBoard cboard(config_path);
@@ -56,7 +54,7 @@ int main(int argc, char * argv[])
   auto_buff::BigTarget buff_big_target;
   auto_buff::Aimer buff_aimer(config_path);
 
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard, plotter);
+  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard);
 
   std::atomic<io::Mode> mode{io::Mode::idle};
   auto last_mode{io::Mode::idle};
@@ -78,7 +76,7 @@ int main(int argc, char * argv[])
     mode = cboard.mode;
 
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", io::MODES[mode]);
+      tools::RemoteLogger::instance().log("INFO", "Switch to {}", io::MODES[mode]);
       last_mode = mode.load();
     }
 
@@ -86,8 +84,6 @@ int main(int argc, char * argv[])
     if (mode.load() == io::Mode::auto_aim) {
       auto [img, armors, t] = detector.debug_pop();
       Eigen::Quaterniond q = cboard.imu_at(t - 1ms);
-
-      // recorder.record(img, q, t);
 
       solver.set_R_gimbal2world(q);
 
@@ -107,8 +103,6 @@ int main(int argc, char * argv[])
 
       camera.read(img, t);
       q = cboard.imu_at(t - 1ms);
-
-      // recorder.record(img, q, t);
 
       buff_solver.set_R_gimbal2world(q);
 

@@ -12,10 +12,8 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 
 const std::string keys =
   "{help h usage ? |                  | 输出命令行参数说明}"
@@ -33,8 +31,8 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
-  tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Camera camera(config_path);
   io::CBoard cboard(config_path);
@@ -59,9 +57,8 @@ int main(int argc, char * argv[])
     camera.read(img, t);
     q = cboard.imu_at(t - 1ms);
     mode = cboard.mode;
-    // recorder.record(img, q, t);
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", io::MODES[mode]);
+      tools::RemoteLogger::instance().log("INFO", "Switch to {}", io::MODES[mode]);
       last_mode = mode;
     }
 
@@ -161,13 +158,10 @@ int main(int argc, char * argv[])
       data["cmd_pitch"] = command.pitch * 57.3;
       data["cmd_shoot"] = command.shoot;
     }
-    plotter.plot(data);
-
-    cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("reprojection", img);
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    tools::RemoteLogger::instance().plot(data);
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
   }
 
+  tools::RemoteLogger::instance().shutdown();
   return 0;
 }

@@ -6,7 +6,7 @@
 
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace omniperception
 {
@@ -28,7 +28,7 @@ Perceptron::Perceptron(
   threads_.emplace_back([&] { parallel_infer(usbcam3, yolo_parallel3_); });
   threads_.emplace_back([&] { parallel_infer(usbcam4, yolo_parallel4_); });
 
-  tools::logger()->info("Perceptron initialized.");
+  tools::RemoteLogger::instance().log("INFO", "Perceptron initialized.");
 }
 
 Perceptron::~Perceptron()
@@ -45,7 +45,7 @@ Perceptron::~Perceptron()
       t.join();
     }
   }
-  tools::logger()->info("Perceptron destructed.");
+  tools::RemoteLogger::instance().log("INFO", "Perceptron destructed.");
 }
 
 std::vector<DetectionResult> Perceptron::get_detection_queue()
@@ -67,7 +67,7 @@ void Perceptron::parallel_infer(
   io::USBCamera * cam, std::shared_ptr<auto_aim::YOLO> & yolov8_parallel)
 {
   if (!cam) {
-    tools::logger()->error("Camera pointer is null!");
+    tools::RemoteLogger::instance().log("ERROR", "Camera pointer is null!");
     return;
   }
   try {
@@ -99,7 +99,7 @@ void Perceptron::parallel_infer(
       }
     }
   } catch (const std::exception & e) {
-    tools::logger()->error("Exception in parallel_infer: {}", e.what());
+    tools::RemoteLogger::instance().log("ERROR", "Exception in parallel_infer: {}", e.what());
   }
 }
 

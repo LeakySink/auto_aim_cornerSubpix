@@ -6,9 +6,8 @@
 #include "io/cboard.hpp"
 #include "io/command.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 using namespace std::chrono_literals;
 
@@ -50,7 +49,7 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
 
   io::CBoard cboard(config_path);
 
@@ -118,7 +117,7 @@ int main(int argc, char * argv[])
       }
       data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);
       last_command = command;
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
       std::this_thread::sleep_for(8ms);  //模拟自瞄100fps
     }
 
@@ -135,7 +134,7 @@ int main(int argc, char * argv[])
       data["last_cmd_yaw"] = last_command.yaw * 57.3;
       data["gimbal_yaw"] = eulers[0] * 57.3;
       last_command = command;
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
       std::this_thread::sleep_for(8ms);  //模拟自瞄100fps
     }
 
@@ -157,7 +156,7 @@ int main(int argc, char * argv[])
       data["cmd_pitch"] = command.pitch * 57.3;
       data["gimbal_yaw"] = eulers[0] * 57.3;
       data["gimbal_pitch"] = eulers[1] * 57.3;
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
       std::this_thread::sleep_for(9ms);
     }
   }

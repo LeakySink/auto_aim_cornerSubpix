@@ -3,10 +3,8 @@
 #include "io/gimbal/gimbal.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 #include "tools/trajectory.hpp"
 
 // 定义命令行参数
@@ -24,10 +22,9 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  // 初始化绘图器、录制器、退出器
-  tools::Plotter plotter;
-  tools::Recorder recorder;
   tools::Exiter exiter;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   // 初始化云台
   io::Gimbal gimbal(config_path);
@@ -47,7 +44,7 @@ int main(int argc, char * argv[])
     auto gs = gimbal.state();
     if (tools::delta_time(now, last_t) > 1.600) {
       plan.success = 2;  // 控制+开火
-      tools::logger()->debug("fire!");
+      tools::RemoteLogger::instance().log("DEBUG", "fire!");
       last_t = now;
     } else {
       plan.success = 1;  // 控制不开火
@@ -63,7 +60,7 @@ int main(int argc, char * argv[])
       data["shoot"] = plan.success == 2 ? 1 : 0;
     }
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     auto key = cv::waitKey(1);
     if (key == 'q') break;

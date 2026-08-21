@@ -28,7 +28,7 @@ std::vector<YOLO11_BUFF::Object> YOLO11_BUFF::get_multicandidateboxes(cv::Mat & 
   // const float factor = fill_tensor_data_image(input_tensor, image);  // 填充图片到合适的input size
 
   if (image.empty()) {
-    tools::logger()->warn("Empty img!, camera drop!");
+    tools::RemoteLogger::instance().log("WARN", "Empty img!, camera drop!");
     return std::vector<YOLO11_BUFF::Object> ();
   }
 

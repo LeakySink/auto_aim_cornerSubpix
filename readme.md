@@ -234,7 +234,7 @@ sp_vision_25
     ├── img_tools.hpp              // 图像处理工具
     ├── logger.hpp                 // 日志记录器
     ├── math_tools.hpp             // 数学工具
-    ├── plotter.hpp                // 曲线图绘制工具
+    ├── remote_logger.hpp          // 远程调试日志
     ├── recorder.hpp               // 视频录制器
     ├── thread_safe_queue.hpp      // 线程安全队列
     ├── trajectory.hpp             // 弹道解算

@@ -2,7 +2,7 @@
 
 #include <libusb-1.0/libusb.h>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 using namespace std::chrono_literals;
 
@@ -12,10 +12,10 @@ HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
 : exposure_us_(exposure_ms * 1e3), gain_(gain), queue_(1), daemon_quit_(false), vid_(-1), pid_(-1)
 {
   set_vid_pid(vid_pid);
-  if (libusb_init(NULL)) tools::logger()->warn("Unable to init libusb!");
+  if (libusb_init(NULL)) tools::RemoteLogger::instance().log("WARN", "Unable to init libusb!");
 
   daemon_thread_ = std::thread{[this] {
-    tools::logger()->info("HikRobot's daemon thread started.");
+    tools::RemoteLogger::instance().log("INFO", "HikRobot's daemon thread started.");
 
     capture_start();
 
@@ -31,7 +31,7 @@ HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
 
     capture_stop();
 
-    tools::logger()->info("HikRobot's daemon thread stopped.");
+    tools::RemoteLogger::instance().log("INFO", "HikRobot's daemon thread stopped.");
   }};
 }
 
@@ -39,7 +39,7 @@ HikRobot::~HikRobot()
 {
   daemon_quit_ = true;
   if (daemon_thread_.joinable()) daemon_thread_.join();
-  tools::logger()->info("HikRobot destructed.");
+  tools::RemoteLogger::instance().log("INFO", "HikRobot destructed.");
 }
 
 void HikRobot::read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
@@ -61,24 +61,24 @@ void HikRobot::capture_start()
   MV_CC_DEVICE_INFO_LIST device_list;
   ret = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_EnumDevices failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_EnumDevices failed: {:#x}", ret);
     return;
   }
 
   if (device_list.nDeviceNum == 0) {
-    tools::logger()->warn("Not found camera!");
+    tools::RemoteLogger::instance().log("WARN", "Not found camera!");
     return;
   }
 
   ret = MV_CC_CreateHandle(&handle_, device_list.pDeviceInfo[0]);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_CreateHandle failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_CreateHandle failed: {:#x}", ret);
     return;
   }
 
   ret = MV_CC_OpenDevice(handle_);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_OpenDevice failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_OpenDevice failed: {:#x}", ret);
     return;
   }
 
@@ -91,12 +91,12 @@ void HikRobot::capture_start()
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_StartGrabbing failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_StartGrabbing failed: {:#x}", ret);
     return;
   }
 
   capture_thread_ = std::thread{[this] {
-    tools::logger()->info("HikRobot's capture thread started.");
+    tools::RemoteLogger::instance().log("INFO", "HikRobot's capture thread started.");
 
     capturing_ = true;
 
@@ -111,7 +111,7 @@ void HikRobot::capture_start()
 
       ret = MV_CC_GetImageBuffer(handle_, &raw, nMsec);
       if (ret != MV_OK) {
-        tools::logger()->warn("MV_CC_GetImageBuffer failed: {:#x}", ret);
+        tools::RemoteLogger::instance().log("WARN", "MV_CC_GetImageBuffer failed: {:#x}", ret);
         break;
       }
 
@@ -145,13 +145,13 @@ void HikRobot::capture_start()
 
       ret = MV_CC_FreeImageBuffer(handle_, &raw);
       if (ret != MV_OK) {
-        tools::logger()->warn("MV_CC_FreeImageBuffer failed: {:#x}", ret);
+        tools::RemoteLogger::instance().log("WARN", "MV_CC_FreeImageBuffer failed: {:#x}", ret);
         break;
       }
     }
 
     capturing_ = false;
-    tools::logger()->info("HikRobot's capture thread stopped.");
+    tools::RemoteLogger::instance().log("INFO", "HikRobot's capture thread stopped.");
   }};
 }
 
@@ -164,19 +164,19 @@ void HikRobot::capture_stop()
 
   ret = MV_CC_StopGrabbing(handle_);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_StopGrabbing failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_StopGrabbing failed: {:#x}", ret);
     return;
   }
 
   ret = MV_CC_CloseDevice(handle_);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_CloseDevice failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_CloseDevice failed: {:#x}", ret);
     return;
   }
 
   ret = MV_CC_DestroyHandle(handle_);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_DestroyHandle failed: {:#x}", ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_DestroyHandle failed: {:#x}", ret);
     return;
   }
 }
@@ -188,7 +188,7 @@ void HikRobot::set_float_value(const std::string & name, double value)
   ret = MV_CC_SetFloatValue(handle_, name.c_str(), value);
 
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_SetFloatValue(\"{}\", {}) failed: {:#x}", name, value, ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_SetFloatValue(\"{}\", {}) failed: {:#x}", name, value, ret);
     return;
   }
 }
@@ -200,7 +200,7 @@ void HikRobot::set_enum_value(const std::string & name, unsigned int value)
   ret = MV_CC_SetEnumValue(handle_, name.c_str(), value);
 
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_SetEnumValue(\"{}\", {}) failed: {:#x}", name, value, ret);
+    tools::RemoteLogger::instance().log("WARN", "MV_CC_SetEnumValue(\"{}\", {}) failed: {:#x}", name, value, ret);
     return;
   }
 }
@@ -209,7 +209,7 @@ void HikRobot::set_vid_pid(const std::string & vid_pid)
 {
   auto index = vid_pid.find(':');
   if (index == std::string::npos) {
-    tools::logger()->warn("Invalid vid_pid: \"{}\"", vid_pid);
+    tools::RemoteLogger::instance().log("WARN", "Invalid vid_pid: \"{}\"", vid_pid);
     return;
   }
 
@@ -220,7 +220,7 @@ void HikRobot::set_vid_pid(const std::string & vid_pid)
     vid_ = std::stoi(vid_str, 0, 16);
     pid_ = std::stoi(pid_str, 0, 16);
   } catch (const std::exception &) {
-    tools::logger()->warn("Invalid vid_pid: \"{}\"", vid_pid);
+    tools::RemoteLogger::instance().log("WARN", "Invalid vid_pid: \"{}\"", vid_pid);
   }
 }
 
@@ -231,14 +231,14 @@ void HikRobot::reset_usb() const
   // https://github.com/ralight/usb-reset/blob/master/usb-reset.c
   auto handle = libusb_open_device_with_vid_pid(NULL, vid_, pid_);
   if (!handle) {
-    tools::logger()->warn("Unable to open usb!");
+    tools::RemoteLogger::instance().log("WARN", "Unable to open usb!");
     return;
   }
 
   if (libusb_reset_device(handle))
-    tools::logger()->warn("Unable to reset usb!");
+    tools::RemoteLogger::instance().log("WARN", "Unable to reset usb!");
   else
-    tools::logger()->info("Reset usb successfully :)");
+    tools::RemoteLogger::instance().log("INFO", "Reset usb successfully :)");
 
   libusb_close(handle);
 }

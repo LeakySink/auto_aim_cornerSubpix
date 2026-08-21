@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace auto_aim

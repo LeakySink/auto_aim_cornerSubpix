@@ -4,7 +4,7 @@
 #include <thread>
 
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 using namespace std::chrono_literals;
@@ -39,7 +39,7 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(timestamp, last_stamp);
     last_stamp = timestamp;
 
-    tools::logger()->info("{:.2f} fps", 1 / dt);
+    tools::RemoteLogger::instance().log("INFO", "{:.2f} fps", 1 / dt);
     std::this_thread::sleep_for(10ms);
 
     if (!display) continue;

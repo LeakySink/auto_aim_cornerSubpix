@@ -7,9 +7,8 @@
 
 #include "io/gimbal/gimbal.hpp"
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 using namespace std::chrono_literals;
 
@@ -31,7 +30,7 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
   auto_aim::Planner planner(config_path);
@@ -68,7 +67,7 @@ int main(int argc, char * argv[])
     data["plan_pitch_vel"] = plan.pitch_vel;
     data["plan_pitch_acc"] = plan.pitch_acc;
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     std::this_thread::sleep_for(10ms);
   }

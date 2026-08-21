@@ -18,10 +18,8 @@
 #include "tasks/omniperception/decider.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 
 using namespace std::chrono;
 
@@ -32,8 +30,6 @@ const std::string keys =
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  tools::Plotter plotter;
-  tools::Recorder recorder;
 
   cv::CommandLineParser cli(argc, argv, keys);
   if (cli.has("help")) {
@@ -41,6 +37,8 @@ int main(int argc, char * argv[])
     return 0;
   }
   auto config_path = cli.get<std::string>(0);
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::ROS2 ros2;
   io::CBoard cboard(config_path);
@@ -65,7 +63,6 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     camera.read(img, timestamp);
     Eigen::Quaterniond q = cboard.imu_at(timestamp - 1ms);
-    // recorder.record(img, q, timestamp);
 
     /// 自瞄核心逻辑
     solver.set_R_gimbal2world(q);

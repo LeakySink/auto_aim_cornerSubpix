@@ -17,10 +17,8 @@
 #include "tasks/auto_buff/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 
 const std::string keys =
   "{help h usage ? | | 输出命令行参数说明}"
@@ -38,8 +36,8 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
-  tools::Recorder recorder;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
@@ -85,7 +83,7 @@ int main(int argc, char * argv[])
         gimbal.send(
           plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);
-        plotter.plot(data);
+        tools::RemoteLogger::instance().plot(data);
         std::this_thread::sleep_for(10ms);
       } else
         std::this_thread::sleep_for(200ms);
@@ -97,14 +95,13 @@ int main(int argc, char * argv[])
     mode = gimbal.mode();
 
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", gimbal.str(mode));
+      tools::RemoteLogger::instance().log("INFO", "Switch to {}", gimbal.str(mode));
       last_mode = mode.load();
     }
 
     camera.read(img, t);
     auto q = gimbal.q(t);
     auto gs = gimbal.state();
-    recorder.record(img, q, t);
     solver.set_R_gimbal2world(q);
 
     /// 自瞄

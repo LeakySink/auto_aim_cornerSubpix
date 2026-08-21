@@ -11,10 +11,8 @@
 #include "tasks/auto_buff/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
-#include "tools/recorder.hpp"
 #include "tools/trajectory.hpp"
 
 // 定义命令行参数
@@ -32,10 +30,9 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  // 初始化绘图器、录制器、退出器
-  tools::Plotter plotter;
-  tools::Recorder recorder;
   tools::Exiter exiter;
+
+  tools::RemoteLogger::instance().init(config_path);
 
   // 初始化C板、相机
   io::CBoard cboard(config_path);
@@ -55,7 +52,6 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     camera.read(img, t);
     q = cboard.imu_at(t);
-    // recorder.record(img, q, t);
 
     // -------------- 打符核心逻辑 --------------
 
@@ -145,14 +141,10 @@ int main(int argc, char * argv[])
       data["shoot"] = command.shoot ? 1 : 0;
     }
 
-    plotter.plot(data);
-
-    cv::resize(img, img, {}, 0.5, 0.5);
-    cv::imshow("result", img);
-
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    tools::RemoteLogger::instance().plot(data);
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "result"}});
   }
 
+  tools::RemoteLogger::instance().shutdown();
   return 0;
 }

@@ -13,10 +13,10 @@ CBoard::CBoard(const std::string & config_path)
   can_(read_yaml(config_path), std::bind(&CBoard::callback, this, std::placeholders::_1))
 // 注意: callback的运行会早于Cboard构造函数的完成
 {
-  tools::logger()->info("[Cboard] Waiting for q...");
+  tools::RemoteLogger::instance().log("INFO", "[Cboard] Waiting for q...");
   queue_.pop(data_ahead_);
   queue_.pop(data_behind_);
-  tools::logger()->info("[Cboard] Opened.");
+  tools::RemoteLogger::instance().log("INFO", "[Cboard] Opened.");
 }
 
 Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestamp)
@@ -61,7 +61,7 @@ void CBoard::send(Command command) const
   try {
     can_.write(&frame);
   } catch (const std::exception & e) {
-    tools::logger()->warn("{}", e.what());
+    tools::RemoteLogger::instance().log("WARN", "{}", e.what());
   }
 }
 
@@ -76,7 +76,7 @@ void CBoard::callback(const can_frame & frame)
     auto w = (int16_t)(frame.data[6] << 8 | frame.data[7]) / 1e4;
 
     if (std::abs(x * x + y * y + z * z + w * w - 1) > 1e-2) {
-      tools::logger()->warn("Invalid q: {} {} {} {}", w, x, y, z);
+      tools::RemoteLogger::instance().log("WARN", "Invalid q: {} {} {} {}", w, x, y, z);
       return;
     }
 
@@ -94,7 +94,7 @@ void CBoard::callback(const can_frame & frame)
     auto now = std::chrono::steady_clock::now();
 
     if (bullet_speed > 0 && tools::delta_time(now, last_log_time) >= 1.0) {
-      tools::logger()->info(
+      tools::RemoteLogger::instance().log("INFO", 
         "[CBoard] Bullet speed: {:.2f} m/s, Mode: {}, Shoot mode: {}, FT angle: {:.2f} rad",
         bullet_speed, MODES[mode], SHOOT_MODES[shoot_mode], ft_angle);
       last_log_time = now;

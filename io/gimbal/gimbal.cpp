@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
 
@@ -21,14 +21,14 @@ Gimbal::Gimbal(const std::string & config_path)
     serial_.setBaudrate(115200);
     serial_.open();
   } catch (const std::exception & e) {
-    tools::logger()->error("[Gimbal] Failed to open serial: {}", e.what());
+    tools::RemoteLogger::instance().log("ERROR", "[Gimbal] Failed to open serial: {}", e.what());
     exit(1);
   }
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 
   queue_.pop();
-  tools::logger()->info("[Gimbal] First q received.");
+  tools::RemoteLogger::instance().log("INFO", "[Gimbal] First q received.");
 }
 
 Gimbal::~Gimbal()
@@ -94,7 +94,7 @@ void Gimbal::send(io::VisionToGimbal msg)
   try {
     serial_.write(frame, sizeof(frame));
   } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
+    tools::RemoteLogger::instance().log("WARN", "[Gimbal] Failed to write serial: {}", e.what());
   }
 }
 
@@ -132,13 +132,13 @@ bool Gimbal::read_bytes(uint8_t * buffer, size_t size)
 
 void Gimbal::read_thread()
 {
-  tools::logger()->info("[Gimbal] read_thread started.");
+  tools::RemoteLogger::instance().log("INFO", "[Gimbal] read_thread started.");
   int error_count = 0;
 
   while (!quit_) {
     if (error_count > 5000) {
       error_count = 0;
-      tools::logger()->warn("[Gimbal] Too many errors, attempting to reconnect...");
+      tools::RemoteLogger::instance().log("WARN", "[Gimbal] Too many errors, attempting to reconnect...");
       reconnect();
       continue;
     }
@@ -175,7 +175,7 @@ void Gimbal::read_thread()
       continue;
     }
     if (crc8_byte != 0x0D) {
-      tools::logger()->debug("[Gimbal] CRC8 check failed: 0x{:02X}", crc8_byte);
+      tools::RemoteLogger::instance().log("DEBUG", "[Gimbal] CRC8 check failed: 0x{:02X}", crc8_byte);
       continue;
     }
 
@@ -183,7 +183,7 @@ void Gimbal::read_thread()
 
     if (id_byte != 0x14) continue;
     if (payload_size != static_cast<int>(sizeof(GimbalToVision))) {
-      tools::logger()->warn(
+      tools::RemoteLogger::instance().log("WARN", 
         "[Gimbal] Payload size mismatch: got {}, expect {}", payload_size,
         sizeof(GimbalToVision));
       continue;
@@ -218,18 +218,18 @@ void Gimbal::read_thread()
       case 3:  mode_ = GimbalMode::BIG_BUFF;   break;
       default:
         mode_ = GimbalMode::IDLE;
-        tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
+        tools::RemoteLogger::instance().log("WARN", "[Gimbal] Invalid mode: {}", rx_data_.mode);
         break;
     }
   }
 
-  tools::logger()->info("[Gimbal] read_thread stopped.");
+  tools::RemoteLogger::instance().log("INFO", "[Gimbal] read_thread stopped.");
 }
 
 void Gimbal::reconnect()
 {
   for (int i = 0; i < 10 && !quit_; ++i) {
-    tools::logger()->warn("[Gimbal] Reconnecting serial, attempt {}/10...", i + 1);
+    tools::RemoteLogger::instance().log("WARN", "[Gimbal] Reconnecting serial, attempt {}/10...", i + 1);
     try {
       serial_.close();
       std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -238,10 +238,10 @@ void Gimbal::reconnect()
     try {
       serial_.open();
       queue_.clear();
-      tools::logger()->info("[Gimbal] Reconnected serial successfully.");
+      tools::RemoteLogger::instance().log("INFO", "[Gimbal] Reconnected serial successfully.");
       break;
     } catch (const std::exception & e) {
-      tools::logger()->warn("[Gimbal] Reconnect failed: {}", e.what());
+      tools::RemoteLogger::instance().log("WARN", "[Gimbal] Reconnect failed: {}", e.what());
       std::this_thread::sleep_for(std::chrono::seconds(1));
     }
   }

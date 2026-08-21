@@ -14,9 +14,8 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 using namespace std::chrono_literals;
@@ -28,7 +27,6 @@ const std::string keys =
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
-  tools::Plotter plotter;
 
   cv::CommandLineParser cli(argc, argv, keys);
   auto config_path = cli.get<std::string>(0);
@@ -36,6 +34,8 @@ int main(int argc, char * argv[])
     cli.printMessage();
     return 0;
   }
+
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
@@ -107,7 +107,7 @@ int main(int argc, char * argv[])
         auto armor = armors.front();
         data["measure_yaw"] = armor.yaw_raw;
       }
-      plotter.plot(data);
+      tools::RemoteLogger::instance().plot(data);
 
       std::this_thread::sleep_for(10ms);
     }
@@ -144,15 +144,13 @@ int main(int argc, char * argv[])
       tools::draw_points(img, image_points, {0, 0, 255});
     }
 
-    cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("reprojection", img);
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
   }
 
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
   gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+  tools::RemoteLogger::instance().shutdown();
 
   return 0;
 }

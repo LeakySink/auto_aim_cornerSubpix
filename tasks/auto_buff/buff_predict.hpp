@@ -9,7 +9,7 @@
 
 #include "tools/extended_kalman_filter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/plotter.hpp"
+#include "tools/remote_logger.hpp"
 const double SMALL_W = CV_PI / 3;
 
 // Predictor 基类
@@ -118,7 +118,7 @@ public:
 #ifdef PLOTJUGGLER
     nlohmann::json json_obj;
     json_obj["angle"] = X_best[0] * 180 / CV_PI;
-    tools::Plotter().plot(json_obj);
+    tools::RemoteLogger::instance().plot(json_obj);
 #endif
     unsolvable = false;
     return;
@@ -257,7 +257,7 @@ public:
     json_obj["a"] = X_best[2];
     json_obj["w"] = X_best[3];
     json_obj["theta"] = X_best[4];
-    tools::Plotter().plot(json_obj);
+    tools::RemoteLogger::instance().plot(json_obj);
 #endif
   }
 
@@ -333,7 +333,7 @@ public:
     json_obj["x"] = X_best[0];
     json_obj["y"] = X_best[1];
     json_obj["z"] = X_best[2];
-    tools::Plotter().plot(json_obj);
+    tools::RemoteLogger::instance().plot(json_obj);
 #endif
     XYZ = X_best;
   }

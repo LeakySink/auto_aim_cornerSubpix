@@ -5,7 +5,7 @@
 #include <thread>
 
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 using namespace std::chrono_literals;
@@ -35,8 +35,8 @@ int main(int argc, char * argv[])
     Eigen::Quaterniond q = cboard.imu_at(timestamp);
 
     Eigen::Vector3d eulers = tools::eulers(q, 2, 1, 0) * 57.3;
-    tools::logger()->info("z{:.2f} y{:.2f} x{:.2f} degree", eulers[0], eulers[1], eulers[2]);
-    tools::logger()->info("bullet speed {:.2f} m/s", cboard.bullet_speed);
+    tools::RemoteLogger::instance().log("INFO", "z{:.2f} y{:.2f} x{:.2f} degree", eulers[0], eulers[1], eulers[2]);
+    tools::RemoteLogger::instance().log("INFO", "bullet speed {:.2f} m/s", cboard.bullet_speed);
   }
 
   return 0;

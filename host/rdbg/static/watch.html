@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote Debugger</title>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/hammer.min.js"></script>
+<script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
+
+<link rel="stylesheet" href="/static/css/shell.css?v=8">
+</head>
+<body>
+
+<div id="sidebar">
+  <button id="sidebar-toggle" title="Toggle sidebar">◀</button>
+  <div class="sidebar-header">设置</div>
+  <div class="sidebar-content">
+    <div class="section">
+      <div class="section-title">显示模式</div>
+      <label><input type="radio" name="mode" value="sliding" checked onchange="onSettingsChange()"> 滑动</label>
+      <label><input type="radio" name="mode" value="centered" onchange="onSettingsChange()"> 居中</label>
+      <label><input type="radio" name="mode" value="paused" onchange="onSettingsChange()"> 暂停</label>
+    </div>
+    <div class="section">
+      <div class="section-title">窗口 (秒)</div>
+      <input type="number" id="win-size" value="10" min="1" max="120" step="1" onchange="onSettingsChange()">
+    </div>
+    <div class="section">
+      <div class="section-title">历史</div>
+      <select id="history-sel" onchange="trimData()">
+        <option value="30">30 秒</option>
+        <option value="60" selected>1 分钟</option>
+        <option value="120">2 分钟</option>
+        <option value="300">5 分钟</option>
+      </select>
+    </div>
+    <div class="section">
+      <div class="section-title">数据字段</div>
+      <div id="field-list"><span style="color:#404050;font-size:13px">等待数据…</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="main-area">
+  <div id="top-bar">
+    <div class="dot" id="dot"></div>
+    <span id="status">已连接</span>
+    <span id="stats" style="color:#505060">0 pkt/s</span>
+    <span style="flex:1"></span>
+    <select id="sender-sel" onchange="onSenderChange()" style="background:#1a1a26;color:#c8c8d0;border:1px solid #303040;border-radius:3px;padding:3px 6px;font:inherit;font-size:14px;max-width:180px">
+    </select>
+    <button onclick="clearPlots()">清除</button>
+    <button onclick="resetAllViews()">重置</button>
+  </div>
+</div>
+
+<script src="/static/js/registry.js?v=1"></script>
+<script src="/static/js/plugins/plot.js?v=1"></script>
+<script src="/static/js/plugins/image.js?v=1"></script>
+<script src="/static/js/plugins/log.js?v=1"></script>
+<script src="/static/js/shell.js?v=8"></script>
+</body>
+</html>

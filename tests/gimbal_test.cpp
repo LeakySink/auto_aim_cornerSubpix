@@ -5,9 +5,8 @@
 #include <thread>
 
 #include "tools/exiter.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 const std::string keys =
   "{help h usage ? | | 输出命令行参数说明}"
@@ -27,7 +26,7 @@ int main(int argc, char * argv[])
   }
 
   tools::Exiter exiter;
-  tools::Plotter plotter;
+  tools::RemoteLogger::instance().init(config_path);
 
   io::Gimbal gimbal(config_path);
 
@@ -44,7 +43,7 @@ int main(int argc, char * argv[])
     auto mode = gimbal.mode();
 
     if (mode != last_mode) {
-      tools::logger()->info("Gimbal mode changed: {}", gimbal.str(mode));
+      tools::RemoteLogger::instance().log("INFO", "Gimbal mode changed: {}", gimbal.str(mode));
       last_mode = mode;
     }
 
@@ -58,7 +57,7 @@ int main(int argc, char * argv[])
 
     if (!first_fired && fired) {
       first_fired = true;
-      tools::logger()->info("Gimbal first fired after: {:.3f}s", tools::delta_time(t, fire_stamp));
+      tools::RemoteLogger::instance().log("INFO", "Gimbal first fired after: {:.3f}s", tools::delta_time(t, fire_stamp));
     }
 
     if (fire && fire_count > 20) {
@@ -88,7 +87,7 @@ int main(int argc, char * argv[])
     data["fired"] = fired ? 1 : 0;
     data["fire"] = test_fire && fire ? 1 : 0;
     data["t"] = tools::delta_time(t, t0);
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     std::this_thread::sleep_for(9ms);
   }

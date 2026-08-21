@@ -10,7 +10,7 @@
 
 #include "tasks/auto_aim/classifier.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace auto_aim
 {
@@ -61,7 +61,7 @@ YOLOV8::YOLOV8(const std::string & config_path, bool debug)
 std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)
 {
   if (raw_img.empty()) {
-    tools::logger()->warn("Empty img!, camera drop!");
+    tools::RemoteLogger::instance().log("WARN", "Empty img!, camera drop!");
     return std::list<Armor>();
   }
 

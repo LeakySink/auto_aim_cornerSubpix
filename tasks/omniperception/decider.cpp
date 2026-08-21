@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <opencv2/opencv.hpp>
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace omniperception
@@ -51,7 +51,7 @@ io::Command Decider::decide(
       delta_angle = this->delta_angle(armors, cams[count_]->device_name);
     }
 
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "[{} camera] delta yaw:{:.2f},target pitch:{:.2f},armor number:{},armor name:{}",
       (count_ == 2 ? "back" : cams[count_]->device_name), delta_angle[0], delta_angle[1],
       armors.size(), auto_aim::ARMOR_NAMES[armors.front().name]);
@@ -79,7 +79,7 @@ io::Command Decider::decide(
 
   if (!empty) {
     auto delta_angle = this->delta_angle(armors, "back");
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "[back camera] delta yaw:{:.2f},target pitch:{:.2f},armor number:{},armor name:{}",
       delta_angle[0], delta_angle[1], armors.size(), auto_aim::ARMOR_NAMES[armors.front().name]);
 
@@ -99,7 +99,7 @@ io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue
 
   DetectionResult dr = detection_queue.front();
   if (dr.armors.empty()) return io::Command{false, false, 0, 0};
-  tools::logger()->info(
+  tools::RemoteLogger::instance().log("INFO", 
     "omniperceptron find {},delta yaw is {:.4f}", auto_aim::ARMOR_NAMES[dr.armors.front().name],
     dr.delta_yaw * 57.3);
 
@@ -212,7 +212,7 @@ void Decider::get_invincible_armor(const std::vector<int8_t> & invincible_enemy_
   if (invincible_enemy_ids.empty()) return;
 
   for (const auto & id : invincible_enemy_ids) {
-    tools::logger()->info("invincible armor id: {}", id);
+    tools::RemoteLogger::instance().log("INFO", "invincible armor id: {}", id);
     invincible_armor_.push_back(auto_aim::ArmorName(id - 1));
   }
 }
@@ -226,11 +226,11 @@ void Decider::get_auto_aim_target(
 
   for (const auto & target : auto_aim_target) {
     if (target <= 0 || static_cast<size_t>(target) > auto_aim::ARMOR_NAMES.size()) {
-      tools::logger()->warn("Received invalid auto_aim target value: {}", int(target));
+      tools::RemoteLogger::instance().log("WARN", "Received invalid auto_aim target value: {}", int(target));
       continue;
     }
     auto_aim_targets.push_back(static_cast<auto_aim::ArmorName>(target - 1));
-    tools::logger()->info("nav send auto_aim target is {}", auto_aim::ARMOR_NAMES[target - 1]);
+    tools::RemoteLogger::instance().log("INFO", "nav send auto_aim target is {}", auto_aim::ARMOR_NAMES[target - 1]);
   }
 
   if (auto_aim_targets.empty()) return;

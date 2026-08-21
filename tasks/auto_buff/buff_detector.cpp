@@ -1,6 +1,6 @@
 #include "buff_detector.hpp"
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 
 namespace auto_buff
 {
@@ -29,7 +29,7 @@ cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::M
   /// error
 
   if (fanblades.empty()) {
-    tools::logger()->debug("[Buff_Detector] 无法计算r_center!");
+    tools::RemoteLogger::instance().log("DEBUG", "[Buff_Detector] 无法计算r_center!");
     return {0, 0};
   }
 

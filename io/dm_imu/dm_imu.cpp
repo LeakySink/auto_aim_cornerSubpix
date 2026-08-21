@@ -9,7 +9,8 @@
 #include <thread>
 
 #include "tools/crc.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
+#include <unistd.h>
 #include "tools/math_tools.hpp"
 
 namespace io
@@ -20,7 +21,7 @@ DM_IMU::DM_IMU() : queue_(5000)
   rec_thread_ = std::thread(&DM_IMU::get_imu_data_thread, this);
   queue_.pop(data_ahead_);
   queue_.pop(data_behind_);
-  tools::logger()->info("[DM_IMU] initialized");
+  tools::RemoteLogger::instance().log("INFO", "[DM_IMU] initialized");
 }
 
 DM_IMU::~DM_IMU()
@@ -48,11 +49,11 @@ void DM_IMU::init_serial()
     serial_.open();
     usleep(1000000);  //1s
 
-    tools::logger()->info("[DM_IMU] serial port opened");
+    tools::RemoteLogger::instance().log("INFO", "[DM_IMU] serial port opened");
   }
 
   catch (serial::IOException & e) {
-    tools::logger()->warn("[DM_IMU] failed to open serial port ");
+    tools::RemoteLogger::instance().log("WARN", "[DM_IMU] failed to open serial port ");
     exit(0);
   }
 }
@@ -61,7 +62,7 @@ void DM_IMU::get_imu_data_thread()
 {
   while (!stop_thread_) {
     if (!serial_.isOpen()) {
-      tools::logger()->warn("In get_imu_data_thread,imu serial port unopen");
+      tools::RemoteLogger::instance().log("WARN", "In get_imu_data_thread,imu serial port unopen");
     }
 
     serial_.read((uint8_t *)(&receive_data.FrameHeader1), 4);
@@ -87,7 +88,7 @@ void DM_IMU::get_imu_data_thread()
         data.roll = *((float *)(&receive_data.roll_u32));
         data.pitch = *((float *)(&receive_data.pitch_u32));
         data.yaw = *((float *)(&receive_data.yaw_u32));
-        // tools::logger()->debug(
+        // tools::RemoteLogger::instance().log("DEBUG", 
         //   "yaw: {:.2f}, pitch: {:.2f}, roll: {:.2f}", static_cast<double>(data.yaw),
         //   static_cast<double>(data.pitch), static_cast<double>(data.roll));
       }
@@ -98,7 +99,7 @@ void DM_IMU::get_imu_data_thread()
       q.normalize();
       queue_.push({q, timestamp});
     } else {
-      tools::logger()->info("[DM_IMU] failed to get correct data");
+      tools::RemoteLogger::instance().log("INFO", "[DM_IMU] failed to get correct data");
     }
   }
 }

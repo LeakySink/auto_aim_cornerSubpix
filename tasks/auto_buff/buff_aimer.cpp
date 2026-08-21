@@ -1,6 +1,6 @@
 #include "buff_aimer.hpp"
 
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/trajectory.hpp"
 
@@ -165,7 +165,7 @@ bool Aimer::get_send_angle(
   // 创建弹道对象
   tools::Trajectory trajectory0(bullet_speed, d, h);
   if (trajectory0.unsolvable) {  // 如果弹道无法解算，返回未命中结果
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "[Aimer] Unsolvable trajectory0: {:.2f} {:.2f} {:.2f}", bullet_speed, d, h);
     return false;
   }
@@ -180,7 +180,7 @@ bool Aimer::get_send_angle(
   h = aim_in_world[2];
   tools::Trajectory trajectory1(bullet_speed, d, h);
   if (trajectory1.unsolvable) {  // 如果弹道无法解算，返回未命中结果
-    tools::logger()->debug(
+    tools::RemoteLogger::instance().log("DEBUG", 
       "[Aimer] Unsolvable trajectory1: {:.2f} {:.2f} {:.2f}", bullet_speed, d, h);
     return false;
   }
@@ -188,7 +188,7 @@ bool Aimer::get_send_angle(
   // 计算时间误差
   auto time_error = trajectory1.fly_time - trajectory0.fly_time;
   if (std::abs(time_error) > 0.01) {  // 如果时间误差过大，返回未命中结果
-    tools::logger()->debug("[Aimer] Large time error: {:.3f}", time_error);
+    tools::RemoteLogger::instance().log("DEBUG", "[Aimer] Large time error: {:.3f}", time_error);
     return false;
   }
 

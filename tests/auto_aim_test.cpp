@@ -11,9 +11,8 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
 
 const std::string keys =
   "{help h usage ? |                   | 输出命令行参数说明 }"
@@ -35,8 +34,8 @@ int main(int argc, char * argv[])
   auto start_index = cli.get<int>("start-index");
   auto end_index = cli.get<int>("end-index");
 
-  tools::Plotter plotter;
   tools::Exiter exiter;
+  tools::RemoteLogger::instance().init(config_path);
 
   auto video_path = fmt::format("{}.avi", input_path);
   auto text_path = fmt::format("{}.txt", input_path);
@@ -93,7 +92,7 @@ int main(int argc, char * argv[])
     /// 调试输出
 
     auto finish = std::chrono::steady_clock::now();
-    tools::logger()->info(
+    tools::RemoteLogger::instance().log("INFO", 
       "[{}] yolo: {:.1f}ms, tracker: {:.1f}ms, aimer: {:.1f}ms", frame_count,
       tools::delta_time(tracker_start, yolo_start) * 1e3,
       tools::delta_time(aimer_start, tracker_start) * 1e3,
@@ -186,7 +185,7 @@ int main(int argc, char * argv[])
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
     }
 
-    plotter.plot(data);
+    tools::RemoteLogger::instance().plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);
