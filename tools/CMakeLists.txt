@@ -9,6 +9,12 @@ add_library(tools OBJECT
     img_tools.cpp
     math_tools.cpp
     remote_logger.cpp
+    rdbg/transport.cpp
+    rdbg/control.cpp
+    rdbg/data.cpp
+    rdbg/session.cpp
+    rdbg/image.cpp
+    rdbg/engine.cpp
     trajectory.cpp
     pid.cpp
     crc.cpp

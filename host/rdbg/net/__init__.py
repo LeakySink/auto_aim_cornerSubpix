@@ -1,1 +1,1 @@
-"""Live wire protocol: control-plane registration and data UDP."""
+"""Live wire protocol: discovery, host queue, data UDP, peer forward."""

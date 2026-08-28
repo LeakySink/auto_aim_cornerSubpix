@@ -8,8 +8,9 @@ from ..http.shell import Shell
 from ..sources.live import LiveSource
 
 
-def run(http_port, control_port, no_browser=False):
-    source = LiveSource(control_port)
+def run(http_port, data_port=15001, peer_port=15100, discover_port=15999,
+        no_browser=False):
+    source = LiveSource(data_port, peer_port, discover_port)
     shell = Shell(name="watch")
     source.attach(shell)
     source.start()
@@ -25,7 +26,8 @@ def run(http_port, control_port, no_browser=False):
 
     url = f"http://localhost:{bound}"
     print(f"[watch] {url}", file=sys.stderr)
-    print(f"[watch] control port {control_port}", file=sys.stderr)
+    print(f"[watch] data {data_port}  peer {peer_port}  discover {discover_port}",
+          file=sys.stderr)
     if not no_browser:
         time.sleep(0.15)
         open_browser(url)

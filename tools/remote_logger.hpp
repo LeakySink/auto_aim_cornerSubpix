@@ -1,49 +1,41 @@
 #ifndef TOOLS__REMOTE_LOGGER_HPP
 #define TOOLS__REMOTE_LOGGER_HPP
 
-#include <netinet/in.h>
-
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
-#include <cstdio>
+#include <memory>
+#include <string>
+
 #include <fmt/format.h>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
 namespace tools
 {
 
-/// RemoteLogger — 主线程只入队，worker 分工：
+/// 车上调试日志。实现在 tools/rdbg/（传输 / 控制 / 数据 / 本地会话）。
 ///
-///   plot / log  ──→ var_buf_    ──→ var_worker_  ──→ .rlog (json) + UDP
-///   plot_image  ──→ 按 name 相位锁 30fps ──→ clone ──→ 每路 mailbox(1) ──→ img_worker_
-///                   未入选帧直接 return              resize 后放全分辨率
-///                                                   JPEG + .rlog + UDP
-///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试
+///   plot / log     → 本地 .rlog + UDP（仅队首）
+///   plot_image     → 30fps 入选 clone → JPEG → .rlog + UDP（仅队首）
+///   enable_remote  → beacon + host 队列（host 来注册）
 class RemoteLogger
 {
 public:
   struct Config
   {
-    std::string remote_host = "127.0.0.1";
     uint16_t control_port = 15000;
+    uint16_t beacon_port = 15999;
     bool enable_remote = true;
     bool enable_local = true;
     std::string log_dir = "./logs";
     size_t var_buffer_size = 1024;
-    size_t img_buffer_size = 10;  // yaml 兼容保留，图像侧不再用深队列
+    size_t img_buffer_size = 10;  // yaml 兼容保留
     int img_width = 640;
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
     std::string sender_name;
-    uint32_t register_retry_ms = 3000;
+    uint32_t beacon_interval_ms = 1000;
+    uint32_t head_timeout_ms = 2000;
   };
 
   static RemoteLogger & instance();
@@ -63,108 +55,13 @@ public:
   void shutdown();
 
 private:
-  RemoteLogger() = default;
+  RemoteLogger();
   ~RemoteLogger();
   RemoteLogger(const RemoteLogger &) = delete;
   RemoteLogger & operator=(const RemoteLogger &) = delete;
 
-  struct VarEntry
-  {
-    uint64_t ts;
-    std::string json_str;
-  };
-
-  struct ImgEntry
-  {
-    uint64_t ts;
-    nlohmann::json meta;
-    cv::Mat img;
-  };
-
-  void var_worker_loop();
-  void img_worker_loop();
-  void ctrl_worker_loop();
-
-  bool try_select_img(uint64_t ts, const std::string & name);
-  void send_register();
-  void poll_ctrl();
-  void handle_ctrl_payload(const char * buf, size_t n);
-  void send_heartbeat();
-  std::string resolve_sender() const;
-  void inject_sender(nlohmann::json & j) const;
-
-  bool ensure_session_file();  // 调用方须已持有 session_mtx_
-  void close_session_file();
-  void close_session_file_unlocked();
-  void maybe_flush_session(bool force = false);
-  void flush_var_local(const std::vector<VarEntry> & entries);
-  void flush_img_local(uint64_t ts, const nlohmann::json & meta,
-                       const std::vector<uint8_t> & jpeg);
-
-  bool encode_and_dispatch_image(ImgEntry & entry);
-  void try_send_var(const VarEntry & entry);
-  void try_send_img(const std::vector<uint8_t> & jpeg, uint64_t ts,
-                    const nlohmann::json & meta);
-  void send_udp(const void * data, size_t len);
-
-  uint64_t now_ns() const;
-
-  Config cfg_;
-  std::atomic<bool> running_{false};
-
-  // ── 变量队列（主线程写，var_worker 读）────────────────────────────
-  std::vector<VarEntry> var_buf_;
-  std::mutex var_mtx_;
-  std::condition_variable var_cv_;
-  std::mutex var_wake_mtx_;
-  std::thread var_worker_;
-
-  // ── 图像：按 name 各 30fps + 每路深度 1 邮箱 ────────────────────
-  class ImgMailbox
-  {
-  public:
-    void reset();
-    void publish(uint64_t ts, nlohmann::json meta, const cv::Mat & img);
-    bool take(ImgEntry & out, int timeout_ms, const std::atomic<bool> & running);
-    void wake();
-    void clear();
-
-  private:
-    struct Slot
-    {
-      ImgEntry entry;
-      bool has{false};
-    };
-    std::unordered_map<std::string, Slot> slots_;
-    std::string rr_key_;
-    std::mutex mtx_;
-    std::condition_variable cv_;
-  };
-
-  std::mutex img_due_mtx_;
-  std::unordered_map<std::string, uint64_t> img_due_ns_;
-  ImgMailbox img_mbox_;
-  std::thread img_worker_;
-
-  // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
-  std::thread ctrl_worker_;
-
-  // ── 本地 .rlog 会话文件（var/img worker 写，session_mtx_ 保护）──
-  std::mutex session_mtx_;
-  std::string session_file_;
-  FILE * session_fp_{nullptr};
-  std::chrono::steady_clock::time_point last_session_flush_{};
-
-  // ── 远程 UDP（注册状态 + sendto）────────────────────────────────
-  std::mutex remote_mtx_;
-  std::atomic<bool> registered_{false};
-  std::chrono::steady_clock::time_point last_register_ts_{};
-  std::chrono::steady_clock::time_point last_ack_ts_{};
-  std::chrono::steady_clock::time_point last_hb_{};
-  int sock_{-1};
-  sockaddr_in addr_{};
-
-  std::string sender_name_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace tools

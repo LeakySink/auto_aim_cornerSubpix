@@ -108,7 +108,6 @@ t_camera2gimbal: [0.27420934670256336, 0.0098763306562371159, 0.0437983859841973
 
 #####-----remote_logger-----#####
 remote_logger:
-  remote_host: "127.0.0.1"
   control_port: 15000
   enable_remote: true
   enable_local: true
@@ -119,4 +118,5 @@ remote_logger:
   img_quality: 50
   heartbeat_interval_ms: 500
   sender_name: "example"
-  register_retry_ms: 3000
+  beacon_interval_ms: 1000
+  head_timeout_ms: 2000

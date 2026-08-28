@@ -1,22 +1,52 @@
-"""Live UDP source — control port + data port, push onto the shell SSE queue."""
+"""Live UDP source — discover robots, register, head-forward. PROTOCOL.md."""
 
 import json
+import socket
 import threading
 import time
+import uuid
 
-from ..net.control import ControlServer
-from ..net.udp import UdpBackend
+from ..net.control import BEACON_STALE_S, Discovery, RobotClient
+from ..net.peer import PeerHub
+from ..net.udp import UdpBackend, packet_sender
 
 
 class LiveSource:
     id = "live"
 
-    def __init__(self, control_port):
-        self.control = ControlServer(port=control_port)
+    def __init__(self, data_port=15001, peer_port=15100, discover_port=15999):
+        self.data_port = int(data_port)
+        self.peer_port = int(peer_port)
+        self.discover_port = int(discover_port)
+        self.host_id = uuid.uuid4().hex
+        self.host_name = socket.gethostname() or "watch"
+
         self.udp = UdpBackend()
         self.udp.on_state = self.push_state
+        self.udp.on_raw = self._on_raw
+
+        self.discover = Discovery(port=self.discover_port, host_id=self.host_id)
+        self.discover.on_beacon = self._on_beacon
+        self.client = RobotClient(
+            self.host_id, self.host_name, self.data_port, self.peer_port)
+        self.peer = PeerHub(self.host_id, self.peer_port, self.data_port)
+        self.peer.on_msg = self._on_peer
+        self.peer.is_head = self._is_head
+
         self.shell = None
-        self._last_version = -1
+        self._lock = threading.Lock()
+        self._running = False
+        self._poller = None
+        self._selected = ""
+        # name -> {ip, control, last}
+        self.robots = {}
+        # name -> head|follower
+        self.roles = {}
+        self.heads = {}
+        self.queues = {}
+        self._last_register = {}
+        self._last_alive = {}
+        self._lost_since = {}
         self._last_senders = []
 
     def attach(self, shell):
@@ -27,53 +57,183 @@ class LiveSource:
         shell.route("/select", self._handle_select)
 
     def start(self):
-        self.control.start()
-        threading.Thread(target=self.poller, daemon=True).start()
+        self._running = True
+        self.peer.start()
+        self.discover.start()
+        self.udp.start(self.data_port, sender_name="")
+        self._poller = threading.Thread(target=self.poller, daemon=True)
+        self._poller.start()
         self.push_state()
+        print("[watch] host_id %s data:%s peer:%s" % (
+            self.host_id[:8], self.data_port, self.peer_port))
 
     def stop(self):
+        self._running = False
+        with self._lock:
+            robots = dict(self.robots)
+        for name, info in robots.items():
+            self.client.deregister(info["ip"], info["control"])
         self.udp.stop()
-        self.control.stop()
+        self.discover.stop()
+        self.peer.stop()
+        self.client.close()
+
+    def live_senders(self):
+        now = time.monotonic()
+        with self._lock:
+            return [n for n, info in self.robots.items()
+                    if now - info["last"] <= BEACON_STALE_S]
 
     def push_state(self):
         if not self.shell:
             return
+        senders = self.live_senders()
+        active = self._selected if self._selected in senders else (
+            senders[0] if senders else "")
         state = {
             "type": "state",
-            "active_sender": self.udp.active_sender,
-            "senders": self.control.get_senders(),
+            "active_sender": active,
+            "senders": senders,
         }
         self.shell.sse.put(json.dumps(state))
 
     def select(self, name):
-        if not name:
-            return
-        info = self.control.get_sender_info(name)
-        if info:
-            self.udp.switch(name, info["data_port"])
+        self._selected = name or ""
+        self.udp.set_filter(self._selected)
         self.push_state()
 
     def _handle_select(self, handler):
         self.select(handler.query.get("sender", [""])[0])
         handler.send(200, b'{"ok":true}', "application/json")
 
+    def _is_head(self, robot):
+        with self._lock:
+            return self.roles.get(robot) == "head"
+
+    def _on_beacon(self, name, ip, control, _addr):
+        now = time.monotonic()
+        changed = False
+        with self._lock:
+            prev = self.robots.get(name)
+            if prev is None or prev["ip"] != ip or prev["control"] != control:
+                changed = True
+            self.robots[name] = {"ip": ip, "control": control, "last": now}
+        if changed:
+            self.client.register(ip, control)
+            self._last_register[name] = now
+            print("[watch] beacon %s at %s:%s" % (name, ip, control))
+            self.push_state()
+
+    def _on_raw(self, data):
+        robot = packet_sender(data)
+        if not robot:
+            return
+        with self._lock:
+            role = self.roles.get(robot)
+        if role == "head":
+            self.peer.forward(robot, data)
+
+    def _on_peer(self, msg, addr):
+        t = msg.get("type", "")
+        robot = msg.get("robot") or ""
+        if t == "register_ack":
+            self._apply_ack(msg)
+        elif t == "promote" and robot:
+            self._become_head(robot, msg.get("queue") or [])
+        elif t in ("queue_update", "peer_handoff") and robot:
+            head = msg.get("head") or {}
+            self._follow(robot, head, msg.get("queue") or [])
+        elif t == "deregister_ack":
+            pass
+
+    def _apply_ack(self, msg):
+        if msg.get("status") != "ok":
+            return
+        robot = msg.get("robot") or ""
+        role = msg.get("role") or ""
+        if not robot or not role:
+            return
+        queue = msg.get("queue") or []
+        if role == "head":
+            self._become_head(robot, queue)
+        else:
+            self._follow(robot, msg.get("head") or {}, queue)
+
+    def _become_head(self, robot, queue):
+        with self._lock:
+            self.roles[robot] = "head"
+            self.queues[robot] = list(queue)
+            self.heads[robot] = {
+                "host_id": self.host_id,
+                "ip": "",
+                "peer_port": self.peer_port,
+                "data_port": self.data_port,
+            }
+        self.peer.unfollow(robot)
+        print("[watch] head of %s" % robot)
+        info = self.robots.get(robot)
+        if info:
+            self.client.head_alive(info["ip"], info["control"])
+            self._last_alive[robot] = time.monotonic()
+        self.push_state()
+
+    def _follow(self, robot, head, queue):
+        if not head or not head.get("ip") or not head.get("peer_port"):
+            return
+        if head.get("host_id") == self.host_id:
+            self._become_head(robot, queue)
+            return
+        with self._lock:
+            self.roles[robot] = "follower"
+            self.heads[robot] = dict(head)
+            self.queues[robot] = list(queue)
+        self.peer.subscribe(robot, head["ip"], head["peer_port"])
+        print("[watch] follow %s via %s:%s" % (
+            robot, head.get("ip"), head.get("peer_port")))
+        self.push_state()
+
     def poller(self):
-        while self.control._running:
+        while self._running:
             time.sleep(0.5)
             try:
-                version = self.control.version()
-                senders = self.control.get_senders()
-                if version != self._last_version or senders != self._last_senders:
-                    self._last_version = version
-                    self._last_senders = senders
-                    self.push_state()
-                if senders:
-                    info = self.control.get_sender_info(senders[0])
-                    if info and (not self.udp.running or
-                                 self.udp.active_sender != senders[0] or
-                                 self.udp.active_port != info["data_port"]):
-                        self.udp.switch(senders[0], info["data_port"])
-                elif self.udp.running:
-                    self.udp.stop()
+                self._tick()
             except Exception:
                 pass
+
+    def _tick(self):
+        now = time.monotonic()
+        self.peer.refresh_subscribes(now)
+        self.peer.expire_subscribers()
+
+        with self._lock:
+            robots = dict(self.robots)
+            roles = dict(self.roles)
+
+        senders = self.live_senders()
+        if senders != self._last_senders:
+            self._last_senders = list(senders)
+            if senders and (not self._selected or self._selected not in senders):
+                self.select(senders[0])
+            else:
+                self.push_state()
+
+        for name, info in robots.items():
+            stale = now - info["last"] > BEACON_STALE_S
+            if stale:
+                continue
+            last_reg = self._last_register.get(name, 0)
+            if now - last_reg >= 3.0:
+                self.client.register(info["ip"], info["control"])
+                self._last_register[name] = now
+            if roles.get(name) == "head":
+                last_hb = self._last_alive.get(name, 0)
+                if now - last_hb >= 0.5:
+                    self.client.head_alive(info["ip"], info["control"])
+                    self._last_alive[name] = now
+            elif roles.get(name) == "follower":
+                if self.udp._last_pkt and now - self.udp._last_pkt > 3.0:
+                    if now - self._lost_since.get(name, 0) > 3.0:
+                        self.client.query_head(info["ip"], info["control"])
+                        self._lost_since[name] = now
+                else:
+                    self._lost_since.pop(name, None)

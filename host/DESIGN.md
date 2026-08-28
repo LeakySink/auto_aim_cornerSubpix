@@ -1,6 +1,6 @@
 # Host 内部设计
 
-给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 本文约定：路径相对 `host/`。包名 `rdbg`。Unix 用 `watch.sh` / `replay.sh`，Windows 用 `watch.bat` / `replay.bat`，把 `host/` 加进 `PYTHONPATH` 后跑 `python -m rdbg …`。`run.py` 只看 `sys.platform`，Windows 调 `.bat`，否则调 `.sh`。
 
@@ -15,10 +15,14 @@ host/
   run.py                   按平台转发到上面
   HOST.md                  使用者
   DESIGN.md                本文件
+  PROTOCOL.md              车/host 控制协议
   rdbg/                    Python 包（不要直接当脚本跑）
     cli.py                 子命令
     http/                  HTTP 壳：路由、SSE、静态
-    net/                   线上协议：注册口 + 数据 UDP
+    net/                   发现、向车注册、数据 UDP、host 转发
+      control.py           Discovery + RobotClient
+      peer.py              subscribe / 原样转发
+      udp.py               数据口解析
     log/                   .rlog 解析与预加载
     sources/               数据源插件（live / replay）
     apps/                  把壳和数据源拼起来
@@ -55,9 +59,9 @@ host/
   plot_image → 0xFF 二进制 UDP + 写入 .rlog
 
 watch:
-  net/control  注册 → 分配 data_port
-  net/udp      收包 → JSON 行 → sources/live → shell.sse → EventSource
-  浏览器 shell.js 按 msg.type 调 addPoint / setImage / addLog
+  net/control  听 beacon，向车 register
+  队首 net/udp 收车包；peer 原样转发
+  follower 收队首转发 → JSON 行 → sources/live → shell.sse
 
 replay:
   log/rlog + log/session 预加载
@@ -110,7 +114,7 @@ class FooSource:
 
 无参数或参数以 `-` 开头（且不是 `-h`）时，默认 `watch`。
 
-`watch` 参数：`--port`(8080) `--control-port`(15000) `--download-assets` `--no-browser`  
+`watch` 参数：`--port`(8080) `--data-port`(15001) `--peer-port`(15100) `--discover-port`(15999) `--download-assets` `--no-browser`  
 `replay` 参数：`rlog` `--host`(127.0.0.1) `--port`(8765) `--max-mb`(1024) `--no-browser`
 
 ### 4.2 `rdbg.http.shell.Shell`
@@ -164,49 +168,45 @@ write_sse(handler, q, on_connect=None)  # 阻塞直到客户端断开
 | `download_vendor()` | 把 Chart/Hammer/zoom 拉到 vendor |
 | `open_browser(url)` | Chrome/Chromium/Edge `--app=` 且隔离 stdio；否则 `webbrowser.open` |
 
-### 4.5 `rdbg.net.control.ControlServer`
+### 4.5 `rdbg.net.control` / `peer`
+
+消息格式见 [`PROTOCOL.md`](PROTOCOL.md)。
 
 ```python
-ControlServer(host="0.0.0.0", port=15000,
-              data_port_start=15001, data_port_end=15099,
-              reuse_ports=False)
+Discovery(port=15999, host_id="")
+d.on_beacon = lambda name, ip, control, addr: ...
+d.start() / d.stop() / d.probe()   # probe 发 who
+
+RobotClient(host_id, host_name, data_port, peer_port)
+c.register(ip, control_port)
+c.deregister(ip, control_port)
+c.head_alive(ip, control_port)
+c.query_head(ip, control_port)
+
+PeerHub(host_id, peer_port, data_port)
+p.on_msg = lambda msg, addr: ...
+p.is_head = lambda robot: False    # 非队首拒绝 subscribe
+p.start() / p.stop()
+p.subscribe(robot, head_ip, head_peer_port)
+p.unfollow(robot)
+p.forward(robot, raw_bytes)        # 原样 UDP 到订阅者 data_port
+p.handoff(robot, head_dict)
 ```
 
-UDP JSON，单线程 recv。
-
-| 方法 | 说明 |
-|---|---|
-| `start()` / `stop()` | `stop` 向已注册发送方发 `host_shutdown` |
-| `version()` | 注册/注销次数，给 poller 做变化检测 |
-| `get_senders()` | `list[str]` 名字 |
-| `get_sender_info(name)` | `{"addr": (ip,port), "data_port": int}` 或 `None` |
-
-**车上 → host**
-
-```json
-{"type":"register","name":"sentry"}
-{"type":"deregister","name":"sentry"}
-```
-
-**host → 车上**
-
-```json
-{"type":"register_ack","status":"ok","port":15001}
-{"type":"register_ack","status":"error","message":"no available data port"}
-{"type":"deregister_ack","status":"ok"}
-{"type":"host_shutdown"}
-```
-
-同名再注册是幂等：更新 `addr`，端口不变，不增加 `version`。先开车上再开 watch 靠这个。
+车 bind `:15000`。host **不听** 15000，听 `:15999`（beacon）和 `:15100`（peer）。
 
 ### 4.6 `rdbg.net.udp.UdpBackend`
 
 ```python
+packet_sender(data) -> str         # 包里的 _from
+
 UdpBackend(timeout_ms=3000)
 rx.on_output = lambda json_line: ...
 rx.on_state = lambda: ...
+rx.on_raw = lambda data: ...       # 原始 UDP，供队首转发；在解析之前
+rx.set_filter(sender_name)         # 空=不过滤；只影响 SSE，不影响 on_raw
 rx.start(port, sender_name="default")
-rx.switch(sender_name, port)   # 同名同口且在跑则 no-op
+rx.switch(sender_name, port)
 rx.stop()
 rx.active_sender / rx.active_port / rx.running
 ```
@@ -274,12 +274,13 @@ load_session_or_exit(path, max_bytes=...)  # 失败 SystemExit 1/2
 
 每个 source：`id`、`attach(shell)`、`start()`、`stop()`。
 
-**`LiveSource(control_port)`**
+**`LiveSource(data_port=15001, peer_port=15100, discover_port=15999)`**
 
 - 页：`/` → `watch.html`
 - `GET /events` SSE，连接时 `push_state`
-- `GET /select?sender=` 切 UDP 口
-- poller 0.5s：sender 变化推 `state`；有车则绑定第一台的 data_port
+- `GET /select?sender=` 按 `_from` 过滤 SSE（数据口不变）
+- 听 beacon；向每辆在线车 `register`；队首 `head_alive`，follower `subscribe`
+- 3s 无 beacon 的车从 `senders` 拿掉，不清车上队列
 
 **`ReplaySource(session)`**
 
@@ -297,7 +298,7 @@ load_or_exit(rlog, max_mb=1024)  # 下限 64MiB
 ### 4.10 `rdbg.apps`
 
 ```python
-apps.watch.run(http_port, control_port, no_browser=False) -> 0|1
+apps.watch.run(http_port, data_port=15001, peer_port=15100, discover_port=15999, no_browser=False) -> 0|1
 apps.replay.run(rlog, host="127.0.0.1", port=8765, max_mb=1024, no_browser=False) -> 0|1
 ```
 
@@ -423,7 +424,7 @@ SSE：`new EventSource('/events')`。`msg.type`：
 
 ## 7. 改代码时别动的契约
 
-- `.rlog` RLG2 布局、UDP `0xFF` 图像头、注册 JSON：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。
+- `.rlog` RLG2 布局、UDP `0xFF` 图像头：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。控制平面（beacon / 队列 / 转发）见 `PROTOCOL.md`。
 - `replay.js` 用的全局函数名。
 - 静态 URL 前缀 `/static/`。
 - 标准库 only，不要为 host 加 pip 依赖。

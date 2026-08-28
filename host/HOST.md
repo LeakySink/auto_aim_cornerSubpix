@@ -2,7 +2,7 @@
 
 调试 PC 上的接收与可视化。Python 3.8+ 标准库，无 pip 依赖。
 
-**内部构造、扩展方法和全部 API** 见 [`DESIGN.md`](DESIGN.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+**内部构造、扩展方法和全部 API** 见 [`DESIGN.md`](DESIGN.md)。车/host 控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 ## 目录
 
@@ -11,10 +11,10 @@ host/
   watch.sh / replay.sh     Unix 入口
   watch.bat / replay.bat   Windows 入口
   run.py                   按平台选上面两者
-  HOST.md / DESIGN.md
+  HOST.md / DESIGN.md / PROTOCOL.md
   rdbg/
     http/     路由 · SSE · 静态
-    net/      注册 UDP · 数据 UDP
+    net/      发现 · 向车注册 · 数据 UDP · host 转发
     log/      .rlog 解析 · 预加载
     sources/  live · replay
     apps/     watch.py · replay.py
@@ -28,7 +28,7 @@ watch 与 replay 是两个进程，共用 HTTP 壳和面板插件，数据源不
 Unix：
 
 ```bash
-./host/watch.sh                          # http://localhost:8080  控制口 15000
+./host/watch.sh                          # http://localhost:8080  数据口 15001
 ./host/replay.sh logs/run_xxx.rlog       # 默认 http://127.0.0.1:8765
 ```
 
@@ -50,7 +50,7 @@ python3 host/run.py replay logs/run_xxx.rlog
 ```bash
 ./host/watch.sh --download-assets
 ./host/watch.sh --no-browser
-HTTP_PORT=8081 CTRL_PORT=15000 ./host/watch.sh
+HTTP_PORT=8081 DATA_PORT=15002 PEER_PORT=15101 ./host/watch.sh
 
 ./host/replay.sh logs/run_xxx.rlog --port 8766 --no-browser
 ```
@@ -60,7 +60,9 @@ HTTP_PORT=8081 CTRL_PORT=15000 ./host/watch.sh
 | 脚本 | 环境变量 / 参数 | 默认 | 说明 |
 |------|----------|------|------|
 | watch.sh | `HTTP_PORT` | 8080 | HTTP |
-| watch.sh | `CTRL_PORT` | 15000 | 注册端口 |
+| watch.sh | `DATA_PORT` | 15001 | 收车/队首转发的数据 |
+| watch.sh | `PEER_PORT` | 15100 | host 对等（subscribe） |
+| watch.sh | `DISCOVER_PORT` | 15999 | 听车 beacon |
 | watch.sh | `--no-browser` | off | 不自动打开浏览器 |
 | watch.sh | `--download-assets` | off | 下载离线 Chart.js |
 | replay.sh | `--port` | 8765 | HTTP（占用则自动 +1） |
@@ -72,7 +74,7 @@ HTTP_PORT=8081 CTRL_PORT=15000 ./host/watch.sh
 
 ```bash
 ./host/watch.sh
-# 另开终端跑车上程序（yaml 里 remote_host 指向本机）
+# 另开终端跑车上程序（不必写 remote_host；watch 靠 beacon 发现车）
 
 ./host/replay.sh logs/run_xxx.rlog
 ```
