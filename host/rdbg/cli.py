@@ -13,7 +13,11 @@ def _parser():
 
     watch = sub.add_parser("watch", aliases=["debugger"], help="live UDP debugger")
     watch.add_argument("--port", type=int, default=8080, help="HTTP port")
-    watch.add_argument("--control-port", type=int, default=15000, help="UDP control port")
+    watch.add_argument("--data-port", type=int, default=15001, help="UDP data port")
+    watch.add_argument("--peer-port", type=int, default=15100, help="host-to-host peer port")
+    watch.add_argument("--discover-port", type=int, default=15999, help="LAN beacon port")
+    watch.add_argument("--control-port", type=int, default=15000,
+                       help="ignored (robot listens here; kept for old scripts)")
     watch.add_argument("--download-assets", action="store_true",
                        help="download Chart.js / Hammer / zoom for offline use")
     watch.add_argument("--no-browser", action="store_true", help="do not open a browser")
@@ -42,7 +46,8 @@ def main(argv=None):
 
     if args.cmd in ("watch", "debugger"):
         from .apps.watch import run
-        return run(args.port, args.control_port, args.no_browser)
+        return run(args.port, args.data_port, args.peer_port, args.discover_port,
+                   args.no_browser)
 
     if args.cmd == "replay":
         from .apps.replay import run

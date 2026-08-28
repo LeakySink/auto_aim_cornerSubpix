@@ -2,12 +2,16 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <string>
 #include <unordered_map>
@@ -66,9 +70,15 @@ void RemoteLogger::init(const Config & cfg)
 
   sender_name_ = resolve_sender();
   registered_ = false;
-  last_register_ts_ = {};
+  last_beacon_ts_ = {};
   last_ack_ts_ = {};
   last_hb_ = {};
+  {
+    std::lock_guard<std::mutex> lock(remote_mtx_);
+    queue_.clear();
+    addr_ = sockaddr_in{};
+    addr_.sin_family = AF_INET;
+  }
   {
     std::lock_guard<std::mutex> lock(img_due_mtx_);
     img_due_ns_.clear();
@@ -91,25 +101,49 @@ void RemoteLogger::init(const Config & cfg)
       cfg_.enable_remote = false;
       std::fprintf(stderr, "[RemoteLogger] socket() failed\n");
     } else {
+      int yes = 1;
+      ::setsockopt(sock_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+      ::setsockopt(sock_, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
       sockaddr_in local{};
       local.sin_family = AF_INET;
       local.sin_addr.s_addr = htonl(INADDR_ANY);
-      local.sin_port = 0;
+      local.sin_port = htons(cfg_.control_port);
       if (::bind(sock_, reinterpret_cast<sockaddr *>(&local), sizeof(local)) < 0) {
         ::close(sock_);
         sock_ = -1;
         cfg_.enable_remote = false;
-        std::fprintf(stderr, "[RemoteLogger] bind() failed\n");
-      } else {
-        addr_.sin_family = AF_INET;
-        addr_.sin_port = 0;
-        addr_.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+        std::fprintf(stderr, "[RemoteLogger] bind() control %u failed\n",
+                     cfg_.control_port);
+      }
+    }
+  }
+
+  if (cfg_.enable_remote && sock_ >= 0) {
+    beacon_sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (beacon_sock_ >= 0) {
+      int yes = 1;
+      ::setsockopt(beacon_sock_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+#ifdef SO_REUSEPORT
+      ::setsockopt(beacon_sock_, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes));
+#endif
+      ::setsockopt(beacon_sock_, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+      sockaddr_in baddr{};
+      baddr.sin_family = AF_INET;
+      baddr.sin_addr.s_addr = htonl(INADDR_ANY);
+      baddr.sin_port = htons(cfg_.beacon_port);
+      if (::bind(beacon_sock_, reinterpret_cast<sockaddr *>(&baddr), sizeof(baddr)) < 0) {
+        std::fprintf(stderr, "[RemoteLogger] bind() beacon %u failed, who disabled\n",
+                     cfg_.beacon_port);
+        ::close(beacon_sock_);
+        beacon_sock_ = -1;
       }
     }
   }
 
   running_ = true;
   if (cfg_.enable_remote && sock_ >= 0) {
+    std::fprintf(stderr, "[RemoteLogger] '%s' control :%u beacon :%u\n",
+                 sender_name_.c_str(), cfg_.control_port, cfg_.beacon_port);
     ctrl_worker_ = std::thread(&RemoteLogger::ctrl_worker_loop, this);
   }
   var_worker_ = std::thread(&RemoteLogger::var_worker_loop, this);
@@ -126,7 +160,6 @@ void RemoteLogger::init(const std::string & config_path)
   }
 
   Config cfg;
-  cfg.remote_host = tools::read<std::string>(node, "remote_host");
   cfg.control_port = tools::read<uint16_t>(node, "control_port");
   cfg.enable_remote = tools::read<bool>(node, "enable_remote");
   cfg.enable_local = tools::read<bool>(node, "enable_local");
@@ -137,7 +170,12 @@ void RemoteLogger::init(const std::string & config_path)
   cfg.img_quality = tools::read<int>(node, "img_quality");
   cfg.heartbeat_interval_ms = tools::read<uint32_t>(node, "heartbeat_interval_ms");
   cfg.sender_name = tools::read<std::string>(node, "sender_name");
-  cfg.register_retry_ms = tools::read<uint32_t>(node, "register_retry_ms");
+  if (node["beacon_interval_ms"])
+    cfg.beacon_interval_ms = node["beacon_interval_ms"].as<uint32_t>();
+  if (node["head_timeout_ms"])
+    cfg.head_timeout_ms = node["head_timeout_ms"].as<uint32_t>();
+  if (node["beacon_port"])
+    cfg.beacon_port = node["beacon_port"].as<uint16_t>();
 
   init(cfg);
 }
@@ -151,25 +189,20 @@ void RemoteLogger::shutdown()
   img_mbox_.wake();
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
 
-  if (sock_ >= 0 && registered_) {
-    sockaddr_in ctrl_addr{};
-    ctrl_addr.sin_family = AF_INET;
-    ctrl_addr.sin_port = ::htons(cfg_.control_port);
-    ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
-
-    nlohmann::json dreg;
-    dreg["type"] = "deregister";
-    dreg["name"] = sender_name_;
-    std::string payload = dreg.dump();
-    ::sendto(sock_, payload.data(), payload.size(), 0,
-             reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
-  }
   registered_ = false;
+  {
+    std::lock_guard<std::mutex> lock(remote_mtx_);
+    queue_.clear();
+  }
 
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
 
   close_session_file();
+  if (beacon_sock_ >= 0) {
+    ::close(beacon_sock_);
+    beacon_sock_ = -1;
+  }
   if (sock_ >= 0) {
     ::close(sock_);
     sock_ = -1;
@@ -285,14 +318,15 @@ void RemoteLogger::var_worker_loop()
   }
 }
 
-// ── ctrl_worker：注册 / 心跳 / 重试（与 var/img 完全分离）────────────
+// ── ctrl_worker：beacon / host 队列 / 队首心跳（与 var/img 完全分离）──
 
 void RemoteLogger::ctrl_worker_loop()
 {
-  send_register();
+  send_beacon();
 
   while (running_) {
     poll_ctrl();
+    poll_beacon();
 
     if (registered_) {
       auto now = std::chrono::steady_clock::now();
@@ -302,15 +336,14 @@ void RemoteLogger::ctrl_worker_loop()
         ack_ts = last_ack_ts_;
       }
       auto silent = std::chrono::duration_cast<std::chrono::milliseconds>(now - ack_ts);
-      auto limit = static_cast<int64_t>(cfg_.register_retry_ms) * 2;
-      if (limit < 1000) limit = 1000;
+      auto limit = static_cast<int64_t>(cfg_.head_timeout_ms);
+      if (limit < 500) limit = 500;
       if (ack_ts.time_since_epoch().count() > 0 && silent.count() > limit) {
-        registered_ = false;
-        std::fprintf(stderr, "[RemoteLogger] host lost, will re-register\n");
+        drop_head("head_alive timeout");
       }
     }
 
-    send_register();
+    send_beacon();
     if (registered_ && cfg_.heartbeat_interval_ms > 0) send_heartbeat();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(kCtrlWorkerPollMs));
@@ -437,51 +470,201 @@ bool RemoteLogger::encode_and_dispatch_image(ImgEntry & entry)
   return true;
 }
 
-void RemoteLogger::send_register()
+void RemoteLogger::send_beacon()
 {
-  if (sock_ < 0) return;
-
   auto now = std::chrono::steady_clock::now();
   {
-    std::lock_guard<std::mutex> lock(remote_mtx_);
-    uint32_t interval =
-      registered_ ? cfg_.register_retry_ms : static_cast<uint32_t>(kCtrlWorkerPollMs);
+    uint32_t interval = cfg_.beacon_interval_ms;
     if (interval < 1) interval = 1;
-    if (last_register_ts_.time_since_epoch().count() > 0) {
+    if (last_beacon_ts_.time_since_epoch().count() > 0) {
       auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_register_ts_);
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_beacon_ts_);
       if (elapsed.count() < static_cast<int64_t>(interval)) return;
     }
-    last_register_ts_ = now;
+    last_beacon_ts_ = now;
   }
 
-  sockaddr_in ctrl_addr{};
-  ctrl_addr.sin_family = AF_INET;
-  ctrl_addr.sin_port = ::htons(cfg_.control_port);
-  ctrl_addr.sin_addr.s_addr = ::inet_addr(cfg_.remote_host.c_str());
+  sockaddr_in dest{};
+  dest.sin_family = AF_INET;
+  dest.sin_port = htons(cfg_.beacon_port);
+  dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+  send_beacon_to(dest);
+}
 
-  nlohmann::json reg;
-  reg["type"] = "register";
-  reg["name"] = sender_name_;
-  std::string payload = reg.dump();
+void RemoteLogger::send_beacon_to(const sockaddr_in & dest)
+{
+  auto payload = make_beacon().dump();
+  int fd = beacon_sock_ >= 0 ? beacon_sock_ : sock_;
+  if (fd < 0) return;
+  ::sendto(fd, payload.data(), payload.size(), 0,
+           reinterpret_cast<const sockaddr *>(&dest), sizeof(dest));
+}
 
-  std::lock_guard<std::mutex> lock(remote_mtx_);
+nlohmann::json RemoteLogger::make_beacon() const
+{
+  nlohmann::json j;
+  j["v"] = 1;
+  j["type"] = "beacon";
+  j["name"] = sender_name_;
+  j["ip"] = local_ipv4();
+  j["control"] = cfg_.control_port;
+  j["ts"] = now_ns();
+  return j;
+}
+
+std::string RemoteLogger::local_ipv4() const
+{
+  int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd >= 0) {
+    sockaddr_in dest{};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(53);
+    ::inet_aton("8.8.8.8", &dest.sin_addr);
+    if (::connect(fd, reinterpret_cast<sockaddr *>(&dest), sizeof(dest)) == 0) {
+      sockaddr_in src{};
+      socklen_t n = sizeof(src);
+      if (::getsockname(fd, reinterpret_cast<sockaddr *>(&src), &n) == 0) {
+        ::close(fd);
+        char buf[INET_ADDRSTRLEN] = {};
+        ::inet_ntop(AF_INET, &src.sin_addr, buf, sizeof(buf));
+        if (buf[0] && std::strcmp(buf, "0.0.0.0") != 0) return buf;
+      }
+    }
+    ::close(fd);
+  }
+
+  ifaddrs * ifa = nullptr;
+  if (::getifaddrs(&ifa) != 0) return {};
+  std::string out;
+  for (ifaddrs * p = ifa; p; p = p->ifa_next) {
+    if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+    if (p->ifa_flags & IFF_LOOPBACK) continue;
+    if (!(p->ifa_flags & IFF_UP)) continue;
+    auto * in = reinterpret_cast<sockaddr_in *>(p->ifa_addr);
+    char buf[INET_ADDRSTRLEN] = {};
+    ::inet_ntop(AF_INET, &in->sin_addr, buf, sizeof(buf));
+    if (buf[0]) {
+      out = buf;
+      break;
+    }
+  }
+  ::freeifaddrs(ifa);
+  return out;
+}
+
+void RemoteLogger::send_json_to(in_addr ip, uint16_t port, const nlohmann::json & j)
+{
   if (sock_ < 0) return;
+  std::string payload = j.dump();
+  sockaddr_in dest{};
+  dest.sin_family = AF_INET;
+  dest.sin_addr = ip;
+  dest.sin_port = htons(port);
   ::sendto(sock_, payload.data(), payload.size(), 0,
-           reinterpret_cast<sockaddr *>(&ctrl_addr), sizeof(ctrl_addr));
+           reinterpret_cast<sockaddr *>(&dest), sizeof(dest));
+}
+
+nlohmann::json RemoteLogger::queue_ids_locked() const
+{
+  nlohmann::json ids = nlohmann::json::array();
+  for (const auto & h : queue_) ids.push_back(h.host_id);
+  return ids;
+}
+
+RemoteLogger::HostSlot * RemoteLogger::find_host_locked(const std::string & id)
+{
+  auto it = std::find_if(queue_.begin(), queue_.end(),
+                         [&](const HostSlot & h) { return h.host_id == id; });
+  if (it == queue_.end()) return nullptr;
+  return &(*it);
+}
+
+void RemoteLogger::apply_head_locked()
+{
+  if (queue_.empty()) {
+    registered_ = false;
+    addr_ = sockaddr_in{};
+    addr_.sin_family = AF_INET;
+    return;
+  }
+  const auto & h = queue_.front();
+  addr_.sin_family = AF_INET;
+  addr_.sin_addr = h.ip;
+  addr_.sin_port = htons(h.data_port);
+  registered_ = true;
+  last_ack_ts_ = std::chrono::steady_clock::now();
+}
+
+void RemoteLogger::notify_head_change(const HostSlot & head,
+                                      const std::vector<HostSlot> & rest)
+{
+  nlohmann::json ids = nlohmann::json::array();
+  ids.push_back(head.host_id);
+  for (const auto & h : rest) ids.push_back(h.host_id);
+
+  nlohmann::json promote;
+  promote["v"] = 1;
+  promote["type"] = "promote";
+  promote["robot"] = sender_name_;
+  promote["role"] = "head";
+  promote["queue"] = ids;
+  send_json_to(head.ip, head.peer_port, promote);
+
+  nlohmann::json upd;
+  upd["v"] = 1;
+  upd["type"] = "queue_update";
+  upd["robot"] = sender_name_;
+  upd["head"] = {
+    {"host_id", head.host_id},
+    {"ip", inet_ntoa(head.ip)},
+    {"peer_port", head.peer_port},
+    {"data_port", head.data_port},
+  };
+  upd["queue"] = ids;
+  for (const auto & h : rest) send_json_to(h.ip, h.peer_port, upd);
+}
+
+void RemoteLogger::drop_head(const char * why)
+{
+  HostSlot new_head;
+  std::vector<HostSlot> rest;
+  bool has_new = false;
+  {
+    std::lock_guard<std::mutex> lock(remote_mtx_);
+    if (queue_.empty()) return;
+    auto gone = queue_.front();
+    queue_.erase(queue_.begin());
+    std::fprintf(stderr, "[RemoteLogger] drop head '%s' (%s)\n",
+                 gone.host_id.c_str(), why ? why : "");
+    if (!queue_.empty()) {
+      has_new = true;
+      new_head = queue_.front();
+      rest.assign(queue_.begin() + 1, queue_.end());
+    }
+    apply_head_locked();
+  }
+  if (has_new) {
+    char ip[INET_ADDRSTRLEN] = {};
+    ::inet_ntop(AF_INET, &new_head.ip, ip, sizeof(ip));
+    std::fprintf(stderr, "[RemoteLogger] new head '%s' -> %s:%u\n",
+                 new_head.host_id.c_str(), ip, new_head.data_port);
+    notify_head_change(new_head, rest);
+  }
 }
 
 void RemoteLogger::poll_ctrl()
 {
   if (sock_ < 0) return;
-
   char buf[2048];
   int icmp_n = 0;
   for (;;) {
-    ssize_t n = ::recvfrom(sock_, buf, sizeof(buf) - 1, MSG_DONTWAIT, nullptr, nullptr);
+    sockaddr_in from{};
+    socklen_t flen = sizeof(from);
+    ssize_t n = ::recvfrom(sock_, buf, sizeof(buf) - 1, MSG_DONTWAIT,
+                           reinterpret_cast<sockaddr *>(&from), &flen);
     if (n > 0) {
       buf[n] = '\0';
-      handle_ctrl_payload(buf, static_cast<size_t>(n));
+      handle_ctrl_payload(buf, static_cast<size_t>(n), from);
       icmp_n = 0;
       continue;
     }
@@ -494,30 +677,201 @@ void RemoteLogger::poll_ctrl()
   }
 }
 
-void RemoteLogger::handle_ctrl_payload(const char * buf, size_t n)
+void RemoteLogger::poll_beacon()
 {
+  if (beacon_sock_ < 0) return;
+  char buf[2048];
+  for (;;) {
+    sockaddr_in from{};
+    socklen_t flen = sizeof(from);
+    ssize_t n = ::recvfrom(beacon_sock_, buf, sizeof(buf) - 1, MSG_DONTWAIT,
+                           reinterpret_cast<sockaddr *>(&from), &flen);
+    if (n <= 0) break;
+    buf[n] = '\0';
+    try {
+      auto msg = nlohmann::json::parse(buf, buf + n);
+      if (msg.value("type", "") == "who") send_beacon_to(from);
+    } catch (...) {
+    }
+  }
+}
+
+void RemoteLogger::handle_ctrl_payload(const char * buf, size_t n, const sockaddr_in & from)
+{
+  nlohmann::json msg;
   try {
-    auto resp = nlohmann::json::parse(buf, buf + n);
-    const auto type = resp.value("type", "");
-    if (type == "host_shutdown") {
-      registered_ = false;
-      std::fprintf(stderr, "[RemoteLogger] host shutdown, will re-register\n");
+    msg = nlohmann::json::parse(buf, buf + n);
+  } catch (...) {
+    return;
+  }
+  const auto type = msg.value("type", "");
+  const auto host_id = msg.value("host_id", "");
+
+  if (type == "who") {
+    send_beacon_to(from);
+    return;
+  }
+
+  if (type == "register") {
+    uint16_t data_port = msg.value("data_port", 0);
+    uint16_t peer_port = msg.value("peer_port", 0);
+    if (host_id.empty() || data_port == 0 || peer_port == 0) {
+      nlohmann::json err;
+      err["v"] = 1;
+      err["type"] = "register_ack";
+      err["status"] = "error";
+      err["message"] = "host_id/data_port/peer_port required";
+      send_json_to(from.sin_addr, peer_port ? peer_port : ntohs(from.sin_port), err);
       return;
     }
-    if (resp.value("status", "") == "ok" && resp.contains("port")) {
-      uint16_t assigned = resp["port"].get<uint16_t>();
-      {
-        std::lock_guard<std::mutex> lock(remote_mtx_);
-        addr_.sin_port = ::htons(assigned);
-        last_ack_ts_ = std::chrono::steady_clock::now();
+
+    bool is_head = false;
+    nlohmann::json ids;
+    HostSlot head_copy;
+    {
+      std::lock_guard<std::mutex> lock(remote_mtx_);
+      auto * existing = find_host_locked(host_id);
+      if (existing) {
+        existing->name = msg.value("name", existing->name);
+        existing->ip = from.sin_addr;
+        existing->data_port = data_port;
+        existing->peer_port = peer_port;
+      } else {
+        if (queue_.size() >= 32) {
+          nlohmann::json err;
+          err["v"] = 1;
+          err["type"] = "register_ack";
+          err["status"] = "error";
+          err["message"] = "host queue full";
+          send_json_to(from.sin_addr, peer_port, err);
+          return;
+        }
+        HostSlot slot;
+        slot.host_id = host_id;
+        slot.name = msg.value("name", "");
+        slot.ip = from.sin_addr;
+        slot.data_port = data_port;
+        slot.peer_port = peer_port;
+        queue_.push_back(std::move(slot));
+        std::fprintf(stderr, "[RemoteLogger] host '%s' queued (%zu)\n",
+                     host_id.c_str(), queue_.size());
       }
-      const bool was = registered_.exchange(true);
-      if (!was) {
-        std::fprintf(stderr, "[RemoteLogger] registered '%s' -> port %d\n",
-                     sender_name_.c_str(), assigned);
+      apply_head_locked();
+      is_head = !queue_.empty() && queue_.front().host_id == host_id;
+      ids = queue_ids_locked();
+      if (!queue_.empty()) head_copy = queue_.front();
+    }
+
+    nlohmann::json ack;
+    ack["v"] = 1;
+    ack["type"] = "register_ack";
+    ack["status"] = "ok";
+    ack["robot"] = sender_name_;
+    ack["queue"] = ids;
+    if (is_head) {
+      ack["role"] = "head";
+    } else {
+      ack["role"] = "follower";
+      ack["head"] = {
+        {"host_id", head_copy.host_id},
+        {"ip", inet_ntoa(head_copy.ip)},
+        {"peer_port", head_copy.peer_port},
+        {"data_port", head_copy.data_port},
+      };
+    }
+    send_json_to(from.sin_addr, peer_port, ack);
+    return;
+  }
+
+  if (type == "deregister") {
+    bool was_head = false;
+    HostSlot new_head;
+    std::vector<HostSlot> rest;
+    bool has_new = false;
+    {
+      std::lock_guard<std::mutex> lock(remote_mtx_);
+      auto * existing = find_host_locked(host_id);
+      if (!existing) {
+        nlohmann::json ack;
+        ack["v"] = 1;
+        ack["type"] = "deregister_ack";
+        ack["status"] = "ok";
+        uint16_t port = msg.value("peer_port", ntohs(from.sin_port));
+        send_json_to(from.sin_addr, port, ack);
+        return;
+      }
+      was_head = queue_.front().host_id == host_id;
+      uint16_t reply_port = existing->peer_port;
+      queue_.erase(std::remove_if(queue_.begin(), queue_.end(),
+                                  [&](const HostSlot & h) { return h.host_id == host_id; }),
+                   queue_.end());
+      apply_head_locked();
+      if (was_head && !queue_.empty()) {
+        has_new = true;
+        new_head = queue_.front();
+        rest.assign(queue_.begin() + 1, queue_.end());
+      }
+      nlohmann::json ack;
+      ack["v"] = 1;
+      ack["type"] = "deregister_ack";
+      ack["status"] = "ok";
+      send_json_to(from.sin_addr, reply_port, ack);
+    }
+    std::fprintf(stderr, "[RemoteLogger] host '%s' deregistered\n", host_id.c_str());
+    if (has_new) notify_head_change(new_head, rest);
+    return;
+  }
+
+  if (type == "head_alive") {
+    std::lock_guard<std::mutex> lock(remote_mtx_);
+    if (queue_.empty() || queue_.front().host_id != host_id) return;
+    auto & h = queue_.front();
+    h.ip = from.sin_addr;
+    if (msg.contains("data_port")) h.data_port = msg.value("data_port", h.data_port);
+    if (msg.contains("peer_port")) h.peer_port = msg.value("peer_port", h.peer_port);
+    apply_head_locked();
+    return;
+  }
+
+  if (type == "query_head") {
+    bool in_queue = false;
+    bool is_head = false;
+    nlohmann::json ids;
+    HostSlot head_copy;
+    uint16_t reply_port = msg.value("peer_port", 0);
+    {
+      std::lock_guard<std::mutex> lock(remote_mtx_);
+      auto * existing = find_host_locked(host_id);
+      in_queue = existing != nullptr;
+      if (existing && existing->peer_port) reply_port = existing->peer_port;
+      ids = queue_ids_locked();
+      if (!queue_.empty()) {
+        head_copy = queue_.front();
+        is_head = head_copy.host_id == host_id;
       }
     }
-  } catch (...) {
+    if (!reply_port) reply_port = ntohs(from.sin_port);
+    nlohmann::json ack;
+    ack["v"] = 1;
+    ack["type"] = "register_ack";
+    ack["robot"] = sender_name_;
+    ack["queue"] = ids;
+    if (!in_queue) {
+      ack["status"] = "error";
+      ack["message"] = "not in queue";
+    } else {
+      ack["status"] = "ok";
+      ack["role"] = is_head ? "head" : "follower";
+      if (!is_head) {
+        ack["head"] = {
+          {"host_id", head_copy.host_id},
+          {"ip", inet_ntoa(head_copy.ip)},
+          {"peer_port", head_copy.peer_port},
+          {"data_port", head_copy.data_port},
+        };
+      }
+    }
+    send_json_to(from.sin_addr, reply_port, ack);
   }
 }
 

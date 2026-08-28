@@ -12,6 +12,32 @@ IMG_MARKER = 0xFF
 MAX_UDP = 65536
 
 
+def packet_sender(data):
+    """_from of a data-plane UDP packet, or ''."""
+    if not data:
+        return ""
+    try:
+        if data[0] == IMG_MARKER:
+            if len(data) < 17:
+                return ""
+            meta_len = struct.unpack_from("<I", data, 9)[0]
+            meta_off = 13
+            if len(data) < meta_off + meta_len:
+                return ""
+            meta = json.loads(data[meta_off:meta_off + meta_len].decode("utf-8"))
+            if isinstance(meta, dict):
+                frm = meta.get("_from")
+                return frm if isinstance(frm, str) else ""
+            return ""
+        j = json.loads(data.decode("utf-8"))
+        if isinstance(j, dict):
+            frm = j.get("_from")
+            return frm if isinstance(frm, str) else ""
+    except Exception:
+        return ""
+    return ""
+
+
 class UdpBackend:
     """Bind one UDP port, parse plot/log/image packets, emit JSON lines."""
 
@@ -19,6 +45,7 @@ class UdpBackend:
         self.timeout_ms = timeout_ms
         self.on_output = None
         self.on_state = None
+        self.on_raw = None
         self._lock = threading.Lock()
         self._sock = None
         self._thread = None
@@ -29,6 +56,7 @@ class UdpBackend:
         self._last_pkt = 0.0
         self._last_from = ""
         self._was_connected = False
+        self._filter = ""
 
     @property
     def active_sender(self):
@@ -42,6 +70,9 @@ class UdpBackend:
     def running(self):
         t = self._thread
         return self._running and t is not None and t.is_alive()
+
+    def set_filter(self, sender_name):
+        self._filter = sender_name or ""
 
     def start(self, port, sender_name="default"):
         with self._lock:
@@ -119,6 +150,12 @@ class UdpBackend:
             if not data:
                 continue
             self._last_pkt = time.monotonic()
+            raw_cb = self.on_raw
+            if raw_cb:
+                try:
+                    raw_cb(data)
+                except Exception as e:
+                    print(f"[udp] forward error: {e}", file=sys.stderr)
             try:
                 self._handle(data)
             except Exception as e:
@@ -146,6 +183,9 @@ class UdpBackend:
         else:
             self._handle_json(data)
 
+    def _drop_filtered(self):
+        return bool(self._filter and self._last_from and self._last_from != self._filter)
+
     def _handle_image(self, data):
         if len(data) < 17:
             return
@@ -167,6 +207,8 @@ class UdpBackend:
             frm = meta.get("_from")
             if isinstance(frm, str):
                 self._last_from = frm
+        if self._drop_filtered():
+            return
         self._emit({
             "type": "image",
             "ts": ts,
@@ -185,6 +227,8 @@ class UdpBackend:
         if isinstance(frm, str):
             self._last_from = frm
         if "hb" in j:
+            return
+        if self._drop_filtered():
             return
         ts = j.get("ts", 0)
         if isinstance(j.get("level"), str) and isinstance(j.get("msg"), str):

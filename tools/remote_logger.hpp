@@ -26,14 +26,14 @@ namespace tools
 ///   plot_image  ──→ 按 name 相位锁 30fps ──→ clone ──→ 每路 mailbox(1) ──→ img_worker_
 ///                   未入选帧直接 return              resize 后放全分辨率
 ///                                                   JPEG + .rlog + UDP
-///   (enable_remote) ctrl_worker_ ──→ 注册 / 心跳 / 重试
+///   (enable_remote) ctrl_worker_ ──→ beacon / host 队列 / 只向队首发数据
 class RemoteLogger
 {
 public:
   struct Config
   {
-    std::string remote_host = "127.0.0.1";
     uint16_t control_port = 15000;
+    uint16_t beacon_port = 15999;
     bool enable_remote = true;
     bool enable_local = true;
     std::string log_dir = "./logs";
@@ -43,7 +43,8 @@ public:
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
     std::string sender_name;
-    uint32_t register_retry_ms = 3000;
+    uint32_t beacon_interval_ms = 1000;
+    uint32_t head_timeout_ms = 2000;
   };
 
   static RemoteLogger & instance();
@@ -85,11 +86,30 @@ private:
   void img_worker_loop();
   void ctrl_worker_loop();
 
+  struct HostSlot
+  {
+    std::string host_id;
+    std::string name;
+    in_addr ip{};
+    uint16_t data_port{0};
+    uint16_t peer_port{0};
+  };
+
   bool try_select_img(uint64_t ts, const std::string & name);
-  void send_register();
   void poll_ctrl();
-  void handle_ctrl_payload(const char * buf, size_t n);
+  void poll_beacon();
+  void handle_ctrl_payload(const char * buf, size_t n, const sockaddr_in & from);
+  void send_beacon();
+  void send_beacon_to(const sockaddr_in & dest);
   void send_heartbeat();
+  void send_json_to(in_addr ip, uint16_t port, const nlohmann::json & j);
+  void apply_head_locked();
+  void drop_head(const char * why);
+  void notify_head_change(const HostSlot & head, const std::vector<HostSlot> & rest);
+  nlohmann::json queue_ids_locked() const;
+  HostSlot * find_host_locked(const std::string & id);
+  std::string local_ipv4() const;
+  nlohmann::json make_beacon() const;
   std::string resolve_sender() const;
   void inject_sender(nlohmann::json & j) const;
 
@@ -146,8 +166,9 @@ private:
   ImgMailbox img_mbox_;
   std::thread img_worker_;
 
-  // ── 远程控制（注册 / 心跳，独立线程）────────────────────────────
+  // ── 远程控制（beacon / 队列 / 队首心跳，独立线程）──────────────
   std::thread ctrl_worker_;
+  int beacon_sock_{-1};
 
   // ── 本地 .rlog 会话文件（var/img worker 写，session_mtx_ 保护）──
   std::mutex session_mtx_;
@@ -155,10 +176,11 @@ private:
   FILE * session_fp_{nullptr};
   std::chrono::steady_clock::time_point last_session_flush_{};
 
-  // ── 远程 UDP（注册状态 + sendto）────────────────────────────────
+  // ── 远程 UDP（host 队列 + 只向队首 sendto）─────────────────────
   std::mutex remote_mtx_;
   std::atomic<bool> registered_{false};
-  std::chrono::steady_clock::time_point last_register_ts_{};
+  std::vector<HostSlot> queue_;
+  std::chrono::steady_clock::time_point last_beacon_ts_{};
   std::chrono::steady_clock::time_point last_ack_ts_{};
   std::chrono::steady_clock::time_point last_hb_{};
   int sock_{-1};

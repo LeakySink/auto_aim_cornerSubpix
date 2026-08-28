@@ -1,12 +1,10 @@
-# Host ↔ 车 控制协议（拟议）
+# Host ↔ 车 控制协议
 
-用法见 [`HOST.md`](HOST.md)，当前实现见 [`DESIGN.md`](DESIGN.md)，车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+用法见 [`HOST.md`](HOST.md)，host 模块 API 见 [`DESIGN.md`](DESIGN.md)，车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
-本文是 **下一版控制平面** 的规格，尚未落地。当前代码仍是：车 yaml 写死 `remote_host`，向该 host `:15000` 单播 `register`，数据只打给那一台。
+数据平面（plot/log JSON、`0xFF` 图像、`.rlog` RLG2）与旧版相同。控制平面：车 DHCP；host 向车注册并排队；车只与 **队首** 发数据和心跳；后入调试机从队首拉流。车上数据面始终一份单播。
 
-目标：车用 DHCP；host 向车注册并排队；车只与 **队首** 发数据和心跳；后入调试机从队首拉流，由队首原样转发。车上数据面始终一份单播。
-
-数据平面（plot/log JSON、`0xFF` 图像、`.rlog` RLG2）**不改**。
+车 yaml 里若仍留着 `remote_host` / `register_retry_ms`，会被忽略。
 
 ---
 
@@ -56,7 +54,7 @@
 
 同一台机器开第二个 watch：用环境变量错开 `DATA_PORT` / `PEER_PORT`（实现时再接到脚本）。
 
-车 yaml（拟议，去掉 `remote_host`）：
+车 yaml：
 
 ```yaml
 remote_logger:
@@ -310,25 +308,24 @@ H2 开始转发；其余改 subscribe H2
 
 ---
 
-## 11. 改代码时的落点（尚未做）
+## 11. 代码落点
 
-建议两个提交：① 车侧队列 + 只对队首单播（行为仍一对一，但 IP 已动态）；② host `peer` 转发。
-
-| 位置 | 改什么 |
+| 位置 | 职责 |
 |---|---|
-| `tools/remote_logger.*` | 去掉 `remote_host`；bind 15000；beacon；队列；只向队首发 UDP |
-| `host/rdbg/net/control.py` | 不再等车来注册；发现 + 向车 `register` |
-| 新增 `host/rdbg/net/peer.py` | `subscribe` / 原样转发 / `handoff` |
-| `UdpBackend`、图像头、`.rlog`、前端 | 不动 |
+| `tools/remote_logger.*` | bind 15000；beacon；host 队列；只向队首发 UDP |
+| `host/rdbg/net/control.py` | 发现 + 向车 `register` / `head_alive` |
+| `host/rdbg/net/peer.py` | `subscribe` / 原样转发 / `handoff` |
+| `host/rdbg/net/udp.py` | 数据面解析 + `on_raw` 转发给 peer |
+| `.rlog` / 图像头 / 前端 | 不动 |
 
 ---
 
-## 12. 与现网的差异（对照）
+## 12. 与旧版差异
 
-| | 现网（DESIGN §4.5） | 本规格 |
+| | 旧版 | 现在 |
 |---|---|---|
 | 谁监听 15000 | host | 车 |
-| yaml `remote_host` | 必须 | 删除 |
+| yaml `remote_host` | 必须 | 忽略 |
 | 数据目的地 | 唯一那台 host | 当前队首 |
 | 第二台 watch | 收不到 | 队首转发 |
-| 发现 | 无 | beacon `:15999` |
+| 发现 | 无 | beacon `:15999`（连上后不停） |

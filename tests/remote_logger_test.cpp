@@ -23,12 +23,12 @@ int main(int argc, char * argv[])
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
       std::printf("Usage: %s [options]\n", argv[0]);
-      std::printf("  --host=IP       Remote host IP (default: 127.0.0.1)\n");
-      std::printf("  --ctrl-port=P   Control port   (default: 15000)\n");
+      std::printf("  --ctrl-port=P   Robot control port (default: 15000)\n");
       std::printf("  --name=NAME     Sender name    (default: auto)\n");
       std::printf("  --hb=MS         Heartbeat ms   (default: 0=off)\n");
       std::printf("  --rate=HZ       Send rate      (default: 50)\n");
       std::printf("  --video=PATH    Video file     (optional)\n");
+      std::printf("  Hosts find this process via UDP beacon; --host is ignored.\n");
       return 0;
     }
     auto eq = arg.find('=');
@@ -54,7 +54,6 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   tools::RemoteLogger::Config cfg;
-  cfg.remote_host = host;
   cfg.control_port = ctrl_port;
   cfg.sender_name = name;
   cfg.heartbeat_interval_ms = hb;
@@ -63,8 +62,8 @@ int main(int argc, char * argv[])
   cfg.img_quality = 40;
 
   tools::RemoteLogger::instance().init(cfg);
-  tools::RemoteLogger::instance().log("INFO", "test started, host=" + host +
-                                             " ctrl_port=" + std::to_string(ctrl_port));
+  tools::RemoteLogger::instance().log("INFO", "test started, ctrl_port=" +
+                                             std::to_string(ctrl_port));
 
   auto interval = std::chrono::microseconds(1000000 / rate);
   auto t0 = std::chrono::steady_clock::now();

@@ -2,7 +2,7 @@
 
 ## 概述
 
-`RemoteLogger` 是单例模式的远程调试日志库，位于 `tools/remote_logger.hpp/.cpp`。库自动处理注册、重试、心跳、注销全流程，调用方只需 `init()` → `plot/log/plot_image` → `shutdown()`。
+`RemoteLogger` 是单例模式的远程调试日志库，位于 `tools/remote_logger.hpp/.cpp`。调用方只需 `init()` → `plot/log/plot_image` → `shutdown()`。库 bind 控制口、发 LAN beacon，host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
 
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
@@ -20,12 +20,11 @@ tools::RemoteLogger::instance().init(config_path);
 
 // 或手动构造 Config（测试程序）
 tools::RemoteLogger::Config cfg;
-cfg.remote_host = "192.168.1.100";
 cfg.sender_name  = "my_robot";
 cfg.heartbeat_interval_ms = 500;
 tools::RemoteLogger::instance().init(cfg);
 
-// 发送数据（库自动处理注册/重试）
+// 发送数据（host 向车注册后才会出现在队首的 UDP 里）
 tools::RemoteLogger::instance().plot({{"pitch", 0.15}, {"yaw", -0.3}});
 tools::RemoteLogger::instance().log("INFO", "target locked");
 tools::RemoteLogger::instance().log("ERROR", "motor {} fail, code={}", 3, 0x1F);
@@ -40,7 +39,6 @@ tools::RemoteLogger::instance().shutdown();  // 自动注销
 
 ```yaml
 remote_logger:
-  remote_host: "127.0.0.1"
   control_port: 15000
   enable_remote: true
   enable_local: true
@@ -51,42 +49,42 @@ remote_logger:
   img_quality: 50
   heartbeat_interval_ms: 500   # 0=关闭
   sender_name: "sentry"
-  register_retry_ms: 3000
+  beacon_interval_ms: 1000     # 缺省 1000；连上后也一直发
+  head_timeout_ms: 2000        # 缺省 2000；队首失联出队
 ```
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `remote_host` | "127.0.0.1" | 远程主机 IP |
-| `control_port` | 15000 | 控制端口（必须，用于注册） |
-| `enable_remote` | true | 启用 UDP 发送 |
+| `control_port` | 15000 | 车 bind 的控制口，host 来 register |
+| `enable_remote` | true | 启用 UDP / beacon |
 | `enable_local` | true | 启用本地日志 |
 | `log_dir` | "./logs" | 本地日志目录 |
 | `var_buffer_size` | 1024 | 变量缓冲条数 |
 | `img_buffer_size` | 10 | yaml 兼容保留，图像侧不再使用深队列 |
 | `img_width` | 640 | 图像压缩宽度 |
 | `img_quality` | 50 | JPEG 质量 |
-| `heartbeat_interval_ms` | 0 | 心跳间隔，0=关闭 |
-| `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`） |
-| `register_retry_ms` | 3000 | 已注册时的刷新间隔；未注册时约 200ms 重试。host 超过 2 倍间隔无应答则重注册 |
+| `heartbeat_interval_ms` | 0 | 向队首发 `hb` 的间隔，0=关闭 |
+| `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`），多车必须唯一 |
+| `beacon_interval_ms` | 1000 | LAN 发现广播间隔，已连接也不停 |
+| `head_timeout_ms` | 2000 | 队首无 `head_alive` 则出队 |
+
+旧键 `remote_host` / `register_retry_ms` 若仍写在 yaml 里会被忽略。
 
 ## 注册协议
 
-远程发送必须先向控制口注册，数据端口由 host 分配。未注册前不发 UDP。
-
-可视化 Host 端见 [`host/HOST.md`](host/HOST.md)（用法）和 [`host/DESIGN.md`](host/DESIGN.md)（内部 API）：`./host/watch.sh` 实时调试，`./host/replay.sh` 回放 `.rlog`。
+host 向车注册，不是车向 host。详细报文见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
 
 ```
-Sender ──{"type":"register","name":"my_robot"}──→ Control :control_port
-Sender ←──{"type":"register_ack","status":"ok","port":15001}── Control
-Sender ──数据──→ port 15001
+车 --beacon--> 255.255.255.255:15999     （enable_remote 期间一直发）
+Host --register--> 车:15000
+车 --register_ack role=head|follower--> Host:15100
+车 --数据/hb--> 仅队首 :15001
+队首 --原样 UDP--> 后入 Host :15001
 ```
 
-注册失败约每 200ms 重试；已连接后每 `register_retry_ms` 向控制口刷新一次。因此可以先开车上程序再开 `./host/watch.sh`，也可以在 watch 重启后自动重连。host 对同一 `name` 的重复注册是幂等的（仍返回原数据口）。
+未入队（队列空）时不发数据 UDP。`.rlog` 照写。可视化：`./host/watch.sh` 实时，`./host/replay.sh` 回放。
 
-`shutdown()` 时自动发送注销：
-```
-Sender ──{"type":"deregister","name":"my_robot"}──→ Control
-```
+`shutdown()` 停 beacon；host 约 3s 听不到该 `name` 即标离线。车上不向 host 发 `deregister`。
 
 ## 发送方标识
 
@@ -160,14 +158,14 @@ plot_image
   按 name 未到 30Hz → return
   入选 → clone → 该路 mailbox(1) ──► resize 放全分辨率
                                JPEG + .rlog + UDP
-plot/log → var_buf_  ──────────────────────────────► .rlog + UDP
-shutdown → join img+var+ctrl                         JSON             register/hb
+plot/log → var_buf_  ──────────────────────────────► .rlog + UDP（仅队首）
+shutdown → join img+var+ctrl                         JSON             beacon/队列
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
-| `var_worker_` | JSON 写本地 + UDP | `plot()` notify；空闲 poll 50ms |
-| `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP | 入选帧 publish；空闲 poll 50ms |
-| `ctrl_worker_` | 注册、刷新、心跳、host 掉线重连 | 独立轮询 200ms（`enable_remote` 时启动） |
+| `var_worker_` | JSON 写本地 + UDP 队首 | `plot()` notify；空闲 poll 50ms |
+| `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP 队首 | 入选帧 publish；空闲 poll 50ms |
+| `ctrl_worker_` | beacon、host 队列、队首 `head_alive` 超时 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。
