@@ -1,6 +1,6 @@
 # Host 内部设计
 
-给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。下一版控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 本文约定：路径相对 `host/`。包名 `rdbg`。Unix 用 `watch.sh` / `replay.sh`，Windows 用 `watch.bat` / `replay.bat`，把 `host/` 加进 `PYTHONPATH` 后跑 `python -m rdbg …`。`run.py` 只看 `sys.platform`，Windows 调 `.bat`，否则调 `.sh`。
 
@@ -15,6 +15,7 @@ host/
   run.py                   按平台转发到上面
   HOST.md                  使用者
   DESIGN.md                本文件
+  PROTOCOL.md              下一版车/host 控制协议（尚未落地）
   rdbg/                    Python 包（不要直接当脚本跑）
     cli.py                 子命令
     http/                  HTTP 壳：路由、SSE、静态
@@ -423,7 +424,7 @@ SSE：`new EventSource('/events')`。`msg.type`：
 
 ## 7. 改代码时别动的契约
 
-- `.rlog` RLG2 布局、UDP `0xFF` 图像头、注册 JSON：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。
+- `.rlog` RLG2 布局、UDP `0xFF` 图像头：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。下一版注册/队列/转发见 `PROTOCOL.md`，落地前仍用本节 §4.5 的现网 JSON。
 - `replay.js` 用的全局函数名。
 - 静态 URL 前缀 `/static/`。
 - 标准库 only，不要为 host 加 pip 依赖。

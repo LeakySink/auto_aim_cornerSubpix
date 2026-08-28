@@ -2,7 +2,7 @@
 
 调试 PC 上的接收与可视化。Python 3.8+ 标准库，无 pip 依赖。
 
-**内部构造、扩展方法和全部 API** 见 [`DESIGN.md`](DESIGN.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+**内部构造、扩展方法和全部 API** 见 [`DESIGN.md`](DESIGN.md)。下一版车/host 控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 ## 目录
 
@@ -11,7 +11,7 @@ host/
   watch.sh / replay.sh     Unix 入口
   watch.bat / replay.bat   Windows 入口
   run.py                   按平台选上面两者
-  HOST.md / DESIGN.md
+  HOST.md / DESIGN.md / PROTOCOL.md
   rdbg/
     http/     路由 · SSE · 静态
     net/      注册 UDP · 数据 UDP
