@@ -136,6 +136,8 @@ host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 b
 {"v":1,"type":"register_ack","status":"error","message":"..."}
 ```
 
+注销成功：
+
 ```json
 {"v":1,"type":"deregister_ack","status":"ok"}
 ```
