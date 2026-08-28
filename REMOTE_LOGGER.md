@@ -2,7 +2,20 @@
 
 ## 概述
 
-`RemoteLogger` 是单例模式的远程调试日志库，位于 `tools/remote_logger.hpp/.cpp`。调用方只需 `init()` → `plot/log/plot_image` → `shutdown()`。库 bind 控制口、发 LAN beacon，host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
+`RemoteLogger` 是单例模式的远程调试日志库。调用方只 include [`tools/remote_logger.hpp`](tools/remote_logger.hpp)：`init()` → `plot/log/plot_image` → `shutdown()`。实现在 [`tools/rdbg/`](tools/rdbg/)，按层拆开：
+
+```
+plot / log / plot_image     对外 API（tools/remote_logger.hpp）
+        │
+        ▼
+   rdbg/engine          入队 + 三条 worker
+        ├─ rdbg/session     本地 .rlog（RLG2）
+        ├─ rdbg/data        数据 UDP → 仅队首
+        ├─ rdbg/control     beacon + host 队列
+        └─ rdbg/transport   UDP bind / sendto / recv
+```
+
+host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
 
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
@@ -149,23 +162,23 @@ type 0x01 image:
 
 ## 线程模型
 
-三条后台路径：变量、图像编码、远程控制；`.rlog` 由 var/img 写（`session_mtx_`）。
+三条后台路径；本地会话与线上控制/数据解耦。
 
 ```
-主线程                         img_worker_           var_worker_      ctrl_worker_
-──────                         ───────────           ───────────      ─────────────
+主线程                         img_worker             var_worker        ctrl_worker
+──────                         ──────────             ──────────        ───────────
 plot_image
   按 name 未到 30Hz → return
-  入选 → clone → 该路 mailbox(1) ──► resize 放全分辨率
-                               JPEG + .rlog + UDP
-plot/log → var_buf_  ──────────────────────────────► .rlog + UDP（仅队首）
-shutdown → join img+var+ctrl                         JSON             beacon/队列
+  入选 → clone → mailbox(1) ──► JPEG
+                               session + data
+plot/log → var_buf  ──────────────────────────────► session + data（仅队首）
+shutdown → join                                     JSON              transport+control
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
-| `var_worker_` | JSON 写本地 + UDP 队首 | `plot()` notify；空闲 poll 50ms |
-| `img_worker_` | 邮箱取帧 → resize → JPEG + 写本地 + UDP 队首 | 入选帧 publish；空闲 poll 50ms |
-| `ctrl_worker_` | beacon、host 队列、队首 `head_alive` 超时 | 独立轮询 200ms（`enable_remote` 时启动） |
+| `var_worker` | JSON → `session` + `data` | `plot()` notify；空闲 poll 50ms |
+| `img_worker` | 邮箱 → JPEG → `session` + `data` | 入选帧 publish；空闲 poll 50ms |
+| `ctrl_worker` | `control`：beacon、队列、队首超时 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。

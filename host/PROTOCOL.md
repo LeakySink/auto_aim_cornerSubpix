@@ -312,11 +312,15 @@ H2 开始转发；其余改 subscribe H2
 
 | 位置 | 职责 |
 |---|---|
-| `tools/remote_logger.*` | bind 15000；beacon；host 队列；只向队首发 UDP |
+| `tools/remote_logger.hpp` | 对外 API（`init` / `plot` / `log` / `plot_image`） |
+| `tools/rdbg/transport` | L0 UDP |
+| `tools/rdbg/control` | L1 beacon + host 队列 |
+| `tools/rdbg/data` | L2 只向队首发 JSON/图像/hb |
+| `tools/rdbg/session` | L3 本地 `.rlog` |
+| `tools/rdbg/image` + `engine` | 30fps 邮箱、worker 拼层 |
 | `host/rdbg/net/control.py` | 发现 + 向车 `register` / `head_alive` |
 | `host/rdbg/net/peer.py` | `subscribe` / 原样转发 / `handoff` |
 | `host/rdbg/net/udp.py` | 数据面解析 + `on_raw` 转发给 peer |
-| `.rlog` / 图像头 / 前端 | 不动 |
 
 ---
 
