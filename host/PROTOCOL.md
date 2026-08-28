@@ -26,7 +26,7 @@
 
 | 谁 | 负担 |
 |---|---|
-| 车 | 数据 1 份单播；~100B/s beacon；成员变化时若干条 `promote` / `queue_update` |
+| 车 | 数据 1 份单播；全程 ~100B/s beacon（连上后不停）；成员变化时若干条 `promote` / `queue_update` |
 | 队首 host | 收车包 + 转发给订阅者 |
 | follower | 只跟队首，不跟车发 `head_alive` |
 
@@ -71,21 +71,30 @@ remote_logger:
 
 ## 3. 发现
 
-车每 `beacon_interval_ms` 向 `255.255.255.255:15999` 发：
+车在 `enable_remote` 期间 **一直** 按 `beacon_interval_ms` 向 `255.255.255.255:15999` 发 beacon。队列空、已有队首、正在转发，都不停。不是「连上之前的握手」，而是常驻宣告。
+
+必须持续广播的原因：
+
+- 后入的 watch 没有历史状态，只能靠当前 beacon 发现车和其 `ip`
+- 车 DHCP 换地址后，`beacon.ip` 是 host 改打 `register` 的唯一来源
+- 多车时 watch 用持续 beacon 维持「场上有哪些 `name`」；某车进程退出，beacon 停，host 才把它从名单里拿掉
+- 队首已连上也不能停：停了第二台调试机就看不见这辆车
 
 ```json
 {"v":1,"type":"beacon","name":"sentry","ip":"<车当前IPv4>","control":15000,"ts":...}
 ```
 
-`ip` 必须是车准备收控制包的地址。host 听到后向 `beacon.ip:control` 单播 `register`。
+`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。
 
-host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 bind 15999 则回；否则等下一次 beacon）：
+host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 bind 15999 则回；否则等下一次周期 beacon）：
 
 ```json
 {"v":1,"type":"who","host_id":"..."}
 ```
 
-车对该 host **单播** 一条等价 `beacon` 到其源地址（发现口或控制口均可，实现时固定回源端口）。
+车对该 host **单播** 一条等价 `beacon` 到其源地址（发现口或控制口均可，实现时固定回源端口）。`who` 是加速，不能替代周期广播。
+
+`shutdown()` / `enable_remote=false` 后停止 beacon。host 超过约 3 个周期（默认 3s）听不到某 `name`，将该车标为离线；**不要**因此替车清 host 队列——队列只活在车上。
 
 ---
 
@@ -243,6 +252,7 @@ H1 --register--> 车 :15000
 车 --register_ack role=head--> H1 :15100
 车 --plot/img/hb--> H1 :15001
 H1 --head_alive--> 车 :15000
+车 --beacon--> LAN          （不停，H2 靠这个发现）
 ```
 
 第二台：
@@ -274,11 +284,11 @@ H2 开始转发；其余改 subscribe H2
 
 ### 车
 
-| 状态 | 数据 sendto | `head_alive` |
-|---|---|---|
-| `queue empty` | 无 | 忽略 |
-| `has head` | 仅 `queue[0].ip:data_port` | 刷新超时计时 |
-| 超时或队首 `deregister` | pop；空则停；否则 `promote` + `queue_update` | — |
+| 状态 | 数据 sendto | `head_alive` | beacon |
+|---|---|---|---|
+| `queue empty` | 无 | 忽略 | 发 |
+| `has head` | 仅 `queue[0].ip:data_port` | 刷新超时计时 | 发 |
+| 超时或队首 `deregister` | pop；空则停；否则 `promote` + `queue_update` | — | 发 |
 
 ### host
 
