@@ -1,10 +1,16 @@
+# 用法:
+#   ./build/calibrate configs/calibration.yaml
+#   ./build/calibrate configs/calibration.yaml -o configs/sentry.yaml
+#   ./build/calibrate configs/calibration.yaml --camera-only
+# 挥动棋盘格填满 X/Y/Size/Skew 后按 C 标定，S 保存。SPACE 可强制采样。
+
 # 棋盘格内角点数量
 pattern_cols: 11
 pattern_rows: 8
 # 方格实际尺寸(毫米)，用于计算相机内参
 square_size_mm: 40
 
-# 相机内参（运行 ./build/calibrate_camera 后获得的结果填入此处）
+# 相机内参（./build/calibrate 按 S 后自动写回）
 # 重投影误差: 0.2437px
 camera_matrix: [1809.4822355031245, 0, 697.14569994150293, 0, 1809.4809037947414, 571.90685201331121, 0, 0, 1]
 distort_coeffs: [-0.081190039023144409, 0.19231523391750371, 0.00096216291015417384, -0.00049720732747006446, 0]
@@ -19,3 +25,18 @@ camera_name: "hikrobot"
 exposure_ms: 5   # 标定时可以使用较短曝光，提高帧率
 gain: 16.0       # 曝光时间短时提高增益以保持亮度
 vid_pid: "2bdf:0001"
+
+#####-----remote_logger-----#####
+remote_logger:
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500
+  sender_name: "calibrate"
+  beacon_interval_ms: 1000
+  head_timeout_ms: 2000
