@@ -393,20 +393,11 @@ bool Calibrator::write_yaml(const std::string & path) const
 
   std::ostringstream out;
   out << "# 标定结果（SAVE 写回；棋盘格参数也在此修改）\n";
+  out << "# 仅内参：camera_matrix / distort_coeffs\n";
   out << "# 用法见 calibration.md\n\n";
   out << "pattern_cols: " << pattern_size_.width << "\n";
   out << "pattern_rows: " << pattern_size_.height << "\n";
   out << "square_size_mm: " << square_size_mm_ << "\n\n";
-  {
-    std::vector<double> r(9);
-    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(r.data()) = R_gimbal2imubody_;
-    out << "R_gimbal2imubody: [";
-    for (int i = 0; i < 9; i++) {
-      if (i) out << ", ";
-      out << fmt::format("{:.16g}", r[i]);
-    }
-    out << "]\n\n";
-  }
   if (!calibrated_at_.empty()) out << "calibrated_at: \"" << calibrated_at_ << "\"\n";
   out << "# 重投影误差: " << fmt::format("{:.4f}px", camera_.reproj_error) << "\n";
   out << "camera_matrix: " << format_flow(camera_.camera_matrix) << "\n";

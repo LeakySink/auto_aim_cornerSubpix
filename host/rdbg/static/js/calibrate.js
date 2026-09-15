@@ -29,7 +29,7 @@
       var x = 4 + Math.max(0, Math.min(1, s.x || 0)) * (w - 8);
       var y = 4 + Math.max(0, Math.min(1, s.y || 0)) * (h - 8);
       var r = Math.max(3, (s.size || 0.1) * 28);
-      ctx.strokeStyle = s.q ? "#50d278" : "#50b4e6";
+      ctx.strokeStyle = "#50b4e6";
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -50,7 +50,7 @@
       board.textContent = "BOARD --";
       board.className = "pill dead";
     }
-    $("counts").textContent = "samples " + (status.n || 0) + " · imu " + (status.n_q || 0);
+    $("counts").textContent = "samples " + (status.n || 0);
     setBar("bx", "vx", status.x);
     setBar("by", "vy", status.y);
     setBar("bs", "vs", status.size);
@@ -71,9 +71,6 @@
 
     var res = [];
     if (status.has_cam) res.push("reproj " + Number(status.reproj).toFixed(4) + " px");
-    if (status.has_hand)
-      res.push("cam " + Number(status.cam_yaw).toFixed(1) + "/" +
-        Number(status.cam_pitch).toFixed(1) + "/" + Number(status.cam_roll).toFixed(1));
     if (status.calibrated_at) res.push(status.calibrated_at);
     if (status.undistort) res.push("undistort ON");
     $("result").textContent = res.join(" · ");

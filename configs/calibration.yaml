@@ -1,10 +1,6 @@
 # 用法:
 #   ./build/calibrate configs/calibration.yaml
-#   ./build/calibrate configs/calibration.yaml --camera-only
-# 棋盘格 / 标定结果见 calibration/result.yaml；网页按钮见 ./host/calibrate.sh
-
-#####-----gimbal参数-----#####
-com_port: "/dev/ttyACM0"
+# 棋盘格 / 内参结果见 calibration/result.yaml；网页见 ./host/calibrate.sh
 
 camera_name: "hikrobot"
 exposure_ms: 5   # 标定时可以使用较短曝光，提高帧率

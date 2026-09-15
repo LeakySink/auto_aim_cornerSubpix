@@ -46,7 +46,7 @@ struct HandeyeResult
 class Calibrator
 {
 public:
-  /// 从 calibration/result.yaml 读棋盘格 / R_gimbal2imubody（缺省 11×8 / 40mm / I）
+  /// 从 calibration/result.yaml 读棋盘格（缺省 11×8 / 40mm）
   Calibrator();
 
   /// 测试或显式覆盖用；生产路径请用无参构造

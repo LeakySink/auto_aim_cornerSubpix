@@ -1,7 +1,6 @@
 #include <fmt/core.h>
 
 #include <chrono>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -10,10 +9,7 @@
 
 #include "calibration/calibrator.hpp"
 #include "io/camera.hpp"
-#include "io/gimbal/gimbal.hpp"
 #include "tools/exiter.hpp"
-#include "tools/img_tools.hpp"
-#include "tools/math_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/yaml.hpp"
 
@@ -21,8 +17,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                          | 输出命令行参数说明}"
-  "{@config-path   | configs/calibration.yaml | 相机/云台/remote_logger 配置}"
-  "{camera-only    |                          | 只标内参，不打开云台}";
+  "{@config-path   | configs/calibration.yaml | 相机 / remote_logger 配置}";
 
 namespace
 {
@@ -52,13 +47,12 @@ void draw_quad(
 
 cv::Mat annotate(
   const cv::Mat & img, const std::vector<cv::Point2f> & live_corners, bool found,
-  const calibration::Calibrator & calib, bool undistort, bool flash,
-  const Eigen::Vector3d * ypr)
+  const calibration::Calibrator & calib, bool undistort, bool flash)
 {
   cv::Mat view = img.clone();
   const auto pattern = calib.pattern_size();
   for (const auto & s : calib.sample_views())
-    draw_quad(view, s.corners, pattern, s.has_q ? cv::Scalar(80, 180, 80) : cv::Scalar(40, 160, 220));
+    draw_quad(view, s.corners, pattern, cv::Scalar(40, 160, 220));
 
   if (found) {
     cv::drawChessboardCorners(view, pattern, live_corners, true);
@@ -80,24 +74,18 @@ cv::Mat annotate(
     view = und;
   }
 
-  if (ypr) {
-    tools::draw_text(view, fmt::format("yaw   {:.2f}", (*ypr)[0]), {16, 32}, {0, 0, 255}, 0.65, 2);
-    tools::draw_text(view, fmt::format("pitch {:.2f}", (*ypr)[1]), {16, 60}, {0, 0, 255}, 0.65, 2);
-    tools::draw_text(view, fmt::format("roll  {:.2f}", (*ypr)[2]), {16, 88}, {0, 0, 255}, 0.65, 2);
-  }
   if (flash) cv::rectangle(view, cv::Rect(0, 0, view.cols, view.rows), {0, 220, 0}, 8);
   return view;
 }
 
 nlohmann::json status_json(
   const calibration::Progress & prog, const calibration::Calibrator & calib, bool board,
-  bool undistort, bool camera_only, const std::string & hint, const Eigen::Vector3d * ypr)
+  bool undistort, const std::string & hint)
 {
   nlohmann::json j;
   j["calib"] = true;
   j["board"] = board ? 1 : 0;
   j["n"] = prog.n;
-  j["n_q"] = prog.n_with_q;
   j["x"] = prog.x;
   j["y"] = prog.y;
   j["size"] = prog.size;
@@ -105,29 +93,16 @@ nlohmann::json status_json(
   j["goodenough"] = prog.goodenough ? 1 : 0;
   j["hint"] = hint;
   j["undistort"] = undistort ? 1 : 0;
-  j["camera_only"] = camera_only ? 1 : 0;
   j["has_cam"] = calib.has_camera() ? 1 : 0;
-  j["has_hand"] = calib.has_handeye() ? 1 : 0;
   j["reproj"] = calib.has_camera() ? calib.camera().reproj_error : -1.0;
   if (!calib.calibrated_at().empty()) j["calibrated_at"] = calib.calibrated_at();
-  if (calib.has_handeye()) {
-    j["cam_yaw"] = calib.handeye().ypr_deg[0];
-    j["cam_pitch"] = calib.handeye().ypr_deg[1];
-    j["cam_roll"] = calib.handeye().ypr_deg[2];
-  }
-  if (ypr) {
-    j["gimbal_yaw"] = (*ypr)[0];
-    j["gimbal_pitch"] = (*ypr)[1];
-    j["gimbal_roll"] = (*ypr)[2];
-  }
   nlohmann::json samples = nlohmann::json::array();
   for (const auto & s : calib.sample_views()) {
     samples.push_back(
       {{"x", s.params.x},
        {"y", s.params.y},
        {"size", s.params.size},
-       {"skew", s.params.skew},
-       {"q", s.has_q ? 1 : 0}});
+       {"skew", s.params.skew}});
   }
   j["samples"] = samples;
   return j;
@@ -144,7 +119,6 @@ int main(int argc, char * argv[])
   }
 
   const auto config_path = cli.get<std::string>(0);
-  const bool camera_only = cli.has("camera-only");
 
   auto yaml = tools::load(config_path);
   if (!yaml["remote_logger"]) {
@@ -155,9 +129,6 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   io::Camera camera(config_path);
-  std::unique_ptr<io::Gimbal> gimbal;
-  if (!camera_only) gimbal = std::make_unique<io::Gimbal>(config_path);
-
   calibration::Calibrator calib;
 
   std::string hint = "open host calibrate page, wave the board";
@@ -168,7 +139,7 @@ int main(int argc, char * argv[])
   auto flash_until = std::chrono::steady_clock::now();
 
   tools::RemoteLogger::instance().log(
-    "INFO", "web calibrate ready, board {}x{}, save -> {}", calib.pattern_size().width,
+    "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
     calib.pattern_size().height, calibration::Calibrator::kResultPath);
   tools::RemoteLogger::instance().log(
     "INFO", "run: ./host/calibrate.sh   then press buttons in the browser");
@@ -180,18 +151,10 @@ int main(int argc, char * argv[])
       return;
     }
     hint = "calibrating...";
-    const bool ok_cam = calib.calibrate_camera();
-    bool ok_hand = false;
-    if (ok_cam && !camera_only) ok_hand = calib.calibrate_handeye();
-    if (!ok_cam)
+    if (!calib.calibrate_camera())
       hint = "camera calib failed";
-    else if (camera_only)
-      hint = fmt::format("camera ok, reproj {:.4f}px  (SAVE)", calib.camera().reproj_error);
-    else if (!ok_hand)
-      hint = fmt::format(
-        "camera ok ({:.4f}px), handeye needs more IMU poses", calib.camera().reproj_error);
     else
-      hint = fmt::format("done, reproj {:.4f}px  (SAVE)", calib.camera().reproj_error);
+      hint = fmt::format("intrinsics ok, reproj {:.4f}px  (SAVE)", calib.camera().reproj_error);
     tools::RemoteLogger::instance().log("INFO", "{}", hint);
     fmt::print("\n{}\n", calib.yaml_snippet());
   };
@@ -247,23 +210,11 @@ int main(int argc, char * argv[])
       if (remote.contains("cmd") && remote["cmd"].is_string())
         apply_cmd(remote["cmd"].get<std::string>());
     }
-    // 兼容只发 calib_cmd 的旧 host
     std::string legacy;
     while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
 
     camera.read(img, stamp);
     if (img.empty()) break;
-
-    const Eigen::Quaterniond * qptr = nullptr;
-    Eigen::Quaterniond q;
-    Eigen::Vector3d ypr;
-    const Eigen::Vector3d * yprptr = nullptr;
-    if (gimbal) {
-      q = gimbal->q(stamp);
-      qptr = &q;
-      ypr = tools::eulers(q, 2, 1, 0) * 57.3;
-      yprptr = &ypr;
-    }
 
     std::vector<cv::Point2f> corners;
     calibration::SampleParams params;
@@ -272,7 +223,7 @@ int main(int argc, char * argv[])
     const auto now = std::chrono::steady_clock::now();
     const bool cooled = now - last_add >= kAutoAddGap;
     if (found && cooled && (want_add || calib.is_good_sample(params))) {
-      if (calib.add_sample(corners, params, img.size(), qptr)) {
+      if (calib.add_sample(corners, params, img.size(), nullptr)) {
         last_add = now;
         flash_until = now + std::chrono::milliseconds(180);
         hint = fmt::format("added #{}", calib.size());
@@ -285,10 +236,9 @@ int main(int argc, char * argv[])
 
     const auto prog = calib.progress();
     const bool flash = now < flash_until;
-    cv::Mat view = annotate(img, corners, found, calib, undistort, flash, yprptr);
+    cv::Mat view = annotate(img, corners, found, calib, undistort, flash);
 
-    tools::RemoteLogger::instance().plot(
-      status_json(prog, calib, found, undistort, camera_only, hint, yprptr));
+    tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint));
     tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
 
     std::this_thread::sleep_for(1ms);
