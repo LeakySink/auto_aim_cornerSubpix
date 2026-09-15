@@ -49,6 +49,16 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 不写外参。需要时再手工拷到各车 yaml。
 
+## 调试后门（结束后删除）
+
+无相机时：
+
+```bash
+./build/calibrate --test
+```
+
+会推送假棋盘格画面，beacon 名 `calibrate-test`。相关代码标 `CALIB_TEST_FEED`，结束后删 `calibration/test_feed.hpp` 及 `calibrate.cpp` 中同名标记段。
+
 ## 协议
 
 ```json

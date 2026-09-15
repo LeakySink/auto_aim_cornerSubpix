@@ -15,11 +15,15 @@
 #include "io/mindvision/mindvision.hpp"
 #include "tools/exiter.hpp"
 #include "tools/remote_logger.hpp"
+// CALIB_TEST_FEED ↓ 调试结束后删除下一行
+#include "calibration/test_feed.hpp"
 
 using namespace std::chrono_literals;
 
 const std::string keys =
-  "{help h usage ? | | 输出命令行参数说明}";
+  "{help h usage ? | | 输出命令行参数说明}"
+  // CALIB_TEST_FEED ↓ 调试结束后删除本行
+  "{test           | | 无相机假数据源（调试后门，结束后删除）}";
 
 namespace
 {
@@ -50,10 +54,10 @@ std::unique_ptr<io::CameraBase> open_camera()
   throw std::runtime_error("unknown camera_name: " + camera_name);
 }
 
-void init_remote_logger()
+void init_remote_logger(bool test_feed)
 {
   tools::RemoteLogger::Config cfg;
-  cfg.sender_name = "calibrate";
+  cfg.sender_name = test_feed ? "calibrate-test" : "calibrate";
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
   cfg.enable_local = true;
@@ -157,18 +161,28 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  init_remote_logger();
+  // CALIB_TEST_FEED ↓ 调试结束后删除本块，并改回 init_remote_logger() / open_camera()
+  const bool test_feed = cli.has("test");
+  init_remote_logger(test_feed);
   tools::Exiter exiter;
-  auto camera = open_camera();
   calibration::Calibrator calib;
+  std::unique_ptr<io::CameraBase> camera =
+    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera();
+  // CALIB_TEST_FEED ↑
 
-  std::string hint = "open host calibrate page, wave the board";
+  std::string hint = test_feed ? "TEST FEED on — no real camera"
+                               : "open host calibrate page, wave the board";
   bool undistort = false;
   bool want_add = false;
   bool quit_cmd = false;
   auto last_add = std::chrono::steady_clock::now() - kAutoAddGap;
   auto flash_until = std::chrono::steady_clock::now();
 
+  if (test_feed) {
+    // CALIB_TEST_FEED
+    tools::RemoteLogger::instance().log(
+      "WARN", "CALIB_TEST_FEED active (--test); sender=calibrate-test; remove after debug");
+  }
   tools::RemoteLogger::instance().log(
     "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
     calib.pattern_size().height, calibration::Calibrator::kResultPath);
