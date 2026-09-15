@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Camera Calibrator</title>
-<link rel="stylesheet" href="/static/css/calibrate.css?v=1">
+<link rel="stylesheet" href="/static/css/calibrate.css?v=2">
 </head>
 <body>
 <header id="top">
@@ -34,20 +34,19 @@
     <canvas id="map" width="288" height="140"></canvas>
     <p id="cov" class="muted">need more poses</p>
     <p id="result"></p>
+    <pre id="result-detail" class="muted" style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto"></pre>
     <p id="hint">wave chessboard through the view</p>
 
     <div class="btns">
       <button data-cmd="add">ADD</button>
       <button data-cmd="calibrate" id="btn-c" disabled>CALIBRATE</button>
-      <button data-cmd="save" id="btn-s" disabled>SAVE</button>
-      <button data-cmd="undistort" id="btn-u" disabled>UNDISTORT</button>
       <button data-cmd="drop" id="btn-d" disabled>DROP</button>
       <button data-cmd="reset" id="btn-r" disabled>RESET</button>
     </div>
-    <p class="keys muted">SPACE add · C calibrate · S save · U undistort · D drop · R reset</p>
+    <p class="keys muted">SPACE add · C calibrate · D drop · R reset</p>
   </aside>
 </main>
 
-<script src="/static/js/calibrate.js?v=1"></script>
+<script src="/static/js/calibrate.js?v=2"></script>
 </body>
 </html>

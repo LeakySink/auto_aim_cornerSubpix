@@ -11,70 +11,65 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 ## 运行
 
-**1. 车上（需要相机，项目根目录执行，无参数）：**
+**1. 车上（需要相机，无 CLI 参数）：**
 
 ```bash
-./build/calibrate
+./build/calibrate          # 建议在仓库根目录，或任意子目录（会自动找 calibration/result.yaml）
 ```
-
-棋盘格与结果在 [`result.yaml`](result.yaml)。相机默认海康；要改曝光等可在同文件写可选字段（见文件内注释）。RemoteLogger 使用内置默认。
 
 **2. 调试 PC：**
 
 ```bash
 ./host/calibrate.sh                 # http://localhost:8090
-# Windows: host\calibrate.bat
 ```
 
 ## 操作
 
-挥动标定板，网页右侧看 X/Y/Size/Skew。按钮与快捷键：
+挥动标定板填满 X/Y/Size/Skew，至少约 20 张样本：
 
 | 按钮 / 键 | 作用 |
 |---|---|
-| 挥动标定板 | 自动采样（姿态太像会丢） |
 | **ADD** / `SPACE` | 强制采样 |
-| **CALIBRATE** / `C` | 至少 20 张；带 host 本地时间，算内参并**自动 SAVE** |
-| **SAVE** / `S` | 手动再写一次 `calibration/result.yaml` |
-| **UNDISTORT** / `U` | 去畸变预览 |
+| **CALIBRATE** / `C` | 带 host 时间 → 车上计算 → **自动写 result.yaml** → 回传结果 |
 | **DROP** / `D` | 丢掉最后一张 |
 | **RESET** / `R` | 清空 |
 
-## 结果
+点 **CALIBRATE** 之后的握手：
 
-`CALIBRATE` 成功后自动写 [`result.yaml`](result.yaml)：
+1. host 下发 `calibrate` + `host_time`
+2. 车计算内参，保存 `calibrated_at` / `camera_matrix` / `distort_coeffs` 到 `calibration/result.yaml`
+3. 车用 plot 回传结果（`calib_done`）
+4. 网页展示内参；host 再下发 `quit`
+5. 车退出；host HTTP 进程随后退出
 
-- `calibrated_at`：host 点击标定时的**本机系统时间**
+## 结果文件
+
+[`result.yaml`](result.yaml)（相对仓库根；从 `build/` 启动也会向上查找）：
+
+- `calibrated_at`：host 本机时间
 - `camera_matrix` / `distort_coeffs`
-
-采样更松（姿态间距更小），至少约 20 张；海康标定过程开 **GainAuto** 连续增益。
-
-不写外参。需要时再手工拷到各车 yaml。
-
-## 调试后门（结束后删除）
-
-无相机时：
-
-```bash
-./build/calibrate --test
-```
-
-会推送假棋盘格画面，beacon 名 `calibrate-test`。相关代码标 `CALIB_TEST_FEED`，结束后删 `calibration/test_feed.hpp` 及 `calibrate.cpp` 中同名标记段。
 
 ## 协议
 
 ```json
 {"v":1,"type":"json","host_id":"...","data":{"cmd":"calibrate","host_time":"2026-09-15 21:50:00"}}
-{"v":1,"type":"json","host_id":"...","data":{"cmd":"add|save|drop|reset|undistort|quit"}}
+{"v":1,"type":"json","host_id":"...","data":{"cmd":"quit"}}
 ```
 
-兼容旧版 `calib_cmd`。仅已入队 host 有效。
+车 → host（plot）：
 
-## 建议
+```json
+{"calib":true,"calib_done":1,"saved":1,"calibrated_at":"...","reproj":0.2,
+ "camera_matrix":[...],"distort_coeffs":[...],"result_path":"..."}
+```
 
-- 曝光短一点、增益补亮度；标定板平整、全板入画。
-- 四条覆盖度尽量打满。
-- 重投影一般应 &lt; 0.5 px。
+## 调试后门（结束后删除）
+
+```bash
+./build/calibrate --test
+```
+
+标 `CALIB_TEST_FEED`；结束后删 `test_feed.hpp` 与相关标记。
 
 ```bash
 ./build/calibrate_test

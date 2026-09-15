@@ -3,6 +3,7 @@
   var pkt = 0;
   var lastPkt = 0;
   var status = {};
+  var doneSent = false;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -40,8 +41,55 @@
     });
   }
 
+  function fmtVec(v, cols) {
+    if (!v || !v.length) return "";
+    var lines = [];
+    for (var i = 0; i < v.length; i += cols) {
+      lines.push(v.slice(i, i + cols).map(function (x) {
+        return Number(x).toFixed(6);
+      }).join(", "));
+    }
+    return lines.join("\n");
+  }
+
+  function showDone(s) {
+    var detail = [];
+    detail.push("calibrated_at: " + (s.calibrated_at || ""));
+    detail.push("reproj: " + Number(s.reproj).toFixed(4) + " px");
+    detail.push("saved: " + (s.saved ? "yes" : "NO"));
+    if (s.result_path) detail.push("path: " + s.result_path);
+    if (s.camera_matrix) {
+      detail.push("camera_matrix:");
+      detail.push(fmtVec(s.camera_matrix, 3));
+    }
+    if (s.distort_coeffs) {
+      detail.push("distort_coeffs:");
+      detail.push(fmtVec(s.distort_coeffs, 5));
+    }
+    $("result-detail").textContent = detail.join("\n");
+    $("hint").textContent = s.hint || "done — quitting robot & host";
+    $("btn-c").disabled = true;
+    $("btn-d").disabled = true;
+    $("btn-r").disabled = true;
+    document.querySelectorAll(".btns button").forEach(function (b) { b.disabled = true; });
+
+    if (doneSent) return;
+    doneSent = true;
+    fetch("/api/done", { method: "POST" }).catch(function () {});
+  }
+
   function applyStatus(s) {
     status = s || {};
+    if (status.calib_done) {
+      showDone(status);
+      var res = [];
+      if (status.has_cam) res.push("reproj " + Number(status.reproj).toFixed(4) + " px");
+      if (status.calibrated_at) res.push(status.calibrated_at);
+      if (status.saved) res.push("SAVED");
+      $("result").textContent = res.join(" · ");
+      return;
+    }
+
     var board = $("board");
     if (status.board) {
       board.textContent = "BOARD OK";
@@ -72,13 +120,10 @@
     var res = [];
     if (status.has_cam) res.push("reproj " + Number(status.reproj).toFixed(4) + " px");
     if (status.calibrated_at) res.push(status.calibrated_at);
-    if (status.undistort) res.push("undistort ON");
     $("result").textContent = res.join(" · ");
     $("hint").textContent = status.hint || "";
 
     $("btn-c").disabled = (status.n || 0) < (status.min_n || 20);
-    $("btn-s").disabled = !status.has_cam;
-    $("btn-u").disabled = !status.has_cam;
     $("btn-d").disabled = !(status.n > 0);
     $("btn-r").disabled = !(status.n > 0 || status.has_cam);
   }
@@ -152,8 +197,6 @@
     var map = {
       " ": "add", a: "add", A: "add",
       c: "calibrate", C: "calibrate",
-      s: "save", S: "save",
-      u: "undistort", U: "undistort",
       d: "drop", D: "drop",
       r: "reset", R: "reset"
     };

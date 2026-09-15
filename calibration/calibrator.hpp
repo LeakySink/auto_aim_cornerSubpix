@@ -87,8 +87,9 @@ public:
   void set_calibrated_at(std::string t) { calibrated_at_ = std::move(t); }
 
   std::string yaml_snippet() const;
-  /// 写回 calibration/result.yaml（含 calibrated_at）
+  /// 写回 result.yaml（含 calibrated_at）；路径见 result_path()
   bool save_yaml() const;
+  const std::string & result_path() const { return result_path_; }
 
   struct SampleView
   {
@@ -102,7 +103,8 @@ public:
   std::vector<cv::Point3f> board_points() const { return object_points(); }
   std::vector<SampleView> sample_views() const;
 
-  static constexpr const char * kResultPath = "calibration/result.yaml";
+  static constexpr const char * kResultRel = "calibration/result.yaml";
+  static constexpr const char * kResultPath = kResultRel;  // 兼容旧代码
   static constexpr int kMinSamples = 20;
   static constexpr int kMinHandeye = 5;
 
@@ -119,6 +121,7 @@ private:
   double square_size_mm_;
   Eigen::Matrix3d R_gimbal2imubody_;
   cv::Size img_size_;
+  std::string result_path_;
 
   std::vector<Sample> samples_;
   CameraResult camera_;
@@ -127,6 +130,7 @@ private:
 
   void invalidate_results();
   bool write_yaml(const std::string & path) const;
+  static std::string resolve_result_path();
 
   std::vector<cv::Point3f> object_points() const;
   static SampleParams compute_params(

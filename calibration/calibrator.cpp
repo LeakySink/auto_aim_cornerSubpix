@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <opencv2/core/eigen.hpp>
 #include <sstream>
@@ -98,13 +99,39 @@ std::string Calibrator::now_local_string()
   return buf;
 }
 
+std::string Calibrator::resolve_result_path()
+{
+  namespace fs = std::filesystem;
+  const fs::path rel = kResultRel;
+  auto try_dir = [&](const fs::path & root) -> std::string {
+    const auto cand = root / rel;
+    if (fs::exists(cand) || fs::exists(root / "calibration") || fs::exists(root / "CMakeLists.txt"))
+      return cand.string();
+    return {};
+  };
+
+  fs::path cur = fs::current_path();
+  for (int i = 0; i < 6; i++) {
+    auto hit = try_dir(cur);
+    if (!hit.empty()) {
+      fs::create_directories(fs::path(hit).parent_path());
+      return hit;
+    }
+    if (!cur.has_parent_path() || cur == cur.parent_path()) break;
+    cur = cur.parent_path();
+  }
+  fs::create_directories(rel.parent_path());
+  return rel.string();
+}
+
 Calibrator::Calibrator()
 : pattern_size_(11, 8),
   square_size_mm_(40),
-  R_gimbal2imubody_(Eigen::Matrix3d::Identity())
+  R_gimbal2imubody_(Eigen::Matrix3d::Identity()),
+  result_path_(resolve_result_path())
 {
   try {
-    const auto y = YAML::LoadFile(kResultPath);
+    const auto y = YAML::LoadFile(result_path_);
     if (y["pattern_cols"] && y["pattern_rows"])
       pattern_size_ = {y["pattern_cols"].as<int>(), y["pattern_rows"].as<int>()};
     if (y["square_size_mm"]) square_size_mm_ = y["square_size_mm"].as<double>();
@@ -123,7 +150,8 @@ Calibrator::Calibrator(
   const Eigen::Matrix3d & R_gimbal2imubody)
 : pattern_size_(pattern_cols, pattern_rows),
   square_size_mm_(square_size_mm),
-  R_gimbal2imubody_(R_gimbal2imubody)
+  R_gimbal2imubody_(R_gimbal2imubody),
+  result_path_(resolve_result_path())
 {
 }
 
@@ -421,13 +449,19 @@ std::string Calibrator::yaml_snippet() const
   return out.c_str();
 }
 
-bool Calibrator::save_yaml() const { return write_yaml(kResultPath); }
+bool Calibrator::save_yaml() const { return write_yaml(result_path_); }
 
 bool Calibrator::write_yaml(const std::string & path) const
 {
   if (!has_camera()) return false;
 
-  // 保留已有相机等非结果字段，避免 SAVE 冲掉
+  namespace fs = std::filesystem;
+  try {
+    fs::create_directories(fs::path(path).parent_path());
+  } catch (const std::exception &) {
+  }
+
+  // 保留已有相机等非结果字段，避免冲掉
   YAML::Node keep;
   try {
     keep = YAML::LoadFile(path);

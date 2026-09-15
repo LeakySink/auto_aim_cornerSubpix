@@ -31,16 +31,16 @@ constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
 constexpr auto kUiGap = std::chrono::milliseconds(66);  // ~15fps 推流
 constexpr int kPreviewW = 480;
 
-std::unique_ptr<io::CameraBase> open_camera()
+std::unique_ptr<io::CameraBase> open_camera(const std::string & result_path)
 {
-  // 默认海康；可在 calibration/result.yaml 覆盖 camera_name / exposure_ms / gain / gamma / vid_pid
+  // 默认海康；可在 result.yaml 覆盖 camera_name / exposure_ms / gain / gamma / vid_pid
   std::string camera_name = "hikrobot";
   double exposure_ms = 5.0;
   double gain = 16.0;
   double gamma = 1.0;
   std::string vid_pid = "2bdf:0001";
   try {
-    const auto y = YAML::LoadFile(calibration::Calibrator::kResultPath);
+    const auto y = YAML::LoadFile(result_path);
     if (y["camera_name"]) camera_name = y["camera_name"].as<std::string>();
     if (y["exposure_ms"]) exposure_ms = y["exposure_ms"].as<double>();
     if (y["gain"]) gain = y["gain"].as<double>();
@@ -146,6 +146,26 @@ nlohmann::json status_json(
   return j;
 }
 
+nlohmann::json result_json(const calibration::Calibrator & calib, bool saved, const std::string & hint)
+{
+  nlohmann::json j;
+  j["calib"] = true;
+  j["calib_done"] = 1;
+  j["saved"] = saved ? 1 : 0;
+  j["hint"] = hint;
+  j["has_cam"] = 1;
+  j["n"] = calib.size();
+  j["min_n"] = calibration::Calibrator::kMinSamples;
+  j["reproj"] = calib.camera().reproj_error;
+  j["calibrated_at"] = calib.calibrated_at();
+  j["result_path"] = calib.result_path();
+  j["camera_matrix"] = std::vector<double>(
+    calib.camera().camera_matrix.begin<double>(), calib.camera().camera_matrix.end<double>());
+  j["distort_coeffs"] = std::vector<double>(
+    calib.camera().distort_coeffs.begin<double>(), calib.camera().distort_coeffs.end<double>());
+  return j;
+}
+
 }  // namespace
 
 int main(int argc, char * argv[])
@@ -162,7 +182,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   calibration::Calibrator calib;
   std::unique_ptr<io::CameraBase> camera =
-    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera();
+    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera(calib.result_path());
   // CALIB_TEST_FEED ↑
 
   std::string hint = test_feed ? "TEST FEED on — no real camera"
@@ -170,6 +190,7 @@ int main(int argc, char * argv[])
   bool undistort = false;
   bool want_add = false;
   bool quit_cmd = false;
+  bool finished = false;
   auto last_add = std::chrono::steady_clock::now() - kAutoAddGap;
   auto flash_until = std::chrono::steady_clock::now();
   auto last_ui = std::chrono::steady_clock::now() - kUiGap;
@@ -181,52 +202,46 @@ int main(int argc, char * argv[])
   }
   tools::RemoteLogger::instance().log(
     "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
-    calib.pattern_size().height, calibration::Calibrator::kResultPath);
+    calib.pattern_size().height, calib.result_path());
   tools::RemoteLogger::instance().log(
     "INFO", "run: ./host/calibrate.sh   then press buttons in the browser");
 
   auto do_calibrate = [&](const std::string & host_time) {
+    if (finished) return;
     const auto prog = calib.progress();
     if (prog.n < calibration::Calibrator::kMinSamples) {
       hint = fmt::format("need >= {} samples", calibration::Calibrator::kMinSamples);
       return;
     }
     hint = "calibrating...";
+    tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint));
     if (!calib.calibrate_camera()) {
       hint = "camera calib failed";
-      tools::RemoteLogger::instance().log("INFO", "{}", hint);
+      tools::RemoteLogger::instance().log("ERROR", "{}", hint);
+      tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint));
       return;
     }
     if (!host_time.empty()) calib.set_calibrated_at(host_time);
-    tools::RemoteLogger::instance().log(
-      "INFO", "intrinsics ok, reproj {:.4f}px, at {}", calib.camera().reproj_error,
-      calib.calibrated_at());
-    fmt::print("\n{}\n", calib.yaml_snippet());
-    if (calib.save_yaml()) {
-      hint = fmt::format(
-        "saved {} ({})", calibration::Calibrator::kResultPath, calib.calibrated_at());
+
+    const bool saved = calib.save_yaml();
+    if (saved) {
+      hint = fmt::format("saved {} ({})", calib.result_path(), calib.calibrated_at());
       tools::RemoteLogger::instance().log("INFO", "{}", hint);
     } else {
       hint = fmt::format(
-        "calib ok ({:.4f}px) but save failed", calib.camera().reproj_error);
-      tools::RemoteLogger::instance().log("ERROR", "failed to write {}",
-                                          calibration::Calibrator::kResultPath);
+        "calib ok ({:.4f}px) but save failed: {}", calib.camera().reproj_error, calib.result_path());
+      tools::RemoteLogger::instance().log("ERROR", "{}", hint);
     }
-  };
+    fmt::print("\n{}\n", calib.yaml_snippet());
 
-  auto do_save = [&]() {
-    if (!calib.has_camera()) {
-      hint = "calibrate first";
-      return;
-    }
-    if (calib.save_yaml()) {
-      hint = fmt::format("saved {} ({})", calibration::Calibrator::kResultPath, calib.calibrated_at());
-      tools::RemoteLogger::instance().log(
-        "INFO", "wrote {} at {}", calibration::Calibrator::kResultPath, calib.calibrated_at());
-    } else {
-      hint = "save failed";
-      tools::RemoteLogger::instance().log(
-        "ERROR", "failed to write {}", calibration::Calibrator::kResultPath);
+    // 回传结果给 host；等待 host 下发 quit
+    finished = true;
+    auto payload = result_json(calib, saved, hint);
+    tools::RemoteLogger::instance().plot(payload);
+    // 多发几次，避免 UDP 丢包
+    for (int i = 0; i < 5; i++) {
+      tools::RemoteLogger::instance().plot(payload);
+      std::this_thread::sleep_for(20ms);
     }
   };
 
@@ -237,24 +252,21 @@ int main(int argc, char * argv[])
       want_add = true;
     else if (cmd == "calibrate")
       do_calibrate(msg.value("host_time", ""));
-    else if (cmd == "save")
-      do_save();
-    else if (cmd == "undistort") {
-      if (!calib.has_camera())
-        hint = "calibrate first";
-      else {
-        undistort = !undistort;
-        hint = undistort ? "undistort ON" : "undistort OFF";
+    else if (cmd == "drop") {
+      if (!finished) {
+        calib.drop_last();
+        hint = "dropped last sample";
       }
-    } else if (cmd == "drop") {
-      calib.drop_last();
-      hint = "dropped last sample";
     } else if (cmd == "reset") {
-      calib.reset();
-      undistort = false;
-      hint = "reset";
-    } else if (cmd == "quit") {
+      if (!finished) {
+        calib.reset();
+        undistort = false;
+        hint = "reset";
+      }
+    } else if (cmd == "quit" || cmd == "done") {
       quit_cmd = true;
+      hint = "host done, exiting";
+      tools::RemoteLogger::instance().log("INFO", "quit by host");
     }
   };
 
@@ -268,6 +280,11 @@ int main(int argc, char * argv[])
     while (tools::RemoteLogger::instance().poll_json(remote)) apply_remote(remote);
     std::string legacy;
     while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
+
+    if (finished) {
+      std::this_thread::sleep_for(20ms);
+      continue;
+    }
 
     camera->read(img, stamp);
     if (img.empty()) break;

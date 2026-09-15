@@ -222,22 +222,15 @@ int main()
     expect(t_err < 0.03, "handeye translation error < 3cm", fmt::format("{:.4f} m", t_err));
   }
 
-  // 4. 写 calibration/result.yaml
-  const auto cwd = std::filesystem::current_path();
-  const auto tmpdir = std::filesystem::temp_directory_path() / "calibrate_test_out";
-  std::filesystem::create_directories(tmpdir / "calibration");
-  std::filesystem::current_path(tmpdir);
+  // 4. yaml 写回（落到 resolve 后的 result_path）
   expect(he_calib.save_yaml(), "save_yaml");
-  auto node = YAML::LoadFile(calibration::Calibrator::kResultPath);
+  auto node = YAML::LoadFile(he_calib.result_path());
   expect(node["calibrated_at"] && !node["calibrated_at"].as<std::string>().empty(),
          "save_yaml writes calibrated_at");
   expect(node["camera_matrix"] && node["camera_matrix"].size() == 9, "save_yaml writes camera_matrix");
   expect(node["R_camera2gimbal"] && node["R_camera2gimbal"].size() == 9, "save_yaml writes R_camera2gimbal");
   expect(node["pattern_cols"] && node["pattern_cols"].as<int>() == pattern.width,
          "save_yaml keeps pattern_cols");
-  std::filesystem::current_path(cwd);
-  std::error_code ec;
-  std::filesystem::remove_all(tmpdir, ec);
 
   expect(!calib.yaml_snippet().empty() || !he_calib.yaml_snippet().empty(), "yaml_snippet nonempty");
 
