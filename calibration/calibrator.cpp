@@ -80,28 +80,19 @@ std::string format_flow(const cv::Mat & m)
   return ss.str();
 }
 
-bool upsert_line(std::string & text, const std::string & key, const std::string & value)
+void upsert_key(
+  std::string & text, const std::string & key, const std::string & value,
+  const std::string & comment = {})
 {
-  const std::regex re("^" + key + ":.*$", std::regex_constants::multiline);
-  const std::string line = key + ": " + value;
+  const std::regex re("(?:^# [^\\n]*\\n)?^" + key + ":.*$", std::regex_constants::multiline);
+  std::string block = key + ": " + value;
+  if (!comment.empty()) block = comment + "\n" + block;
   if (std::regex_search(text, re)) {
-    text = std::regex_replace(text, re, line, std::regex_constants::format_first_only);
-    return true;
+    text = std::regex_replace(text, re, block, std::regex_constants::format_first_only);
+    return;
   }
   if (!text.empty() && text.back() != '\n') text += '\n';
-  text += line + "\n";
-  return false;
-}
-
-void upsert_comment_before(
-  std::string & text, const std::string & key, const std::string & comment)
-{
-  const std::regex re(
-    "(?:^# [^\\n]*\\n)?^" + key + ":", std::regex_constants::multiline);
-  std::smatch m;
-  if (std::regex_search(text, m, re)) {
-    text.replace(m.position(), m.length(), comment + "\n" + key + ":");
-  }
+  text += block + "\n";
 }
 
 }  // namespace
@@ -368,19 +359,18 @@ bool Calibrator::save_yaml(const std::string & path) const
     text = ss.str();
   }
 
-  upsert_comment_before(
-    text, "camera_matrix", fmt::format("# 重投影误差: {:.4f}px", camera_.reproj_error));
-  upsert_line(text, "camera_matrix", format_flow(camera_.camera_matrix));
-  upsert_line(text, "distort_coeffs", format_flow(camera_.distort_coeffs));
+  upsert_key(
+    text, "camera_matrix", format_flow(camera_.camera_matrix),
+    fmt::format("# 重投影误差: {:.4f}px", camera_.reproj_error));
+  upsert_key(text, "distort_coeffs", format_flow(camera_.distort_coeffs));
 
   if (has_handeye()) {
-    upsert_comment_before(
-      text, "R_camera2gimbal",
+    upsert_key(
+      text, "R_camera2gimbal", format_flow(handeye_.R_camera2gimbal),
       fmt::format(
         "# 相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree", handeye_.ypr_deg[0],
         handeye_.ypr_deg[1], handeye_.ypr_deg[2]));
-    upsert_line(text, "R_camera2gimbal", format_flow(handeye_.R_camera2gimbal));
-    upsert_line(text, "t_camera2gimbal", format_flow(handeye_.t_camera2gimbal));
+    upsert_key(text, "t_camera2gimbal", format_flow(handeye_.t_camera2gimbal));
   }
 
   std::ofstream out(path);
