@@ -54,7 +54,13 @@ public:
     int pattern_cols, int pattern_rows, double square_size_mm,
     const Eigen::Matrix3d & R_gimbal2imubody);
 
-  bool detect(const cv::Mat & img, std::vector<cv::Point2f> & corners, SampleParams & params) const;
+  /// refine=false：缩小快速检测（预览）；true：再 cornerSubPix（入库）
+  bool detect(
+    const cv::Mat & img, std::vector<cv::Point2f> & corners, SampleParams & params,
+    bool refine = true) const;
+
+  void refine_corners(const cv::Mat & img, std::vector<cv::Point2f> & corners) const;
+  SampleParams sample_params(const std::vector<cv::Point2f> & corners, cv::Size img_size) const;
 
   bool is_good_sample(const SampleParams & params) const;
 

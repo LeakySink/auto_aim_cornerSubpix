@@ -135,12 +135,11 @@ void Calibrator::invalidate_results()
 }
 
 bool Calibrator::detect(
-  const cv::Mat & img, std::vector<cv::Point2f> & corners, SampleParams & params) const
+  const cv::Mat & img, std::vector<cv::Point2f> & corners, SampleParams & params,
+  bool refine) const
 {
   corners.clear();
-  const int flags =
-    cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_FAST_CHECK;
-  if (!cv::findChessboardCorners(img, pattern_size_, corners, flags)) return false;
+  if (img.empty()) return false;
 
   cv::Mat gray;
   if (img.channels() == 3)
@@ -148,12 +147,50 @@ bool Calibrator::detect(
   else
     gray = img;
 
-  cv::cornerSubPix(
-    gray, corners, {11, 11}, {-1, -1},
-    cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.1));
+  // 工业相机全分辨率找棋盘格很慢：缩小检测再还原坐标（对齐 ROS 交互手感）
+  constexpr int kDetectMaxW = 800;
+  double scale = 1.0;
+  cv::Mat detect_gray = gray;
+  if (gray.cols > kDetectMaxW) {
+    scale = static_cast<double>(kDetectMaxW) / gray.cols;
+    cv::resize(
+      gray, detect_gray, cv::Size(), scale, scale, cv::INTER_AREA);
+  }
+
+  const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FAST_CHECK;
+  if (!cv::findChessboardCorners(detect_gray, pattern_size_, corners, flags)) return false;
+
+  if (scale != 1.0) {
+    const float inv = static_cast<float>(1.0 / scale);
+    for (auto & c : corners) {
+      c.x *= inv;
+      c.y *= inv;
+    }
+  }
+
+  if (refine) refine_corners(gray, corners);
 
   params = compute_params(corners, img.size(), pattern_size_);
   return true;
+}
+
+void Calibrator::refine_corners(const cv::Mat & img, std::vector<cv::Point2f> & corners) const
+{
+  if (corners.empty() || img.empty()) return;
+  cv::Mat gray;
+  if (img.channels() == 3)
+    cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+  else
+    gray = img;
+  cv::cornerSubPix(
+    gray, corners, {5, 5}, {-1, -1},
+    cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 20, 0.05));
+}
+
+SampleParams Calibrator::sample_params(
+  const std::vector<cv::Point2f> & corners, cv::Size img_size) const
+{
+  return compute_params(corners, img_size, pattern_size_);
 }
 
 bool Calibrator::is_good_sample(const SampleParams & params) const
@@ -279,11 +316,10 @@ bool Calibrator::calibrate_camera()
 
   cv::Mat camera_matrix, distort_coeffs;
   std::vector<cv::Mat> rvecs, tvecs;
-  auto criteria =
-    cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 100, DBL_EPSILON);
+  auto criteria = cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 40, 1e-6);
   cv::calibrateCamera(
     obj_points, img_points, img_size_, camera_matrix, distort_coeffs, rvecs, tvecs,
-    cv::CALIB_FIX_K3, criteria);
+    cv::CALIB_FIX_K3 | cv::CALIB_USE_LU, criteria);
 
   double error_sum = 0;
   size_t total = 0;

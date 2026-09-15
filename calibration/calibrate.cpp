@@ -28,6 +28,8 @@ const std::string keys =
 namespace
 {
 constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
+constexpr auto kUiGap = std::chrono::milliseconds(66);  // ~15fps 推流
+constexpr int kPreviewW = 480;
 
 std::unique_ptr<io::CameraBase> open_camera()
 {
@@ -61,64 +63,56 @@ void init_remote_logger(bool test_feed)
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
   cfg.enable_local = true;
-  cfg.img_width = 480;
-  cfg.img_quality = 30;
+  cfg.img_width = 0;  // 预览已缩到 480，JPEG 不再二次缩放
+  cfg.img_quality = 28;
   tools::RemoteLogger::instance().init(cfg);
 }
 
-cv::Point2f outer_corner(
-  const std::vector<cv::Point2f> & corners, cv::Size pattern, int idx)
-{
-  const int w = pattern.width;
-  if (idx == 0) return corners.front();
-  if (idx == 1) return corners[w - 1];
-  if (idx == 2) return corners.back();
-  return corners[corners.size() - w];
-}
-
-void draw_quad(
-  cv::Mat & img, const std::vector<cv::Point2f> & corners, cv::Size pattern,
-  const cv::Scalar & color)
-{
-  if (corners.size() < static_cast<size_t>(pattern.width * pattern.height)) return;
-  std::vector<cv::Point> q = {
-    outer_corner(corners, pattern, 0), outer_corner(corners, pattern, 1),
-    outer_corner(corners, pattern, 2), outer_corner(corners, pattern, 3)};
-  const std::vector<std::vector<cv::Point>> poly = {q};
-  cv::polylines(img, poly, true, color, 2, cv::LINE_AA);
-}
-
-cv::Mat annotate(
+cv::Mat annotate_preview(
   const cv::Mat & img, const std::vector<cv::Point2f> & live_corners, bool found,
-  const calibration::Calibrator & calib, bool undistort, bool flash)
+  const calibration::Calibrator & calib, bool undistort, bool flash, int preview_w)
 {
-  cv::Mat view = img.clone();
-  const auto pattern = calib.pattern_size();
-  for (const auto & s : calib.sample_views())
-    draw_quad(view, s.corners, pattern, cv::Scalar(40, 160, 220));
+  cv::Mat small;
+  const double scale =
+    (preview_w > 0 && img.cols > preview_w) ? static_cast<double>(preview_w) / img.cols : 1.0;
+  if (scale != 1.0)
+    cv::resize(img, small, cv::Size(), scale, scale, cv::INTER_AREA);
+  else
+    small = img.clone();
 
-  if (found) {
-    cv::drawChessboardCorners(view, pattern, live_corners, true);
-    if (calib.has_camera() && live_corners.size() == calib.board_points().size()) {
-      cv::Mat rvec, tvec;
-      if (cv::solvePnP(
-            calib.board_points(), live_corners, calib.camera().camera_matrix,
-            calib.camera().distort_coeffs, rvec, tvec, false, cv::SOLVEPNP_IPPE)) {
-        cv::drawFrameAxes(
-          view, calib.camera().camera_matrix, calib.camera().distort_coeffs, rvec, tvec,
-          static_cast<float>(calib.square_size_mm() * 3), 2);
+  const auto pattern = calib.pattern_size();
+  // 历史样本只画覆盖点，不画全分辨率外框（网页 map 已有覆盖）
+  for (const auto & s : calib.sample_views()) {
+    cv::circle(
+      small,
+      {static_cast<int>(s.params.x * small.cols), static_cast<int>(s.params.y * small.rows)}, 3,
+      {40, 160, 220}, -1, cv::LINE_AA);
+  }
+
+  if (found && !live_corners.empty()) {
+    std::vector<cv::Point2f> scaled = live_corners;
+    if (scale != 1.0) {
+      for (auto & c : scaled) {
+        c.x = static_cast<float>(c.x * scale);
+        c.y = static_cast<float>(c.y * scale);
       }
     }
+    cv::drawChessboardCorners(small, pattern, scaled, true);
   }
 
   if (undistort && calib.has_camera()) {
+    cv::Mat K = calib.camera().camera_matrix.clone();
+    K.at<double>(0, 0) *= scale;
+    K.at<double>(1, 1) *= scale;
+    K.at<double>(0, 2) *= scale;
+    K.at<double>(1, 2) *= scale;
     cv::Mat und;
-    cv::undistort(view, und, calib.camera().camera_matrix, calib.camera().distort_coeffs);
-    view = und;
+    cv::undistort(small, und, K, calib.camera().distort_coeffs);
+    small = und;
   }
 
-  if (flash) cv::rectangle(view, cv::Rect(0, 0, view.cols, view.rows), {0, 220, 0}, 8);
-  return view;
+  if (flash) cv::rectangle(small, cv::Rect(0, 0, small.cols, small.rows), {0, 220, 0}, 4);
+  return small;
 }
 
 nlohmann::json status_json(
@@ -178,6 +172,7 @@ int main(int argc, char * argv[])
   bool quit_cmd = false;
   auto last_add = std::chrono::steady_clock::now() - kAutoAddGap;
   auto flash_until = std::chrono::steady_clock::now();
+  auto last_ui = std::chrono::steady_clock::now() - kUiGap;
 
   if (test_feed) {
     // CALIB_TEST_FEED
@@ -279,12 +274,15 @@ int main(int argc, char * argv[])
 
     std::vector<cv::Point2f> corners;
     calibration::SampleParams params;
-    const bool found = calib.detect(img, corners, params);
+    const bool found = calib.detect(img, corners, params, /*refine=*/false);
 
     const auto now = std::chrono::steady_clock::now();
     const bool cooled = now - last_add >= kAutoAddGap;
     if (found && cooled && (want_add || calib.is_good_sample(params))) {
-      if (calib.add_sample(corners, params, img.size(), nullptr)) {
+      auto refined = corners;
+      calib.refine_corners(img, refined);
+      const auto refined_params = calib.sample_params(refined, img.size());
+      if (calib.add_sample(refined, refined_params, img.size(), nullptr)) {
         last_add = now;
         flash_until = now + std::chrono::milliseconds(180);
         hint = fmt::format("added #{}", calib.size());
@@ -295,14 +293,15 @@ int main(int argc, char * argv[])
     }
     want_add = false;
 
-    const auto prog = calib.progress();
-    const bool flash = now < flash_until;
-    cv::Mat view = annotate(img, corners, found, calib, undistort, flash);
-
-    tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint));
-    tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
-
-    std::this_thread::sleep_for(1ms);
+    if (now - last_ui >= kUiGap) {
+      last_ui = now;
+      const auto prog = calib.progress();
+      const bool flash = now < flash_until;
+      cv::Mat view =
+        annotate_preview(img, corners, found, calib, undistort, flash, kPreviewW);
+      tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint));
+      tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
+    }
   }
 
   tools::RemoteLogger::instance().shutdown();
