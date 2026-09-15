@@ -48,7 +48,9 @@ target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff to
 target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
 ##################calibration################
+add_executable(calibrate calibration/calibrate.cpp calibration/calibrator.cpp)
 add_executable(split_video calibration/split_video.cpp)
+target_link_libraries(calibrate ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
 
 ##################tests##################
