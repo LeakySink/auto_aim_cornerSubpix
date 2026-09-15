@@ -77,6 +77,18 @@ public:
   std::string yaml_snippet() const;
   bool save_yaml(const std::string & path) const;
 
+  struct SampleView
+  {
+    std::vector<cv::Point2f> corners;
+    SampleParams params;
+    bool has_q = false;
+  };
+
+  cv::Size pattern_size() const { return pattern_size_; }
+  double square_size_mm() const { return square_size_mm_; }
+  std::vector<cv::Point3f> board_points() const { return object_points(); }
+  std::vector<SampleView> sample_views() const;
+
   static constexpr int kMinSamples = 10;
   static constexpr int kMinHandeye = 5;
 

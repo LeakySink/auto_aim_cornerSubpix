@@ -173,6 +173,14 @@ void Calibrator::reset()
   handeye_ = {};
 }
 
+std::vector<Calibrator::SampleView> Calibrator::sample_views() const
+{
+  std::vector<SampleView> out;
+  out.reserve(samples_.size());
+  for (const auto & s : samples_) out.push_back({s.corners, s.params, s.has_q});
+  return out;
+}
+
 Progress Calibrator::progress() const
 {
   Progress p;
