@@ -17,11 +17,11 @@ namespace calibration
 {
 namespace
 {
-constexpr double kMinParamDist = 0.2;
-constexpr double kNeedX = 0.7;
-constexpr double kNeedY = 0.7;
-constexpr double kNeedSize = 0.4;
-constexpr double kNeedSkew = 0.5;
+constexpr double kMinParamDist = 0.08;
+constexpr double kNeedX = 0.6;
+constexpr double kNeedY = 0.6;
+constexpr double kNeedSize = 0.35;
+constexpr double kNeedSkew = 0.4;
 
 double pdist(const cv::Point2f & a, const cv::Point2f & b)
 {

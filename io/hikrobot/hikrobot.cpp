@@ -8,8 +8,14 @@ using namespace std::chrono_literals;
 
 namespace io
 {
-HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
-: exposure_us_(exposure_ms * 1e3), gain_(gain), queue_(1), daemon_quit_(false), vid_(-1), pid_(-1)
+HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain)
+: exposure_us_(exposure_ms * 1e3),
+  gain_(gain),
+  auto_gain_(auto_gain),
+  queue_(1),
+  daemon_quit_(false),
+  vid_(-1),
+  pid_(-1)
 {
   set_vid_pid(vid_pid);
   if (libusb_init(NULL)) tools::RemoteLogger::instance().log("WARN", "Unable to init libusb!");
@@ -84,9 +90,13 @@ void HikRobot::capture_start()
 
   set_enum_value("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);
   set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
-  set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
   set_float_value("ExposureTime", exposure_us_);
-  set_float_value("Gain", gain_);
+  if (auto_gain_) {
+    set_enum_value("GainAuto", MV_GAIN_MODE_CONTINUOUS);
+  } else {
+    set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
+    set_float_value("Gain", gain_);
+  }
   MV_CC_SetFrameRate(handle_, 150);
 
   ret = MV_CC_StartGrabbing(handle_);

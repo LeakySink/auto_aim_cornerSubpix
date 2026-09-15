@@ -78,6 +78,7 @@ public:
   const CameraResult & camera() const { return camera_; }
   const HandeyeResult & handeye() const { return handeye_; }
   const std::string & calibrated_at() const { return calibrated_at_; }
+  void set_calibrated_at(std::string t) { calibrated_at_ = std::move(t); }
 
   std::string yaml_snippet() const;
   /// 写回 calibration/result.yaml（含 calibrated_at）
@@ -96,7 +97,7 @@ public:
   std::vector<SampleView> sample_views() const;
 
   static constexpr const char * kResultPath = "calibration/result.yaml";
-  static constexpr int kMinSamples = 10;
+  static constexpr int kMinSamples = 20;
   static constexpr int kMinHandeye = 5;
 
 private:

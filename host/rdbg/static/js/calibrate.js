@@ -61,11 +61,11 @@
     if (status.goodenough) {
       cov.textContent = "coverage READY";
       cov.style.color = "#4ee06a";
-    } else if ((status.n || 0) >= 10) {
+    } else if ((status.n || 0) >= (status.min_n || 20)) {
       cov.textContent = "coverage low, still ok";
       cov.style.color = "#50b4e6";
     } else {
-      cov.textContent = "need more poses";
+      cov.textContent = "need more poses (min " + (status.min_n || 20) + ")";
       cov.style.color = "#707080";
     }
 
@@ -76,7 +76,7 @@
     $("result").textContent = res.join(" · ");
     $("hint").textContent = status.hint || "";
 
-    $("btn-c").disabled = (status.n || 0) < 10;
+    $("btn-c").disabled = (status.n || 0) < (status.min_n || 20);
     $("btn-s").disabled = !status.has_cam;
     $("btn-u").disabled = !status.has_cam;
     $("btn-d").disabled = !(status.n > 0);

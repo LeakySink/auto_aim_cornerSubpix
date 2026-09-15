@@ -34,18 +34,20 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 |---|---|
 | 挥动标定板 | 自动采样（姿态太像会丢） |
 | **ADD** / `SPACE` | 强制采样 |
-| **CALIBRATE** / `C` | 至少 10 张，算内参 |
-| **SAVE** / `S` | 写 `calibration/result.yaml`（含 `calibrated_at`） |
+| **CALIBRATE** / `C` | 至少 20 张；带 host 本地时间，算内参并**自动 SAVE** |
+| **SAVE** / `S` | 手动再写一次 `calibration/result.yaml` |
 | **UNDISTORT** / `U` | 去畸变预览 |
 | **DROP** / `D` | 丢掉最后一张 |
 | **RESET** / `R` | 清空 |
 
 ## 结果
 
-`SAVE` 更新 [`result.yaml`](result.yaml)：
+`CALIBRATE` 成功后自动写 [`result.yaml`](result.yaml)：
 
-- `calibrated_at`
+- `calibrated_at`：host 点击标定时的**本机系统时间**
 - `camera_matrix` / `distort_coeffs`
+
+采样更松（姿态间距更小），至少约 20 张；海康标定过程开 **GainAuto** 连续增益。
 
 不写外参。需要时再手工拷到各车 yaml。
 
@@ -62,7 +64,8 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 ## 协议
 
 ```json
-{"v":1,"type":"json","host_id":"...","data":{"cmd":"add|calibrate|save|drop|reset|undistort|quit"}}
+{"v":1,"type":"json","host_id":"...","data":{"cmd":"calibrate","host_time":"2026-09-15 21:50:00"}}
+{"v":1,"type":"json","host_id":"...","data":{"cmd":"add|save|drop|reset|undistort|quit"}}
 ```
 
 兼容旧版 `calib_cmd`。仅已入队 host 有效。

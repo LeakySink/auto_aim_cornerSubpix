@@ -27,7 +27,7 @@ const std::string keys =
 
 namespace
 {
-constexpr auto kAutoAddGap = std::chrono::milliseconds(400);
+constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
 
 std::unique_ptr<io::CameraBase> open_camera()
 {
@@ -50,7 +50,7 @@ std::unique_ptr<io::CameraBase> open_camera()
   if (camera_name == "mindvision")
     return std::make_unique<io::MindVision>(exposure_ms, gamma, vid_pid);
   if (camera_name == "hikrobot")
-    return std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid);
+    return std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid, /*auto_gain=*/true);
   throw std::runtime_error("unknown camera_name: " + camera_name);
 }
 
@@ -129,6 +129,7 @@ nlohmann::json status_json(
   j["calib"] = true;
   j["board"] = board ? 1 : 0;
   j["n"] = prog.n;
+  j["min_n"] = calibration::Calibrator::kMinSamples;
   j["x"] = prog.x;
   j["y"] = prog.y;
   j["size"] = prog.size;
@@ -189,19 +190,33 @@ int main(int argc, char * argv[])
   tools::RemoteLogger::instance().log(
     "INFO", "run: ./host/calibrate.sh   then press buttons in the browser");
 
-  auto do_calibrate = [&]() {
+  auto do_calibrate = [&](const std::string & host_time) {
     const auto prog = calib.progress();
     if (prog.n < calibration::Calibrator::kMinSamples) {
       hint = fmt::format("need >= {} samples", calibration::Calibrator::kMinSamples);
       return;
     }
     hint = "calibrating...";
-    if (!calib.calibrate_camera())
+    if (!calib.calibrate_camera()) {
       hint = "camera calib failed";
-    else
-      hint = fmt::format("intrinsics ok, reproj {:.4f}px  (SAVE)", calib.camera().reproj_error);
-    tools::RemoteLogger::instance().log("INFO", "{}", hint);
+      tools::RemoteLogger::instance().log("INFO", "{}", hint);
+      return;
+    }
+    if (!host_time.empty()) calib.set_calibrated_at(host_time);
+    tools::RemoteLogger::instance().log(
+      "INFO", "intrinsics ok, reproj {:.4f}px, at {}", calib.camera().reproj_error,
+      calib.calibrated_at());
     fmt::print("\n{}\n", calib.yaml_snippet());
+    if (calib.save_yaml()) {
+      hint = fmt::format(
+        "saved {} ({})", calibration::Calibrator::kResultPath, calib.calibrated_at());
+      tools::RemoteLogger::instance().log("INFO", "{}", hint);
+    } else {
+      hint = fmt::format(
+        "calib ok ({:.4f}px) but save failed", calib.camera().reproj_error);
+      tools::RemoteLogger::instance().log("ERROR", "failed to write {}",
+                                          calibration::Calibrator::kResultPath);
+    }
   };
 
   auto do_save = [&]() {
@@ -220,11 +235,13 @@ int main(int argc, char * argv[])
     }
   };
 
-  auto apply_cmd = [&](const std::string & cmd) {
+  auto apply_remote = [&](const nlohmann::json & msg) {
+    const auto cmd = msg.value("cmd", "");
+    if (cmd.empty()) return;
     if (cmd == "add")
       want_add = true;
     else if (cmd == "calibrate")
-      do_calibrate();
+      do_calibrate(msg.value("host_time", ""));
     else if (cmd == "save")
       do_save();
     else if (cmd == "undistort") {
@@ -246,15 +263,14 @@ int main(int argc, char * argv[])
     }
   };
 
+  auto apply_cmd = [&](const std::string & cmd) { apply_remote({{"cmd", cmd}}); };
+
   cv::Mat img;
   std::chrono::steady_clock::time_point stamp;
 
   while (!exiter.exit() && !quit_cmd) {
     nlohmann::json remote;
-    while (tools::RemoteLogger::instance().poll_json(remote)) {
-      if (remote.contains("cmd") && remote["cmd"].is_string())
-        apply_cmd(remote["cmd"].get<std::string>());
-    }
+    while (tools::RemoteLogger::instance().poll_json(remote)) apply_remote(remote);
     std::string legacy;
     while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
 
