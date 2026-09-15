@@ -61,8 +61,8 @@ void init_remote_logger(bool test_feed)
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
   cfg.enable_local = true;
-  cfg.img_width = 640;
-  cfg.img_quality = 50;
+  cfg.img_width = 480;
+  cfg.img_quality = 30;
   tools::RemoteLogger::instance().init(cfg);
 }
 
