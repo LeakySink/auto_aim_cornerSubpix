@@ -86,6 +86,7 @@ HTTP_PORT=8081 DATA_PORT=15002 PEER_PORT=15101 ./host/watch.sh
 
 # 标定：车上 ./build/calibrate，PC 上：
 ./host/calibrate.sh
+# 完整步骤见 calibration/calibration.md
 ```
 
 回放快捷键：空格播放/暂停，← / → 步进 0.05s。图像窗口用下拉框切 `meta.name`；拆分不会自动换路。
