@@ -47,6 +47,8 @@ private:
 
   void set_float_value(const std::string & name, double value);
   void set_enum_value(const std::string & name, unsigned int value);
+  void set_int_value(const std::string & name, int64_t value);
+  bool try_set_enum(const std::string & name, unsigned int value);
 
   void set_vid_pid(const std::string & vid_pid);
   void reset_usb() const;

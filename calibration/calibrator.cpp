@@ -175,18 +175,22 @@ bool Calibrator::detect(
   else
     gray = img;
 
-  // 工业相机全分辨率找棋盘格很慢：缩小检测再还原坐标（对齐 ROS 交互手感）
-  constexpr int kDetectMaxW = 800;
+  // 工业相机全分辨率找棋盘格很慢：适度缩小检测再还原坐标
+  constexpr int kDetectMaxW = 1280;
   double scale = 1.0;
   cv::Mat detect_gray = gray;
   if (gray.cols > kDetectMaxW) {
     scale = static_cast<double>(kDetectMaxW) / gray.cols;
-    cv::resize(
-      gray, detect_gray, cv::Size(), scale, scale, cv::INTER_AREA);
+    cv::resize(gray, detect_gray, cv::Size(), scale, scale, cv::INTER_AREA);
   }
 
-  const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FAST_CHECK;
-  if (!cv::findChessboardCorners(detect_gray, pattern_size_, corners, flags)) return false;
+  // 先快检；失败再关 FAST_CHECK 并开归一化（暗/反光场景更稳）
+  const int flags_fast =
+    cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_FAST_CHECK;
+  const int flags_full = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE;
+  if (!cv::findChessboardCorners(detect_gray, pattern_size_, corners, flags_fast) &&
+      !cv::findChessboardCorners(detect_gray, pattern_size_, corners, flags_full))
+    return false;
 
   if (scale != 1.0) {
     const float inv = static_cast<float>(1.0 / scale);

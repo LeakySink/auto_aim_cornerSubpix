@@ -33,9 +33,9 @@ constexpr int kPreviewW = 480;
 
 std::unique_ptr<io::CameraBase> open_camera(const std::string & result_path)
 {
-  // 默认海康；可在 result.yaml 覆盖 camera_name / exposure_ms / gain / gamma / vid_pid
+  // 标定默认稍长曝光，便于棋盘格识别；可在 result.yaml 覆盖
   std::string camera_name = "hikrobot";
-  double exposure_ms = 5.0;
+  double exposure_ms = 10.0;
   double gain = 16.0;
   double gamma = 1.0;
   std::string vid_pid = "2bdf:0001";
@@ -48,6 +48,10 @@ std::unique_ptr<io::CameraBase> open_camera(const std::string & result_path)
     if (y["vid_pid"]) vid_pid = y["vid_pid"].as<std::string>();
   } catch (const std::exception &) {
   }
+
+  tools::RemoteLogger::instance().log(
+    "INFO", "open camera '{}' exposure_ms={:.1f} gain={:.1f} auto_gain={}", camera_name,
+    exposure_ms, gain, camera_name == "hikrobot");
 
   if (camera_name == "mindvision")
     return std::make_unique<io::MindVision>(exposure_ms, gamma, vid_pid);
