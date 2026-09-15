@@ -16,5 +16,5 @@ if errorlevel 1 (
 )
 
 echo [calibrate] http://localhost:%HTTP_PORT%  data:%DATA_PORT% peer:%PEER_PORT%
-echo [calibrate] robot: .\build\calibrate configs\calibration.yaml
+echo [calibrate] robot: .\build\calibrate
 python -m rdbg calibrate --port %HTTP_PORT% --data-port %DATA_PORT% --peer-port %PEER_PORT% --discover-port %DISCOVER_PORT% %*

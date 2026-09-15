@@ -391,13 +391,33 @@ bool Calibrator::write_yaml(const std::string & path) const
 {
   if (!has_camera()) return false;
 
+  // 保留已有相机等非结果字段，避免 SAVE 冲掉
+  YAML::Node keep;
+  try {
+    keep = YAML::LoadFile(path);
+  } catch (const std::exception &) {
+  }
+
   std::ostringstream out;
   out << "# 标定结果（SAVE 写回；棋盘格参数也在此修改）\n";
-  out << "# 仅内参：camera_matrix / distort_coeffs\n";
+  out << "# 仅内参：camera_matrix / distort_coeffs；车上直接 ./build/calibrate\n";
   out << "# 用法见 calibration.md\n\n";
   out << "pattern_cols: " << pattern_size_.width << "\n";
   out << "pattern_rows: " << pattern_size_.height << "\n";
   out << "square_size_mm: " << square_size_mm_ << "\n\n";
+
+  const char * cam_keys[] = {"camera_name", "exposure_ms", "gain", "gamma", "vid_pid"};
+  bool wrote_cam = false;
+  for (const char * key : cam_keys) {
+    if (!keep[key]) continue;
+    if (!wrote_cam) {
+      out << "# 相机（可选；缺省海康 exposure_ms=5 gain=16）\n";
+      wrote_cam = true;
+    }
+    out << key << ": " << keep[key].Scalar() << "\n";
+  }
+  if (wrote_cam) out << "\n";
+
   if (!calibrated_at_.empty()) out << "calibrated_at: \"" << calibrated_at_ << "\"\n";
   out << "# 重投影误差: " << fmt::format("{:.4f}px", camera_.reproj_error) << "\n";
   out << "camera_matrix: " << format_flow(camera_.camera_matrix) << "\n";

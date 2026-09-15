@@ -1,27 +1,66 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <memory>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <thread>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 #include "calibration/calibrator.hpp"
-#include "io/camera.hpp"
+#include "io/hikrobot/hikrobot.hpp"
+#include "io/mindvision/mindvision.hpp"
 #include "tools/exiter.hpp"
 #include "tools/remote_logger.hpp"
-#include "tools/yaml.hpp"
 
 using namespace std::chrono_literals;
 
 const std::string keys =
-  "{help h usage ? |                          | 输出命令行参数说明}"
-  "{@config-path   | configs/calibration.yaml | 相机 / remote_logger 配置}";
+  "{help h usage ? | | 输出命令行参数说明}";
 
 namespace
 {
 constexpr auto kAutoAddGap = std::chrono::milliseconds(400);
+
+std::unique_ptr<io::CameraBase> open_camera()
+{
+  // 默认海康；可在 calibration/result.yaml 覆盖 camera_name / exposure_ms / gain / gamma / vid_pid
+  std::string camera_name = "hikrobot";
+  double exposure_ms = 5.0;
+  double gain = 16.0;
+  double gamma = 1.0;
+  std::string vid_pid = "2bdf:0001";
+  try {
+    const auto y = YAML::LoadFile(calibration::Calibrator::kResultPath);
+    if (y["camera_name"]) camera_name = y["camera_name"].as<std::string>();
+    if (y["exposure_ms"]) exposure_ms = y["exposure_ms"].as<double>();
+    if (y["gain"]) gain = y["gain"].as<double>();
+    if (y["gamma"]) gamma = y["gamma"].as<double>();
+    if (y["vid_pid"]) vid_pid = y["vid_pid"].as<std::string>();
+  } catch (const std::exception &) {
+  }
+
+  if (camera_name == "mindvision")
+    return std::make_unique<io::MindVision>(exposure_ms, gamma, vid_pid);
+  if (camera_name == "hikrobot")
+    return std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid);
+  throw std::runtime_error("unknown camera_name: " + camera_name);
+}
+
+void init_remote_logger()
+{
+  tools::RemoteLogger::Config cfg;
+  cfg.sender_name = "calibrate";
+  cfg.heartbeat_interval_ms = 500;
+  cfg.enable_remote = true;
+  cfg.enable_local = true;
+  cfg.img_width = 640;
+  cfg.img_quality = 50;
+  tools::RemoteLogger::instance().init(cfg);
+}
 
 cv::Point2f outer_corner(
   const std::vector<cv::Point2f> & corners, cv::Size pattern, int idx)
@@ -118,17 +157,9 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  const auto config_path = cli.get<std::string>(0);
-
-  auto yaml = tools::load(config_path);
-  if (!yaml["remote_logger"]) {
-    fmt::print(stderr, "calibration.yaml needs remote_logger for web UI\n");
-    return 1;
-  }
-  tools::RemoteLogger::instance().init(config_path);
-
+  init_remote_logger();
   tools::Exiter exiter;
-  io::Camera camera(config_path);
+  auto camera = open_camera();
   calibration::Calibrator calib;
 
   std::string hint = "open host calibrate page, wave the board";
@@ -213,7 +244,7 @@ int main(int argc, char * argv[])
     std::string legacy;
     while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
 
-    camera.read(img, stamp);
+    camera->read(img, stamp);
     if (img.empty()) break;
 
     std::vector<cv::Point2f> corners;

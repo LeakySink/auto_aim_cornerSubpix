@@ -76,7 +76,7 @@ def run(http_port, data_port=15001, peer_port=15100, discover_port=15999,
     print(f"[calibrate] {url}", file=sys.stderr)
     print(f"[calibrate] data {data_port}  peer {peer_port}  discover {discover_port}",
           file=sys.stderr)
-    print("[calibrate] on robot: ./build/calibrate configs/calibration.yaml",
+    print("[calibrate] on robot: ./build/calibrate",
           file=sys.stderr)
     if not no_browser:
         time.sleep(0.15)

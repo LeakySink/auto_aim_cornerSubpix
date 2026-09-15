@@ -84,7 +84,7 @@ HTTP_PORT=8081 DATA_PORT=15002 PEER_PORT=15101 ./host/watch.sh
 
 ./host/replay.sh logs/run_xxx.rlog
 
-# 标定：车上 ./build/calibrate configs/calibration.yaml，PC 上：
+# 标定：车上 ./build/calibrate，PC 上：
 ./host/calibrate.sh
 ```
 

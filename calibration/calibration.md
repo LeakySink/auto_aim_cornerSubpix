@@ -1,6 +1,6 @@
 # 相机内参一键标定（网页）
 
-车上跑无窗口标定程序，**只标定相机内参**（`camera_matrix` / `distort_coeffs`），不标手眼外参。调试 PC 用 host 打开网页看覆盖度并点按钮。通信复用 RemoteLogger / host 发现与队首协议。
+车上跑无窗口标定程序，**只标定相机内参**。调试 PC 用 host 打开网页看覆盖度并点按钮。
 
 ## 编译
 
@@ -11,13 +11,13 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 ## 运行
 
-**1. 车上（需要相机，不需要云台）：**
+**1. 车上（需要相机，项目根目录执行，无参数）：**
 
 ```bash
-./build/calibrate configs/calibration.yaml
+./build/calibrate
 ```
 
-棋盘格尺寸与内参结果写在 [`result.yaml`](result.yaml)。
+棋盘格与结果在 [`result.yaml`](result.yaml)。相机默认海康；要改曝光等可在同文件写可选字段（见文件内注释）。RemoteLogger 使用内置默认。
 
 **2. 调试 PC：**
 
@@ -26,11 +26,9 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 # Windows: host\calibrate.bat
 ```
 
-`configs/calibration.yaml` 只负责相机与 `remote_logger`。
-
 ## 操作
 
-挥动标定板，网页右侧看 X/Y/Size/Skew 覆盖度和样本分布。按钮与快捷键：
+挥动标定板，网页右侧看 X/Y/Size/Skew。按钮与快捷键：
 
 | 按钮 / 键 | 作用 |
 |---|---|
@@ -46,34 +44,24 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 `SAVE` 更新 [`result.yaml`](result.yaml)：
 
-- `calibrated_at`：本次内参计算完成时间
+- `calibrated_at`
 - `camera_matrix` / `distort_coeffs`
 
-不写 `R_camera2gimbal` / `t_camera2gimbal`。需要时再手工把内参拷到各车 yaml。
+不写外参。需要时再手工拷到各车 yaml。
 
 ## 协议
-
-推荐（host `RobotClient.send_json` / 车 `RemoteLogger::poll_json`）：
 
 ```json
 {"v":1,"type":"json","host_id":"...","data":{"cmd":"add|calibrate|save|drop|reset|undistort|quit"}}
 ```
 
-兼容旧版：
-
-```json
-{"v":1,"type":"calib_cmd","host_id":"...","cmd":"add|..."}
-```
-
-仅已入队 host 有效。车 → 队首：`plot`（`"calib":true`）+ `plot_image`（`name=calibrate`）。
+兼容旧版 `calib_cmd`。仅已入队 host 有效。
 
 ## 建议
 
 - 曝光短一点、增益补亮度；标定板平整、全板入画。
 - 四条覆盖度尽量打满。
 - 重投影一般应 &lt; 0.5 px。
-
-离线算法自检（不需要相机/网页）：
 
 ```bash
 ./build/calibrate_test

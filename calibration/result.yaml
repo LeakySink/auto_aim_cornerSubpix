@@ -1,9 +1,16 @@
-# 标定结果（SAVE 写回此文件；棋盘格参数也在这里改）
-# 仅标定相机内参；用法见 calibration.md
+# 标定结果（SAVE 写回；棋盘格参数也在此修改）
+# 车上直接：./build/calibrate   （无需 configs 参数文件）
+# 用法见 calibration.md
 
 pattern_cols: 11
 pattern_rows: 8
 square_size_mm: 40
+
+# 相机（可选；不写则默认海康 exposure_ms=5 gain=16 vid_pid=2bdf:0001）
+# camera_name: "hikrobot"
+# exposure_ms: 5
+# gain: 16.0
+# vid_pid: "2bdf:0001"
 
 # 以下字段由标定程序写入
 # calibrated_at: ""
