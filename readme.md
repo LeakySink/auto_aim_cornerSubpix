@@ -186,9 +186,10 @@ sp_vision_25
 ├── assets         // 包含demo素材、网络权重等
 │   └── ...
 ├── calibration    // 标定相关程序
-│   ├── calibrate.cpp                    // ROS 风格一键标定（内参+手眼）
-│   ├── calibrator.cpp / calibrator.hpp  // 覆盖度采样与标定计算
-│   └── split_video.cpp                  // 录制视频裁剪
+│   ├── calibrate_camera.cpp             // 相机内参标定程序
+│   ├── calibrate_handeye.cpp            // 手眼标定程序
+│   ├── calibrate_robotworld_handeye.cpp // 手眼标定程序（同时计算标定板位置）
+│   └── capture.cpp                      // 相机标定数据采集程序
 ├── CMakeLists.txt // CMake配置文件
 ├── configs        // 每台机器人的YAML配置文件
 │   └── ...
