@@ -106,6 +106,8 @@ void Engine::plot_image(const cv::Mat & img, const nlohmann::json & meta)
 
 bool Engine::poll_calib_cmd(std::string & cmd) { return control_.poll_calib_cmd(cmd); }
 
+bool Engine::poll_json(nlohmann::json & data) { return control_.poll_json(data); }
+
 void Engine::var_loop()
 {
   std::vector<VarEntry> pending;

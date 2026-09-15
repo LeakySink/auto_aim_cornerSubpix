@@ -4,10 +4,11 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <ctime>
 #include <fstream>
 #include <opencv2/core/eigen.hpp>
-#include <regex>
 #include <sstream>
 
 #include "tools/math_tools.hpp"
@@ -80,22 +81,42 @@ std::string format_flow(const cv::Mat & m)
   return ss.str();
 }
 
-void upsert_key(
-  std::string & text, const std::string & key, const std::string & value,
-  const std::string & comment = {})
+}  // namespace
+
+std::string Calibrator::now_local_string()
 {
-  const std::regex re("(?:^# [^\\n]*\\n)?^" + key + ":.*$", std::regex_constants::multiline);
-  std::string block = key + ": " + value;
-  if (!comment.empty()) block = comment + "\n" + block;
-  if (std::regex_search(text, re)) {
-    text = std::regex_replace(text, re, block, std::regex_constants::format_first_only);
-    return;
-  }
-  if (!text.empty() && text.back() != '\n') text += '\n';
-  text += block + "\n";
+  using clock = std::chrono::system_clock;
+  const auto t = clock::to_time_t(clock::now());
+  std::tm tm{};
+#if defined(_WIN32)
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+  return buf;
 }
 
-}  // namespace
+Calibrator::Calibrator()
+: pattern_size_(11, 8),
+  square_size_mm_(40),
+  R_gimbal2imubody_(Eigen::Matrix3d::Identity())
+{
+  try {
+    const auto y = YAML::LoadFile(kResultPath);
+    if (y["pattern_cols"] && y["pattern_rows"])
+      pattern_size_ = {y["pattern_cols"].as<int>(), y["pattern_rows"].as<int>()};
+    if (y["square_size_mm"]) square_size_mm_ = y["square_size_mm"].as<double>();
+    if (y["R_gimbal2imubody"] && y["R_gimbal2imubody"].IsSequence() &&
+        y["R_gimbal2imubody"].size() == 9) {
+      auto v = y["R_gimbal2imubody"].as<std::vector<double>>();
+      R_gimbal2imubody_ = Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(v.data());
+    }
+  } catch (const std::exception &) {
+    // 缺文件或字段时用上面的默认值
+  }
+}
 
 Calibrator::Calibrator(
   int pattern_cols, int pattern_rows, double square_size_mm,
@@ -104,6 +125,13 @@ Calibrator::Calibrator(
   square_size_mm_(square_size_mm),
   R_gimbal2imubody_(R_gimbal2imubody)
 {
+}
+
+void Calibrator::invalidate_results()
+{
+  camera_ = {};
+  handeye_ = {};
+  calibrated_at_.clear();
 }
 
 bool Calibrator::detect(
@@ -153,8 +181,7 @@ bool Calibrator::add_sample(
     s.has_q = true;
   }
   samples_.push_back(std::move(s));
-  camera_ = {};
-  handeye_ = {};
+  invalidate_results();
   return true;
 }
 
@@ -162,15 +189,13 @@ void Calibrator::drop_last()
 {
   if (samples_.empty()) return;
   samples_.pop_back();
-  camera_ = {};
-  handeye_ = {};
+  invalidate_results();
 }
 
 void Calibrator::reset()
 {
   samples_.clear();
-  camera_ = {};
-  handeye_ = {};
+  invalidate_results();
 }
 
 std::vector<Calibrator::SampleView> Calibrator::sample_views() const
@@ -273,6 +298,7 @@ bool Calibrator::calibrate_camera()
   camera_.distort_coeffs = distort_coeffs;
   camera_.reproj_error = error_sum / static_cast<double>(total);
   handeye_ = {};
+  calibrated_at_ = now_local_string();
   return true;
 }
 
@@ -319,6 +345,7 @@ bool Calibrator::calibrate_handeye()
   handeye_.R_camera2gimbal = R_camera2gimbal;
   handeye_.t_camera2gimbal = t_camera2gimbal;
   handeye_.ypr_deg = tools::eulers(R_camera2ideal, 1, 0, 2) * 57.3;
+  calibrated_at_ = now_local_string();
   return true;
 }
 
@@ -328,6 +355,9 @@ std::string Calibrator::yaml_snippet() const
 
   YAML::Emitter out;
   out << YAML::BeginMap;
+  if (!calibrated_at_.empty()) {
+    out << YAML::Key << "calibrated_at" << YAML::Value << calibrated_at_;
+  }
   out << YAML::Comment(fmt::format("重投影误差: {:.4f}px", camera_.reproj_error));
   out << YAML::Key << "camera_matrix";
   out << YAML::Value << YAML::Flow
@@ -355,36 +385,44 @@ std::string Calibrator::yaml_snippet() const
   return out.c_str();
 }
 
-bool Calibrator::save_yaml(const std::string & path) const
+bool Calibrator::save_yaml() const { return write_yaml(kResultPath); }
+
+bool Calibrator::write_yaml(const std::string & path) const
 {
   if (!has_camera()) return false;
 
-  std::ifstream in(path);
-  std::string text;
-  if (in) {
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    text = ss.str();
+  std::ostringstream out;
+  out << "# 标定结果（SAVE 写回；棋盘格参数也在此修改）\n";
+  out << "# 用法见 calibration.md\n\n";
+  out << "pattern_cols: " << pattern_size_.width << "\n";
+  out << "pattern_rows: " << pattern_size_.height << "\n";
+  out << "square_size_mm: " << square_size_mm_ << "\n\n";
+  {
+    std::vector<double> r(9);
+    Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(r.data()) = R_gimbal2imubody_;
+    out << "R_gimbal2imubody: [";
+    for (int i = 0; i < 9; i++) {
+      if (i) out << ", ";
+      out << fmt::format("{:.16g}", r[i]);
+    }
+    out << "]\n\n";
   }
-
-  upsert_key(
-    text, "camera_matrix", format_flow(camera_.camera_matrix),
-    fmt::format("# 重投影误差: {:.4f}px", camera_.reproj_error));
-  upsert_key(text, "distort_coeffs", format_flow(camera_.distort_coeffs));
-
+  if (!calibrated_at_.empty()) out << "calibrated_at: \"" << calibrated_at_ << "\"\n";
+  out << "# 重投影误差: " << fmt::format("{:.4f}px", camera_.reproj_error) << "\n";
+  out << "camera_matrix: " << format_flow(camera_.camera_matrix) << "\n";
+  out << "distort_coeffs: " << format_flow(camera_.distort_coeffs) << "\n";
   if (has_handeye()) {
-    upsert_key(
-      text, "R_camera2gimbal", format_flow(handeye_.R_camera2gimbal),
-      fmt::format(
-        "# 相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree", handeye_.ypr_deg[0],
-        handeye_.ypr_deg[1], handeye_.ypr_deg[2]));
-    upsert_key(text, "t_camera2gimbal", format_flow(handeye_.t_camera2gimbal));
+    out << "# 相机同理想情况的偏角: yaw" << fmt::format("{:.2f}", handeye_.ypr_deg[0])
+        << " pitch" << fmt::format("{:.2f}", handeye_.ypr_deg[1]) << " roll"
+        << fmt::format("{:.2f}", handeye_.ypr_deg[2]) << " degree\n";
+    out << "R_camera2gimbal: " << format_flow(handeye_.R_camera2gimbal) << "\n";
+    out << "t_camera2gimbal: " << format_flow(handeye_.t_camera2gimbal) << "\n";
   }
 
-  std::ofstream out(path);
-  if (!out) return false;
-  out << text;
-  return static_cast<bool>(out);
+  std::ofstream file(path);
+  if (!file) return false;
+  file << out.str();
+  return static_cast<bool>(file);
 }
 
 }  // namespace calibration

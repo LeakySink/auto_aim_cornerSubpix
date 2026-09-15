@@ -74,6 +74,7 @@
     if (status.has_hand)
       res.push("cam " + Number(status.cam_yaw).toFixed(1) + "/" +
         Number(status.cam_pitch).toFixed(1) + "/" + Number(status.cam_roll).toFixed(1));
+    if (status.calibrated_at) res.push(status.calibrated_at);
     if (status.undistort) res.push("undistort ON");
     $("result").textContent = res.join(" · ");
     $("hint").textContent = status.hint || "";

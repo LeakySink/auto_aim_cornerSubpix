@@ -48,7 +48,7 @@ class CalibrateSource(LiveSource):
         if not info:
             handler.send(404, b'{"ok":false,"error":"unknown robot"}', "application/json")
             return
-        self.client.calib_cmd(info["ip"], info["control"], cmd)
+        self.client.send_json(info["ip"], info["control"], {"cmd": cmd})
         handler.send(
             200,
             json.dumps({"ok": True, "cmd": cmd, "robot": name}).encode(),

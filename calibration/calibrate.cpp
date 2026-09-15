@@ -21,8 +21,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                          | 输出命令行参数说明}"
-  "{@config-path   | configs/calibration.yaml | yaml配置（棋盘格/相机/云台）}"
-  "{output-path o  |                          | 结果写入路径，默认与配置相同}"
+  "{@config-path   | configs/calibration.yaml | 相机/云台/remote_logger 配置}"
   "{camera-only    |                          | 只标内参，不打开云台}";
 
 namespace
@@ -110,6 +109,7 @@ nlohmann::json status_json(
   j["has_cam"] = calib.has_camera() ? 1 : 0;
   j["has_hand"] = calib.has_handeye() ? 1 : 0;
   j["reproj"] = calib.has_camera() ? calib.camera().reproj_error : -1.0;
+  if (!calib.calibrated_at().empty()) j["calibrated_at"] = calib.calibrated_at();
   if (calib.has_handeye()) {
     j["cam_yaw"] = calib.handeye().ypr_deg[0];
     j["cam_pitch"] = calib.handeye().ypr_deg[1];
@@ -144,17 +144,9 @@ int main(int argc, char * argv[])
   }
 
   const auto config_path = cli.get<std::string>(0);
-  auto output_path = cli.get<std::string>("output-path");
-  if (output_path.empty()) output_path = config_path;
   const bool camera_only = cli.has("camera-only");
 
   auto yaml = tools::load(config_path);
-  const int cols = tools::read<int>(yaml, "pattern_cols");
-  const int rows = tools::read<int>(yaml, "pattern_rows");
-  const double square_mm = tools::read<double>(yaml, "square_size_mm");
-  auto R_data = tools::read<std::vector<double>>(yaml, "R_gimbal2imubody");
-  Eigen::Matrix<double, 3, 3, Eigen::RowMajor> R_gimbal2imubody(R_data.data());
-
   if (!yaml["remote_logger"]) {
     fmt::print(stderr, "calibration.yaml needs remote_logger for web UI\n");
     return 1;
@@ -166,7 +158,7 @@ int main(int argc, char * argv[])
   std::unique_ptr<io::Gimbal> gimbal;
   if (!camera_only) gimbal = std::make_unique<io::Gimbal>(config_path);
 
-  calibration::Calibrator calib(cols, rows, square_mm, R_gimbal2imubody);
+  calibration::Calibrator calib;
 
   std::string hint = "open host calibrate page, wave the board";
   bool undistort = false;
@@ -176,7 +168,8 @@ int main(int argc, char * argv[])
   auto flash_until = std::chrono::steady_clock::now();
 
   tools::RemoteLogger::instance().log(
-    "INFO", "web calibrate ready, board {}x{}, save -> {}", cols, rows, output_path);
+    "INFO", "web calibrate ready, board {}x{}, save -> {}", calib.pattern_size().width,
+    calib.pattern_size().height, calibration::Calibrator::kResultPath);
   tools::RemoteLogger::instance().log(
     "INFO", "run: ./host/calibrate.sh   then press buttons in the browser");
 
@@ -208,12 +201,14 @@ int main(int argc, char * argv[])
       hint = "calibrate first";
       return;
     }
-    if (calib.save_yaml(output_path)) {
-      hint = fmt::format("saved {}", output_path);
-      tools::RemoteLogger::instance().log("INFO", "wrote {}", output_path);
+    if (calib.save_yaml()) {
+      hint = fmt::format("saved {} ({})", calibration::Calibrator::kResultPath, calib.calibrated_at());
+      tools::RemoteLogger::instance().log(
+        "INFO", "wrote {} at {}", calibration::Calibrator::kResultPath, calib.calibrated_at());
     } else {
       hint = "save failed";
-      tools::RemoteLogger::instance().log("ERROR", "failed to write {}", output_path);
+      tools::RemoteLogger::instance().log(
+        "ERROR", "failed to write {}", calibration::Calibrator::kResultPath);
     }
   };
 
@@ -247,8 +242,14 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point stamp;
 
   while (!exiter.exit() && !quit_cmd) {
-    std::string cmd;
-    while (tools::RemoteLogger::instance().poll_calib_cmd(cmd)) apply_cmd(cmd);
+    nlohmann::json remote;
+    while (tools::RemoteLogger::instance().poll_json(remote)) {
+      if (remote.contains("cmd") && remote["cmd"].is_string())
+        apply_cmd(remote["cmd"].get<std::string>());
+    }
+    // 兼容只发 calib_cmd 的旧 host
+    std::string legacy;
+    while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
 
     camera.read(img, stamp);
     if (img.empty()) break;

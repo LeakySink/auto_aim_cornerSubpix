@@ -46,6 +46,10 @@ struct HandeyeResult
 class Calibrator
 {
 public:
+  /// 从 calibration/result.yaml 读棋盘格 / R_gimbal2imubody（缺省 11×8 / 40mm / I）
+  Calibrator();
+
+  /// 测试或显式覆盖用；生产路径请用无参构造
   Calibrator(
     int pattern_cols, int pattern_rows, double square_size_mm,
     const Eigen::Matrix3d & R_gimbal2imubody);
@@ -73,9 +77,11 @@ public:
 
   const CameraResult & camera() const { return camera_; }
   const HandeyeResult & handeye() const { return handeye_; }
+  const std::string & calibrated_at() const { return calibrated_at_; }
 
   std::string yaml_snippet() const;
-  bool save_yaml(const std::string & path) const;
+  /// 写回 calibration/result.yaml（含 calibrated_at）
+  bool save_yaml() const;
 
   struct SampleView
   {
@@ -89,6 +95,7 @@ public:
   std::vector<cv::Point3f> board_points() const { return object_points(); }
   std::vector<SampleView> sample_views() const;
 
+  static constexpr const char * kResultPath = "calibration/result.yaml";
   static constexpr int kMinSamples = 10;
   static constexpr int kMinHandeye = 5;
 
@@ -109,11 +116,16 @@ private:
   std::vector<Sample> samples_;
   CameraResult camera_;
   HandeyeResult handeye_;
+  std::string calibrated_at_;
+
+  void invalidate_results();
+  bool write_yaml(const std::string & path) const;
 
   std::vector<cv::Point3f> object_points() const;
   static SampleParams compute_params(
     const std::vector<cv::Point2f> & corners, cv::Size img_size, cv::Size pattern_size);
   static double param_l1(const SampleParams & a, const SampleParams & b);
+  static std::string now_local_string();
 };
 
 }  // namespace calibration

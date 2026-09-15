@@ -15,9 +15,10 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 ```bash
 ./build/calibrate configs/calibration.yaml
-./build/calibrate configs/calibration.yaml -o configs/sentry.yaml
 ./build/calibrate configs/calibration.yaml --camera-only
 ```
+
+棋盘格尺寸与标定结果写在 [`result.yaml`](result.yaml)，不写回各车配置。
 
 **2. 调试 PC：**
 
@@ -26,7 +27,7 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 # Windows: host\calibrate.bat
 ```
 
-浏览器会自动打开。棋盘格默认 **11×8 内角点**、方格 **40 mm**，在 `configs/calibration.yaml` 里改。配置里需要有 `remote_logger`。
+浏览器会自动打开。`configs/calibration.yaml` 只负责相机 / 云台 / `remote_logger`。
 
 ## 操作
 
@@ -37,26 +38,38 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 | 挥动标定板 | 自动采样（姿态太像会丢） |
 | **ADD** / `SPACE` | 强制采样 |
 | **CALIBRATE** / `C` | 至少 10 张；有 IMU 时同时算手眼 |
-| **SAVE** / `S` | 写回 yaml（`-o` 或默认配置文件） |
+| **SAVE** / `S` | 写 `calibration/result.yaml`（含 `calibrated_at`） |
 | **UNDISTORT** / `U` | 去畸变预览 |
 | **DROP** / `D` | 丢掉最后一张 |
 | **RESET** / `R` | 清空 |
 
-画面由车上推流（角点、已采外框、标定后坐标轴）；进度条和按钮在网页。
+画面由车上推流；进度条和按钮在网页。
 
 ## 结果
 
-`SAVE` 更新目标 yaml 的 `camera_matrix` / `distort_coeffs` / `R_camera2gimbal` / `t_camera2gimbal`。
+`SAVE` 更新 [`result.yaml`](result.yaml)：
+
+- `calibrated_at`：本次标定计算完成时间
+- `camera_matrix` / `distort_coeffs`
+- 有手眼时还有 `R_camera2gimbal` / `t_camera2gimbal`
+
+需要时再手工拷到各车 yaml。
 
 ## 协议
 
-host → 车控制口：
+推荐（通用 JSON，host `RobotClient.send_json` / 车 `RemoteLogger::poll_json`）：
 
 ```json
-{"v":1,"type":"calib_cmd","host_id":"...","cmd":"add|calibrate|save|drop|reset|undistort|quit"}
+{"v":1,"type":"json","host_id":"...","data":{"cmd":"add|calibrate|save|drop|reset|undistort|quit"}}
 ```
 
-仅已入队 host 有效。车 → 队首：普通 `plot`（带 `"calib":true`）+ `plot_image`（`name=calibrate`）。
+兼容旧版（仍可用）：
+
+```json
+{"v":1,"type":"calib_cmd","host_id":"...","cmd":"add|..."}
+```
+
+仅已入队 host 有效。车 → 队首：`plot`（`"calib":true`）+ `plot_image`（`name=calibrate`）。
 
 ## 建议
 

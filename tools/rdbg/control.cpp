@@ -22,6 +22,7 @@ bool ControlPlane::start()
     std::lock_guard<std::mutex> lock(mtx_);
     queue_.clear();
     calib_cmds_.clear();
+    inbound_json_.clear();
     head_addr_ = sockaddr_in{};
     head_addr_.sin_family = AF_INET;
   }
@@ -433,6 +434,17 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
     }
     return;
   }
+
+  if (type == "json") {
+    if (host_id.empty() || !msg.contains("data")) return;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      if (!find_locked(host_id)) return;
+      if (inbound_json_.size() >= 64) inbound_json_.pop_front();
+      inbound_json_.push_back(msg["data"]);
+    }
+    return;
+  }
 }
 
 bool ControlPlane::poll_calib_cmd(std::string & cmd)
@@ -441,6 +453,15 @@ bool ControlPlane::poll_calib_cmd(std::string & cmd)
   if (calib_cmds_.empty()) return false;
   cmd = std::move(calib_cmds_.front());
   calib_cmds_.pop_front();
+  return true;
+}
+
+bool ControlPlane::poll_json(nlohmann::json & data)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (inbound_json_.empty()) return false;
+  data = std::move(inbound_json_.front());
+  inbound_json_.pop_front();
   return true;
 }
 

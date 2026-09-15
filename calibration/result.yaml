@@ -1,0 +1,16 @@
+# 标定结果（SAVE 写回此文件；棋盘格参数也在这里改）
+# 用法见 calibration.md
+
+pattern_cols: 11
+pattern_rows: 8
+square_size_mm: 40
+
+# 云台到 IMU 本体旋转（通常为单位阵）
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# 以下字段由标定程序写入
+# calibrated_at: ""
+# camera_matrix: []
+# distort_coeffs: []
+# R_camera2gimbal: []
+# t_camera2gimbal: []

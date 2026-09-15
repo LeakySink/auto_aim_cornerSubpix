@@ -31,6 +31,7 @@ public:
   void log(const std::string & level, const std::string & msg);
   void plot_image(const cv::Mat & img, const nlohmann::json & meta);
   bool poll_calib_cmd(std::string & cmd);
+  bool poll_json(nlohmann::json & data);
 
 private:
   struct VarEntry
