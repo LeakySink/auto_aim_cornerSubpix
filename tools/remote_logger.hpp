@@ -52,6 +52,10 @@ public:
   }
 
   void plot_image(const cv::Mat & img, const nlohmann::json & meta);
+  /// host 网页下发的标定指令（旧协议，保留兼容）
+  bool poll_calib_cmd(std::string & cmd);
+  /// host 下发的通用 JSON（type=json 的 data）
+  bool poll_json(nlohmann::json & data);
   void shutdown();
 
 private:

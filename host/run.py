@@ -18,10 +18,10 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0].startswith("-"):
         name, rest = "watch", argv
-    elif argv[0] in ("watch", "replay"):
+    elif argv[0] in ("watch", "replay", "calibrate"):
         name, rest = argv[0], argv[1:]
     else:
-        print("Usage: run.py [watch|replay] [args...]", file=sys.stderr)
+        print("Usage: run.py [watch|replay|calibrate] [args...]", file=sys.stderr)
         return 2
 
     win = sys.platform == "win32"

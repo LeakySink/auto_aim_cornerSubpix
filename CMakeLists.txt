@@ -48,16 +48,9 @@ target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff to
 target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
 ##################calibration################
-add_executable(capture calibration/capture.cpp)
-add_executable(calibrate_camera calibration/calibrate_camera.cpp)
-add_executable(calibrate_handeye calibration/calibrate_handeye.cpp)
-add_executable(calibrate_robotworld_handeye calibration/calibrate_robotworld_handeye.cpp)
+add_executable(calibrate calibration/calibrate.cpp calibration/calibrator.cpp)
 add_executable(split_video calibration/split_video.cpp)
-
-target_link_libraries(capture ${OpenCV_LIBS} fmt::fmt tools io)
-target_link_libraries(calibrate_camera ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
-target_link_libraries(calibrate_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
-target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
+target_link_libraries(calibrate ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
 
 ##################tests##################
@@ -77,6 +70,7 @@ add_executable(handeye_test tests/handeye_test.cpp)
 add_executable(dm_test tests/dm_test.cpp)
 add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
 add_executable(remote_logger_test tests/remote_logger_test.cpp)
+add_executable(calibrate_test tests/calibrate_test.cpp calibration/calibrator.cpp)
 
 target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
@@ -94,6 +88,7 @@ target_link_libraries(handeye_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io aut
 target_link_libraries(dm_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 target_link_libraries(remote_logger_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
+target_link_libraries(calibrate_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 
 add_executable(multi_sender_test tests/multi_sender_test.cpp)
 target_link_libraries(multi_sender_test ${OpenCV_LIBS} fmt::fmt tools)

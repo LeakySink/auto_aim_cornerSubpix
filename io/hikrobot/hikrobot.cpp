@@ -8,8 +8,14 @@ using namespace std::chrono_literals;
 
 namespace io
 {
-HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
-: exposure_us_(exposure_ms * 1e3), gain_(gain), queue_(1), daemon_quit_(false), vid_(-1), pid_(-1)
+HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain)
+: exposure_us_(exposure_ms * 1e3),
+  gain_(gain),
+  auto_gain_(auto_gain),
+  queue_(1),
+  daemon_quit_(false),
+  vid_(-1),
+  pid_(-1)
 {
   set_vid_pid(vid_pid);
   if (libusb_init(NULL)) tools::RemoteLogger::instance().log("WARN", "Unable to init libusb!");
@@ -82,12 +88,29 @@ void HikRobot::capture_start()
     return;
   }
 
+  set_enum_value("TriggerMode", MV_TRIGGER_MODE_OFF);
   set_enum_value("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);
   set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
-  set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
   set_float_value("ExposureTime", exposure_us_);
-  set_float_value("Gain", gain_);
-  MV_CC_SetFrameRate(handle_, 150);
+
+  if (auto_gain_) {
+    // 连续自动增益；失败则退回固定增益，避免画面过暗导致棋盘格检测失败
+    if (try_set_enum("GainAuto", MV_GAIN_MODE_CONTINUOUS)) {
+      set_int_value("Brightness", 120);
+      tools::RemoteLogger::instance().log(
+        "INFO", "HikRobot GainAuto=CONTINUOUS, ExposureTime={:.0f}us", exposure_us_);
+    } else {
+      tools::RemoteLogger::instance().log(
+        "WARN", "GainAuto unsupported, fallback Gain={:.1f}", gain_);
+      set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
+      set_float_value("Gain", gain_);
+    }
+  } else {
+    set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
+    set_float_value("Gain", gain_);
+  }
+  // 标定不需要极限帧率；过高可能导致曝光/增益来不及稳定
+  MV_CC_SetFrameRate(handle_, 60);
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
@@ -202,6 +225,26 @@ void HikRobot::set_enum_value(const std::string & name, unsigned int value)
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_SetEnumValue(\"{}\", {}) failed: {:#x}", name, value, ret);
     return;
+  }
+}
+
+bool HikRobot::try_set_enum(const std::string & name, unsigned int value)
+{
+  const unsigned int ret = MV_CC_SetEnumValue(handle_, name.c_str(), value);
+  if (ret != MV_OK) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "MV_CC_SetEnumValue(\"{}\", {}) failed: {:#x}", name, value, ret);
+    return false;
+  }
+  return true;
+}
+
+void HikRobot::set_int_value(const std::string & name, int64_t value)
+{
+  const unsigned int ret = MV_CC_SetIntValueEx(handle_, name.c_str(), value);
+  if (ret != MV_OK) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "MV_CC_SetIntValueEx(\"{}\", {}) failed: {:#x}", name, value, ret);
   }
 }
 

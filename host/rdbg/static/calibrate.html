@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Calibrator</title>
+<link rel="stylesheet" href="/static/css/calibrate.css?v=2">
+</head>
+<body>
+<header id="top">
+  <div class="dot" id="dot"></div>
+  <span id="status">connecting…</span>
+  <span id="stats"></span>
+  <span style="flex:1"></span>
+  <select id="sender-sel"></select>
+</header>
+
+<main>
+  <section id="view">
+    <img id="frame" alt="calibrate stream">
+    <div id="placeholder">waiting for ./build/calibrate …</div>
+  </section>
+
+  <aside id="panel">
+    <h1>Calibrator</h1>
+    <div id="board" class="pill dead">BOARD --</div>
+    <div id="counts">samples 0</div>
+
+    <div class="bar-row"><span>X</span><div class="track"><div class="fill" id="bx"></div></div><em id="vx">0%</em></div>
+    <div class="bar-row"><span>Y</span><div class="track"><div class="fill" id="by"></div></div><em id="vy">0%</em></div>
+    <div class="bar-row"><span>Size</span><div class="track"><div class="fill" id="bs"></div></div><em id="vs">0%</em></div>
+    <div class="bar-row"><span>Skew</span><div class="track"><div class="fill" id="bk"></div></div><em id="vk">0%</em></div>
+
+    <canvas id="map" width="288" height="140"></canvas>
+    <p id="cov" class="muted">need more poses</p>
+    <p id="result"></p>
+    <pre id="result-detail" class="muted" style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto"></pre>
+    <p id="hint">wave chessboard through the view</p>
+
+    <div class="btns">
+      <button data-cmd="add">ADD</button>
+      <button data-cmd="calibrate" id="btn-c" disabled>CALIBRATE</button>
+      <button data-cmd="drop" id="btn-d" disabled>DROP</button>
+      <button data-cmd="reset" id="btn-r" disabled>RESET</button>
+    </div>
+    <p class="keys muted">SPACE add · C calibrate · D drop · R reset</p>
+  </aside>
+</main>
+
+<script src="/static/js/calibrate.js?v=2"></script>
+</body>
+</html>

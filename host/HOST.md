@@ -8,8 +8,8 @@
 
 ```
 host/
-  watch.sh / replay.sh     Unix 入口
-  watch.bat / replay.bat   Windows 入口
+  watch.sh / replay.sh / calibrate.sh     Unix 入口
+  watch.bat / replay.bat / calibrate.bat   Windows 入口
   run.py                   按平台选上面两者
   HOST.md / DESIGN.md / PROTOCOL.md
   rdbg/
@@ -17,11 +17,11 @@ host/
     net/      发现 · 向车注册 · 数据 UDP · host 转发
     log/      .rlog 解析 · 预加载
     sources/  live · replay
-    apps/     watch.py · replay.py
-    static/   watch.html · replay.html · js/plugins/
+    apps/     watch.py · replay.py · calibrate.py
+    static/   watch.html · replay.html · calibrate.html · js/plugins/
 ```
 
-watch 与 replay 是两个进程，共用 HTTP 壳和面板插件，数据源不同。
+watch / replay / calibrate 是不同进程，共用 HTTP 壳与发现协议；calibrate 用专用网页做标定 UI。
 
 ## 快速开始
 
@@ -30,6 +30,7 @@ Unix：
 ```bash
 ./host/watch.sh                          # http://localhost:8080  数据口 15001
 ./host/replay.sh logs/run_xxx.rlog       # 默认 http://127.0.0.1:8765
+./host/calibrate.sh                      # http://localhost:8090  标定网页
 ```
 
 Windows：
@@ -37,6 +38,7 @@ Windows：
 ```bat
 host\watch.bat
 host\replay.bat logs\run_xxx.rlog
+host\calibrate.bat
 ```
 
 不想记平台时：
@@ -45,6 +47,7 @@ host\replay.bat logs\run_xxx.rlog
 python3 host/run.py                      # 等价于 watch
 python3 host/run.py watch --no-browser
 python3 host/run.py replay logs/run_xxx.rlog
+python3 host/run.py calibrate --no-browser
 ```
 
 ```bash
@@ -69,6 +72,9 @@ HTTP_PORT=8081 DATA_PORT=15002 PEER_PORT=15101 ./host/watch.sh
 | replay.sh | `--host` | 127.0.0.1 | HTTP 绑定 |
 | replay.sh | `--max-mb` | 1024 | 预加载内存上限 |
 | replay.sh | `--no-browser` | off | 不自动打开浏览器 |
+| calibrate.sh | `HTTP_PORT` | 8090 | HTTP |
+| calibrate.sh | `DATA_PORT` / `PEER_PORT` / `DISCOVER_PORT` | 同 watch | 发现与数据 |
+| calibrate.sh | `--no-browser` | off | 不自动打开浏览器 |
 
 ## 使用
 
@@ -77,6 +83,10 @@ HTTP_PORT=8081 DATA_PORT=15002 PEER_PORT=15101 ./host/watch.sh
 # 另开终端跑车上程序（不必写 remote_host；watch 靠 beacon 发现车）
 
 ./host/replay.sh logs/run_xxx.rlog
+
+# 标定：车上 ./build/calibrate，PC 上：
+./host/calibrate.sh
+# 完整步骤见 calibration/calibration.md
 ```
 
 回放快捷键：空格播放/暂停，← / → 步进 0.05s。图像窗口用下拉框切 `meta.name`；拆分不会自动换路。

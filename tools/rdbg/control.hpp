@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -45,6 +46,11 @@ public:
   bool has_head() const { return has_head_.load(); }
   bool send_to_head(const void * data, size_t len);
 
+  // host → 车：标定网页按钮（兼容旧协议；新代码优先用 poll_json）
+  bool poll_calib_cmd(std::string & cmd);
+  // host → 车：通用 JSON（type=json 的 data 字段）
+  bool poll_json(nlohmann::json & data);
+
 private:
   void send_beacon_to(const sockaddr_in & dest);
   nlohmann::json make_beacon() const;
@@ -63,6 +69,8 @@ private:
   std::mutex mtx_;
   std::atomic<bool> has_head_{false};
   std::vector<HostSlot> queue_;
+  std::deque<std::string> calib_cmds_;
+  std::deque<nlohmann::json> inbound_json_;
   sockaddr_in head_addr_{};
   std::chrono::steady_clock::time_point last_beacon_{};
   std::chrono::steady_clock::time_point last_alive_{};

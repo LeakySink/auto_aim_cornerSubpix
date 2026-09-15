@@ -151,3 +151,21 @@ class RobotClient:
             "host_id": self.host_id,
             "peer_port": self.peer_port,
         })
+
+    def calib_cmd(self, ip, control_port, cmd):
+        """Legacy calibrate button protocol. Prefer send_json for new code."""
+        self._send(ip, control_port, {
+            "v": 1,
+            "type": "calib_cmd",
+            "host_id": self.host_id,
+            "cmd": cmd,
+        })
+
+    def send_json(self, ip, control_port, data):
+        """Send an application JSON payload to the robot (type=json)."""
+        self._send(ip, control_port, {
+            "v": 1,
+            "type": "json",
+            "host_id": self.host_id,
+            "data": data,
+        })
