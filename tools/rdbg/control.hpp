@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -45,6 +46,9 @@ public:
   bool has_head() const { return has_head_.load(); }
   bool send_to_head(const void * data, size_t len);
 
+  // host → 车：标定网页按钮（仅已入队 host）。返回 false 表示队列空。
+  bool poll_calib_cmd(std::string & cmd);
+
 private:
   void send_beacon_to(const sockaddr_in & dest);
   nlohmann::json make_beacon() const;
@@ -63,6 +67,7 @@ private:
   std::mutex mtx_;
   std::atomic<bool> has_head_{false};
   std::vector<HostSlot> queue_;
+  std::deque<std::string> calib_cmds_;
   sockaddr_in head_addr_{};
   std::chrono::steady_clock::time_point last_beacon_{};
   std::chrono::steady_clock::time_point last_alive_{};

@@ -52,6 +52,8 @@ public:
   }
 
   void plot_image(const cv::Mat & img, const nlohmann::json & meta);
+  /// host 网页下发的标定指令（add/calibrate/save/drop/reset/undistort/quit）
+  bool poll_calib_cmd(std::string & cmd);
   void shutdown();
 
 private:

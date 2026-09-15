@@ -65,6 +65,8 @@ void RemoteLogger::plot_image(const cv::Mat & img, const nlohmann::json & meta)
   impl_->plot_image(img, meta);
 }
 
+bool RemoteLogger::poll_calib_cmd(std::string & cmd) { return impl_->poll_calib_cmd(cmd); }
+
 void RemoteLogger::shutdown() { impl_->shutdown(); }
 
 }  // namespace tools

@@ -84,27 +84,38 @@ class Shell:
                 self.wfile.write(body)
 
             def do_GET(self):
+                self._dispatch("GET")
+
+            def do_POST(self):
+                self._dispatch("POST")
+
+            def _dispatch(self, method):
                 parsed = urlparse(self.path)
                 path = parsed.path
                 self.route_path = path
                 self.query = parse_qs(parsed.query)
+                self.body = b""
+                if method == "POST":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    self.body = self.rfile.read(n) if n > 0 else b""
 
-                html = shell._pages.get(path)
-                if html:
-                    serve_page(self, html)
-                    return
+                if method == "GET":
+                    html = shell._pages.get(path)
+                    if html:
+                        serve_page(self, html)
+                        return
 
-                fn = shell._exact.get(("GET", path))
+                fn = shell._exact.get((method, path))
                 if fn:
                     fn(self)
                     return
 
-                for method, prefix, fn in shell._prefixes:
-                    if method == "GET" and path.startswith(prefix):
+                for m, prefix, fn in shell._prefixes:
+                    if m == method and path.startswith(prefix):
                         fn(self)
                         return
 
-                if try_serve_static(self, self.path):
+                if method == "GET" and try_serve_static(self, self.path):
                     return
                 self.send_error(404)
 

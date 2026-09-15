@@ -104,6 +104,8 @@ void Engine::plot_image(const cv::Mat & img, const nlohmann::json & meta)
   mailbox_.publish(ts, meta, img);
 }
 
+bool Engine::poll_calib_cmd(std::string & cmd) { return control_.poll_calib_cmd(cmd); }
+
 void Engine::var_loop()
 {
   std::vector<VarEntry> pending;

@@ -21,6 +21,7 @@ bool ControlPlane::start()
   {
     std::lock_guard<std::mutex> lock(mtx_);
     queue_.clear();
+    calib_cmds_.clear();
     head_addr_ = sockaddr_in{};
     head_addr_.sin_family = AF_INET;
   }
@@ -420,6 +421,27 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
     }
     send_json(from.sin_addr, reply_port, ack);
   }
+
+  if (type == "calib_cmd") {
+    const auto cmd = msg.value("cmd", "");
+    if (cmd.empty() || host_id.empty()) return;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      if (!find_locked(host_id)) return;
+      if (calib_cmds_.size() >= 32) calib_cmds_.pop_front();
+      calib_cmds_.push_back(cmd);
+    }
+    return;
+  }
+}
+
+bool ControlPlane::poll_calib_cmd(std::string & cmd)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (calib_cmds_.empty()) return false;
+  cmd = std::move(calib_cmds_.front());
+  calib_cmds_.pop_front();
+  return true;
 }
 
 }  // namespace rdbg

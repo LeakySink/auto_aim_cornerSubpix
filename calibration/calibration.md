@@ -1,6 +1,6 @@
-# 相机一键标定
+# 相机一键标定（网页）
 
-实时挥动棋盘格采集样本，一次计算内参和手眼外参，写回 yaml。交互对齐 ROS `camera_calibration`。
+车上跑无窗口标定程序，调试 PC 用 host 打开网页做覆盖度可视化和按钮操作。交互对齐 ROS `camera_calibration`，通信复用 RemoteLogger / host 发现与队首协议。
 
 ## 编译
 
@@ -11,7 +11,7 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 ## 运行
 
-车上需要相机。默认还要云台 IMU（手眼用四元数）。桌上只标内参时加 `--camera-only`。
+**1. 车上（需要相机；默认还要云台 IMU）：**
 
 ```bash
 ./build/calibrate configs/calibration.yaml
@@ -19,51 +19,52 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 ./build/calibrate configs/calibration.yaml --camera-only
 ```
 
-棋盘格默认 **11×8 内角点**、方格 **40 mm**，在 `configs/calibration.yaml` 里改。相机曝光、内参、手眼仍写在各车自己的 yaml（或标定配置）里。
+**2. 调试 PC：**
+
+```bash
+./host/calibrate.sh                 # http://localhost:8090
+# Windows: host\calibrate.bat
+```
+
+浏览器会自动打开。棋盘格默认 **11×8 内角点**、方格 **40 mm**，在 `configs/calibration.yaml` 里改。配置里需要有 `remote_logger`。
 
 ## 操作
 
-右侧是可视化面板：覆盖度条、样本 XY 分布、去畸变预览，以及可点击按钮。快捷键仍然可用。
+挥动标定板，网页右侧看 X/Y/Size/Skew 覆盖度和样本分布。按钮与快捷键：
 
 | 按钮 / 键 | 作用 |
 |---|---|
-| 挥动标定板 | 自动采样（X/Y/Size/Skew 有增益才收） |
-| 点画面 / `SPACE` | 强制采样（仍会拒绝几乎重复的姿态） |
-| **CALIBRATE** / `C` | 标定。至少 10 张；有 IMU 时同时算手眼 |
-| **SAVE** / `S` | 写回 yaml（`-o` 指定的文件，默认就是配置文件） |
-| **UNDISTORT** / `U` | 主画面去畸变；标定后右侧也有预览小图 |
-| **DROP LAST** / `D` | 丢掉最后一张 |
-| **RESET** / `R` | 清空重来 |
-| `Q` / `Esc` | 退出 |
+| 挥动标定板 | 自动采样（姿态太像会丢） |
+| **ADD** / `SPACE` | 强制采样 |
+| **CALIBRATE** / `C` | 至少 10 张；有 IMU 时同时算手眼 |
+| **SAVE** / `S` | 写回 yaml（`-o` 或默认配置文件） |
+| **UNDISTORT** / `U` | 去畸变预览 |
+| **DROP** / `D` | 丢掉最后一张 |
+| **RESET** / `R` | 清空 |
 
-画面里会画出已采集的棋盘格外框（绿=带 IMU，黄=仅内参）。标定完成后，当前板上会画三维坐标轴。右侧 coverage XY 是样本中心在画面中的分布。
+画面由车上推流（角点、已采外框、标定后坐标轴）；进度条和按钮在网页。
 
-右侧四条进度条和 ROS 含义相同：
+## 结果
 
-- **X / Y**：棋盘格中心在画面里扫过的范围
-- **Size**：远近变化
-- **Skew**：斜视角
+`SAVE` 更新目标 yaml 的 `camera_matrix` / `distort_coeffs` / `R_camera2gimbal` / `t_camera2gimbal`。
 
-条满后显示 `coverage READY`。条没满但已有 10 张也可以按 `C`，精度会差一些。
+## 协议
 
-## 结果写什么
+host → 车控制口：
 
-`S` 会更新目标 yaml 里的这些键，其它内容不动：
+```json
+{"v":1,"type":"calib_cmd","host_id":"...","cmd":"add|calibrate|save|drop|reset|undistort|quit"}
+```
 
-- `camera_matrix`、`distort_coeffs`（附注重投影误差）
-- `R_camera2gimbal`、`t_camera2gimbal`（米；注释为相对理想安装的 yaw/pitch/roll）
-
-把 `-o` 指到该车配置（如 `configs/sentry.yaml`）即可直接给自瞄用。也可以先写进 `configs/calibration.yaml`，再自己拷。
+仅已入队 host 有效。车 → 队首：普通 `plot`（带 `"calib":true`）+ `plot_image`（`name=calibrate`）。
 
 ## 建议
 
-- 曝光短一点、增益补亮度，减少拖影；标定板要平整、全板在画面内。
-- 四条覆盖度都尽量打满，手眼再多转几个 yaw/pitch。
-- 重投影误差一般应小于 **0.5 px**。明显偏大就 `R` 重采。
-- 手眼注释里的偏角应接近机械安装；差到十几度先检查 IMU 方向和 `R_gimbal2imubody`。
-- 可用 `./build/handeye_test` 看地面网格是否套得上（需单独的 handeye 配置）。
+- 曝光短一点、增益补亮度；标定板平整、全板入画。
+- 四条覆盖度尽量打满，手眼多转 yaw/pitch。
+- 重投影一般应 &lt; 0.5 px。
 
-离线自检（不需要相机）：
+离线算法自检（不需要相机/网页）：
 
 ```bash
 ./build/calibrate_test

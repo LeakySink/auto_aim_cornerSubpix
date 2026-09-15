@@ -151,3 +151,11 @@ class RobotClient:
             "host_id": self.host_id,
             "peer_port": self.peer_port,
         })
+
+    def calib_cmd(self, ip, control_port, cmd):
+        self._send(ip, control_port, {
+            "v": 1,
+            "type": "calib_cmd",
+            "host_id": self.host_id,
+            "cmd": cmd,
+        })

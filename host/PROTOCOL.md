@@ -104,7 +104,10 @@ host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 b
 {"v":1,"type":"register","host_id":"...","name":"lbw-pc","data_port":15001,"peer_port":15100}
 {"v":1,"type":"deregister","host_id":"..."}
 {"v":1,"type":"query_head","host_id":"..."}
+{"v":1,"type":"calib_cmd","host_id":"...","cmd":"add|calibrate|save|drop|reset|undistort|quit"}
 ```
+
+`calib_cmd`：发送方 `host_id` 须已在车端队列；车入队后由标定程序 `poll_calib_cmd` 消费。详见 `calibration/calibration.md`。
 
 车侧队列元素：`{host_id, ip, data_port, peer_port}`。`ip` 取 `recvfrom` 源地址。
 
