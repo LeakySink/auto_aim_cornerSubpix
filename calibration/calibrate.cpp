@@ -17,7 +17,7 @@
 const std::string keys =
   "{help h usage ? |                          | 输出命令行参数说明}"
   "{@config-path   | configs/calibration.yaml | yaml配置（棋盘格/相机/云台）}"
-  "{output-path o  |                          | 结果写入路径，默认 camera_dir 下同名文件}"
+  "{output-path o  |                          | 结果写入路径，默认与配置相同}"
   "{camera-only    |                          | 只标内参，不打开云台}";
 
 namespace
@@ -51,10 +51,7 @@ int main(int argc, char * argv[])
 
   const auto config_path = cli.get<std::string>(0);
   auto output_path = cli.get<std::string>("output-path");
-  if (output_path.empty()) {
-    output_path = tools::camera_yaml_path(config_path);
-    if (output_path.empty()) output_path = config_path;
-  }
+  if (output_path.empty()) output_path = config_path;
   const bool camera_only = cli.has("camera-only");
 
   auto yaml = tools::load(config_path);

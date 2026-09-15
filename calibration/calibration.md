@@ -15,23 +15,11 @@ cmake --build build --target calibrate calibrate_test -j$(nproc)
 
 ```bash
 ./build/calibrate configs/calibration.yaml
-./build/calibrate configs/calibration.yaml -o configs/camera/sentry.yaml
+./build/calibrate configs/calibration.yaml -o configs/sentry.yaml
 ./build/calibrate configs/calibration.yaml --camera-only
 ```
 
-棋盘格默认 **11×8 内角点**、方格 **40 mm**，在 `configs/calibration.yaml` 里改。
-
-### 相机参数与 `camera_dir`
-
-工业相机曝光、内参、手眼写在 `configs/camera/<同名>.yaml`，机器人 yaml 只留：
-
-```yaml
-camera_dir: configs/camera
-```
-
-`tools::load(path)` 会按同名文件递归合并：`A.yaml` → `camera_dir/A.yaml` → 若后者还有 `camera_dir` 再往下（A→B→C）。近层覆盖远层。读相机参数请用 `tools::load`，不要直接 `YAML::LoadFile`。
-
-例外：`configs/camera.yaml` 是给 `camera_test` / 哨兵副相机用的**独立**小文件，没有 `camera_dir`，按普通 yaml 直接加载。
+棋盘格默认 **11×8 内角点**、方格 **40 mm**，在 `configs/calibration.yaml` 里改。相机曝光、内参、手眼仍写在各车自己的 yaml（或标定配置）里。
 
 ## 操作
 
@@ -42,7 +30,7 @@ camera_dir: configs/camera
 | 挥动标定板 | 自动采样（X/Y/Size/Skew 有增益才收） |
 | 点画面 / `SPACE` | 强制采样（仍会拒绝几乎重复的姿态） |
 | **CALIBRATE** / `C` | 标定。至少 10 张；有 IMU 时同时算手眼 |
-| **SAVE** / `S` | 写回 yaml（`-o` 指定的文件；默认 `camera_dir` 下与当前配置同名的文件） |
+| **SAVE** / `S` | 写回 yaml（`-o` 指定的文件，默认就是配置文件） |
 | **UNDISTORT** / `U` | 主画面去畸变；标定后右侧也有预览小图 |
 | **DROP LAST** / `D` | 丢掉最后一张 |
 | **RESET** / `R` | 清空重来 |
@@ -65,7 +53,7 @@ camera_dir: configs/camera
 - `camera_matrix`、`distort_coeffs`（附注重投影误差）
 - `R_camera2gimbal`、`t_camera2gimbal`（米；注释为相对理想安装的 yaw/pitch/roll）
 
-默认写到 `camera_dir` 下的同名文件（例如 `configs/calibration.yaml` → `configs/camera/calibration.yaml`）。用 `-o configs/camera/sentry.yaml` 可直接写到某车的相机参数。
+把 `-o` 指到该车配置（如 `configs/sentry.yaml`）即可直接给自瞄用。也可以先写进 `configs/calibration.yaml`，再自己拷。
 
 ## 建议
 

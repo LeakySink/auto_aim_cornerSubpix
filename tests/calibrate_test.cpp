@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "calibration/calibrator.hpp"
-#include "tools/yaml.hpp"
 
 namespace
 {
@@ -228,17 +227,6 @@ int main()
   std::filesystem::remove(tmp);
 
   expect(!calib.yaml_snippet().empty() || !he_calib.yaml_snippet().empty(), "yaml_snippet nonempty");
-
-  // 5. camera_dir 合并：机器人 yaml 经 tools::load 应带出相机内参
-  {
-    auto merged = tools::load("configs/sentry.yaml");
-    expect(merged["camera_matrix"] && merged["camera_matrix"].size() == 9,
-           "tools::load(sentry) merges camera_matrix");
-    expect(merged["camera_name"] && merged["camera_name"].as<std::string>() == "hikrobot",
-           "tools::load(sentry) merges camera_name");
-    expect(merged["enemy_color"] && merged["enemy_color"].as<std::string>() == "blue",
-           "tools::load keeps robot keys");
-  }
 
   fmt::print("\n{} passed, {} failed\n", g_passed, g_failed);
   return g_failed == 0 ? 0 : 1;
