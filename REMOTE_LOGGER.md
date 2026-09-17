@@ -20,7 +20,7 @@ host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host
 支持四种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
-- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker resize 后放开全分辨率，再 JPEG / UDP / `.rlog`
+- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker resize 后 JPEG；`.rlog` 照写；**UDP 仅在 host `img_subscribe` 了该 `meta.name` 时**，以 ≤1200B 的 `0xFE` 分片发给队首
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 
 ## 快速开始
@@ -128,17 +128,21 @@ Host --register--> 车:15000
 {"hb": 1, "_from": "my_robot", "ts": 1234567890123456789}
 ```
 
-### 图像 — 二进制
+### 图像 — UDP 分片（`0xFE`）
 
 ```
-[1B: 0xFF][8B: ts][4B: meta_len][meta][4B: jpg_len][jpeg]
+公共头: [1B 0xFE][8B ts][2B seq][2B idx][2B cnt][1B from_len][from]
+frag0:  [2B meta_len][meta][4B jpg_total][chunk]
+frag n: [chunk]
 ```
+
+每片总长 ≤1200B，避免 WiFi IP 分片。未订阅的流不发 UDP。另有约 1s 一次的目录 JSON：`{"img_streams":[...],"_from":...}`。
 
 ## 本地日志 (`.rlog`)
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG / 写盘 / UDP。JPEG 跟不上时只覆盖该路等待槽。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG；`enable_local` 时写盘；仅当该流被 host 订阅时再分片 UDP。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 

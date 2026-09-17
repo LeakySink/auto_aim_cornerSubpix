@@ -56,7 +56,8 @@ host/
 ```
 车上 RemoteLogger
   plot/log  → JSON UDP
-  plot_image → 0xFF 二进制 UDP + 写入 .rlog
+  plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片发给队首
+  周期 img_streams 目录 JSON
 
 watch:
   net/control  听 beacon，向车 register
@@ -218,17 +219,12 @@ rx.active_sender / rx.active_port / rx.running
 | `plot` | `ts`, `data`（原 JSON，含 `_from`） |
 | `log` | `ts`, `level`, `msg`，可选 `_from` |
 | `image` | `ts`, `meta`, `jpg_b64` |
+| `img_streams` | `streams` 字符串列表，可选 `_from` |
 | `status` | `connected` bool；连上时带 `sender` |
 
-二进制图像包（首字节 `0xFF`）：
+图像默认 `0xFE` 分片（见 `PROTOCOL.md`）；host 收齐后发 `image`。兼容旧整包 `0xFF`。含 `"img_streams"` 的 JSON 目录单独发出。含 `"hb"` 的心跳丢弃。无包超过 `timeout_ms` 发 `status.connected=false`。
 
-```
-[1: 0xFF][8: ts_le][4: meta_len_le][meta utf-8][4: jpg_len_le][jpeg]
-```
-
-其余 UDP 当 JSON。含 `"hb"` 的心跳丢弃。无包超过 `timeout_ms` 发 `status.connected=false`。
-
-常量：`IMG_MARKER=0xFF`，`MAX_UDP=65536`。
+常量：`IMG_FRAG_MARKER=0xFE`，`IMG_MARKER=0xFF`，`MAX_UDP=65536`。
 
 ### 4.7 `rdbg.log.rlog`
 
@@ -424,7 +420,7 @@ SSE：`new EventSource('/events')`。`msg.type`：
 
 ## 7. 改代码时别动的契约
 
-- `.rlog` RLG2 布局、UDP `0xFF` 图像头：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。控制平面（beacon / 队列 / 转发）见 `PROTOCOL.md`。
+- `.rlog` RLG2 布局、UDP `0xFE` 分片图像（及旧 `0xFF`）：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。控制平面（beacon / 队列 / 转发 / `img_subscribe`）见 `PROTOCOL.md`。
 - `replay.js` 用的全局函数名。
 - 静态 URL 前缀 `/static/`。
 - 标准库 only，不要为 host 加 pip 依赖。
