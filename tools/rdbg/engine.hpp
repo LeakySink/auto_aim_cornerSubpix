@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace tools
@@ -41,6 +42,8 @@ private:
   void var_loop();
   void img_loop();
   void ctrl_loop();
+  void note_stream(const std::string & name);
+  void maybe_send_catalog();
   static std::string resolve_sender(const std::string & name);
 
   RemoteLogger::Config cfg_;
@@ -57,6 +60,10 @@ private:
   std::mutex var_mtx_;
   std::condition_variable var_cv_;
   std::mutex var_wake_mtx_;
+
+  std::mutex stream_mtx_;
+  std::unordered_set<std::string> known_streams_;
+  std::chrono::steady_clock::time_point last_catalog_{};
 
   std::thread var_worker_;
   std::thread img_worker_;

@@ -32,9 +32,14 @@ void Engine::init(const RemoteLogger::Config & cfg)
   fps_.reset();
   mailbox_.reset();
   last_hb_ = {};
+  last_catalog_ = {};
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
     var_buf_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(stream_mtx_);
+    known_streams_.clear();
   }
 
   control_.control_port = cfg_.control_port;
@@ -98,10 +103,42 @@ void Engine::plot_image(const cv::Mat & img, const nlohmann::json & meta)
   if (!running_) return;
   if (!cfg_.enable_local && !cfg_.enable_remote) return;
   if (img.empty()) return;
+  const auto name = stream_name(meta);
+  note_stream(name);
+
+  const bool want_remote =
+    cfg_.enable_remote && remote_ok_ && control_.image_subscribed(name);
+  if (!cfg_.enable_local && !want_remote) return;
+
   uint64_t ts = now_ns();
   if (meta.contains("ts") && meta["ts"].is_number()) ts = meta["ts"].get<uint64_t>();
-  if (!fps_.select(ts, stream_name(meta))) return;
+  if (!fps_.select(ts, name)) return;
   mailbox_.publish(ts, meta, img);
+}
+
+void Engine::note_stream(const std::string & name)
+{
+  if (name.empty()) return;
+  std::lock_guard<std::mutex> lock(stream_mtx_);
+  known_streams_.insert(name);
+}
+
+void Engine::maybe_send_catalog()
+{
+  if (!cfg_.enable_remote || !remote_ok_ || !control_.has_head()) return;
+  auto now = std::chrono::steady_clock::now();
+  if (last_catalog_.time_since_epoch().count() != 0) {
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_catalog_);
+    if (ms.count() < static_cast<int64_t>(kImgCatalogIntervalMs)) return;
+  }
+  std::vector<std::string> streams;
+  {
+    std::lock_guard<std::mutex> lock(stream_mtx_);
+    if (known_streams_.empty()) return;
+    streams.assign(known_streams_.begin(), known_streams_.end());
+  }
+  last_catalog_ = now;
+  data_.send_img_catalog(streams);
 }
 
 void Engine::var_loop()
@@ -148,15 +185,23 @@ void Engine::img_loop()
       if (!running_.load()) break;
       continue;
     }
+    const auto name = stream_name(entry.meta);
+    const bool want_remote =
+      cfg_.enable_remote && remote_ok_ && control_.has_head() &&
+      control_.image_subscribed(name);
+    if (!cfg_.enable_local && !want_remote) {
+      entry.meta = nlohmann::json{};
+      entry.img.release();
+      continue;
+    }
+
     std::vector<uint8_t> jpeg;
     if (encode_jpeg(entry.img, cfg_.img_width, cfg_.img_quality, jpeg)) {
       nlohmann::json meta = entry.meta;
       data_.inject(meta);
       if (!meta.contains("ts")) meta["ts"] = entry.ts;
       if (cfg_.enable_local) session_.write_image(entry.ts, meta, jpeg);
-      if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
-        data_.send_image(jpeg, entry.ts, entry.meta);
-      }
+      if (want_remote) data_.send_image(jpeg, entry.ts, entry.meta);
     }
     entry.meta = nlohmann::json{};
     entry.img.release();
@@ -171,6 +216,7 @@ void Engine::ctrl_loop()
     control_.poll();
     control_.check_head_timeout();
     control_.maybe_beacon();
+    maybe_send_catalog();
     if (control_.has_head() && cfg_.heartbeat_interval_ms > 0) {
       auto now = std::chrono::steady_clock::now();
       if (last_hb_.time_since_epoch().count() == 0) {

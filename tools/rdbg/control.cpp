@@ -21,6 +21,8 @@ bool ControlPlane::start()
   {
     std::lock_guard<std::mutex> lock(mtx_);
     queue_.clear();
+    img_subs_.clear();
+    img_union_.clear();
     head_addr_ = sockaddr_in{};
     head_addr_.sin_family = AF_INET;
   }
@@ -50,6 +52,8 @@ void ControlPlane::stop()
   {
     std::lock_guard<std::mutex> lock(mtx_);
     queue_.clear();
+    img_subs_.clear();
+    img_union_.clear();
   }
   beacon_.close();
   ctrl_.close();
@@ -61,6 +65,32 @@ bool ControlPlane::send_to_head(const void * data, size_t len)
   std::lock_guard<std::mutex> lock(mtx_);
   if (!has_head_) return false;
   return ctrl_.sendto(data, len, head_addr_);
+}
+
+bool ControlPlane::image_subscribed(const std::string & stream) const
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  return img_union_.count(stream) > 0;
+}
+
+bool ControlPlane::any_image_subscribed() const
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  return !img_union_.empty();
+}
+
+void ControlPlane::clear_img_sub_locked(const std::string & host_id)
+{
+  img_subs_.erase(host_id);
+  rebuild_img_union_locked();
+}
+
+void ControlPlane::rebuild_img_union_locked()
+{
+  img_union_.clear();
+  for (const auto & kv : img_subs_) {
+    for (const auto & s : kv.second) img_union_.insert(s);
+  }
 }
 
 void ControlPlane::send_json(in_addr ip, uint16_t port, const nlohmann::json & j)
@@ -171,6 +201,7 @@ void ControlPlane::drop_head(const char * why)
     if (queue_.empty()) return;
     auto gone = queue_.front();
     queue_.erase(queue_.begin());
+    clear_img_sub_locked(gone.host_id);
     std::fprintf(stderr, "[RemoteLogger] drop head '%s' (%s)\n",
                  gone.host_id.c_str(), why ? why : "");
     if (!queue_.empty()) {
@@ -355,6 +386,7 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
       queue_.erase(std::remove_if(queue_.begin(), queue_.end(),
                                   [&](const HostSlot & h) { return h.host_id == host_id; }),
                    queue_.end());
+      clear_img_sub_locked(host_id);
       apply_head_locked();
       if (was_head && !queue_.empty()) {
         has_new = true;
@@ -417,6 +449,41 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
           {"data_port", head_copy.data_port},
         };
       }
+    }
+    send_json(from.sin_addr, reply_port, ack);
+  }
+
+  if (type == "img_subscribe") {
+    if (host_id.empty()) return;
+    std::unordered_set<std::string> streams;
+    if (msg.contains("streams") && msg["streams"].is_array()) {
+      for (const auto & s : msg["streams"]) {
+        if (s.is_string()) {
+          auto name = s.get<std::string>();
+          if (!name.empty()) streams.insert(std::move(name));
+        }
+      }
+    }
+    nlohmann::json ack = {{"v", 1}, {"type", "img_subscribe_ack"}, {"status", "ok"}};
+    uint16_t reply_port = msg.value("peer_port", 0);
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      auto * existing = find_locked(host_id);
+      if (!existing) {
+        ack["status"] = "error";
+        ack["message"] = "not in queue";
+        if (!reply_port) reply_port = ntohs(from.sin_port);
+        send_json(from.sin_addr, reply_port, ack);
+        return;
+      }
+      if (!reply_port) reply_port = existing->peer_port;
+      if (streams.empty()) img_subs_.erase(host_id);
+      else img_subs_[host_id] = std::move(streams);
+      rebuild_img_union_locked();
+      ack["streams"] = nlohmann::json::array();
+      for (const auto & s : img_union_) ack["streams"].push_back(s);
+      std::fprintf(stderr, "[RemoteLogger] img_subscribe host=%s union=%zu\n",
+                   host_id.c_str(), img_union_.size());
     }
     send_json(from.sin_addr, reply_port, ack);
   }
