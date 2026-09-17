@@ -142,7 +142,7 @@ frag n: [chunk]
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG；`enable_local` 时写盘；仅当该流被 host 订阅时再分片 UDP。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG；`enable_local` 时用 `writev` 直写 `.rlog`（不再经 `FILE` 二次缓冲）；仅当该流被 host 订阅时再以 `sendmsg` 分片 UDP（JPEG 零拷贝进包）。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 
