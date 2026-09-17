@@ -1,6 +1,8 @@
-// Image panel plugin — streams keyed by meta.name.
+// Image panel plugin — streams keyed by meta.name; host 选中才向车订阅。
 var imgSources = {};
 var imgFpsTracker = {};
+var imgKnown = {};
+var imgSubTimer = null;
 
 function applyImgTransform(p) {
   if (!p.imgEl) return;
@@ -13,14 +15,50 @@ function resetImgView(p) {
   applyImgTransform(p);
 }
 
+function collectWantedImgStreams() {
+  var wanted = [];
+  var seen = {};
+  forEachPanel(function(p) {
+    if (p.type !== 'image' || !p.imgSel) return;
+    var name = p.imgSel.value;
+    if (!name || seen[name]) return;
+    seen[name] = true;
+    wanted.push(name);
+  });
+  return wanted;
+}
+
+function pushImgSubscribe() {
+  var wanted = collectWantedImgStreams();
+  var q = wanted.map(encodeURIComponent).join(',');
+  fetch('/img_subscribe?streams=' + q).catch(function() {});
+}
+
+function scheduleImgSubscribe() {
+  if (imgSubTimer) clearTimeout(imgSubTimer);
+  imgSubTimer = setTimeout(function() {
+    imgSubTimer = null;
+    pushImgSubscribe();
+  }, 50);
+}
+
 function showPanelImage(p) {
   if (p.type !== 'image' || !p.imgSel) return;
   var name = p.imgSel.value;
-  if (!name) { var keys = Object.keys(imgSources); if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; } }
+  if (!name) {
+    var keys = Object.keys(imgKnown);
+    if (keys.length === 0) keys = Object.keys(imgSources);
+    if (keys.length > 0) { name = keys[0]; p.imgSel.value = name; }
+  }
   var s = imgSources[name];
   if (s && s.b64) {
     p.imgEl.src = s.b64; p.imgEl.style.display = '';
     p.placeholder.style.display = 'none'; p.imgInfo.textContent = s.kb + ' KB';
+  } else {
+    p.imgEl.style.display = 'none';
+    p.placeholder.style.display = '';
+    p.placeholder.textContent = name ? ('等待 ' + name + '\u2026') : '等待中\u2026';
+    p.imgInfo.textContent = '';
   }
 }
 
@@ -28,7 +66,9 @@ function refreshImgOptions(p) {
   if (!p || !p.imgSel) return;
   var cur = p.imgSel.value;
   p.imgSel.innerHTML = '';
-  var keys = Object.keys(imgSources);
+  var keys = Object.keys(imgKnown);
+  if (keys.length === 0) keys = Object.keys(imgSources);
+  keys.sort();
   if (keys.length === 0) {
     p.imgSel.appendChild(Object.assign(document.createElement('option'), {value:'',textContent:'\u2014'}));
     return;
@@ -38,8 +78,21 @@ function refreshImgOptions(p) {
     opt.value = keys[i]; opt.textContent = keys[i];
     p.imgSel.appendChild(opt);
   }
-  if (cur && imgSources[cur]) p.imgSel.value = cur;
+  if (cur && (imgKnown[cur] || imgSources[cur])) p.imgSel.value = cur;
   else p.imgSel.value = keys[0];
+}
+
+function setImgStreams(list) {
+  if (!Array.isArray(list)) return;
+  for (var i = 0; i < list.length; i++) {
+    if (typeof list[i] === 'string' && list[i]) imgKnown[list[i]] = true;
+  }
+  forEachPanel(function(p) {
+    if (p.type !== 'image') return;
+    refreshImgOptions(p);
+    showPanelImage(p);
+  });
+  scheduleImgSubscribe();
 }
 
 function initImagePanel(p) {
@@ -84,12 +137,14 @@ function initImagePanel(p) {
   p.imgEl.addEventListener('dragstart', function(e) { e.preventDefault(); });
 
   refreshImgOptions(p);
-  if (Object.keys(imgSources).length > 0) showPanelImage(p);
+  showPanelImage(p);
+  scheduleImgSubscribe();
 }
 
 function setImage(b64, meta) {
   var name = (meta && meta.name) ? meta.name : 'default';
   var now = Date.now();
+  imgKnown[name] = true;
 
   if (!imgFpsTracker[name]) imgFpsTracker[name] = [];
   imgFpsTracker[name].push(now);
@@ -116,7 +171,10 @@ Rdbg.registerPanel({
   setupHeader: function(p, hdr, typeSel) {
     var imgSel = document.createElement('select');
     imgSel.style.cssText = 'max-width:130px;margin-left:4px';
-    imgSel.onchange = function() { showPanelImage(p); };
+    imgSel.onchange = function() {
+      showPanelImage(p);
+      scheduleImgSubscribe();
+    };
     typeSel.insertAdjacentElement('afterend', imgSel);
     p.imgSel = imgSel;
     var fpsSpan = document.createElement('span');
@@ -136,6 +194,7 @@ Rdbg.registerPanel({
     p.imgDragging = false;
     if (p.imgSel) { p.imgSel.remove(); p.imgSel = null; }
     if (p.imgFps) { p.imgFps.remove(); p.imgFps = null; }
+    scheduleImgSubscribe();
   },
   reset: function(p) { resetImgView(p); }
 });

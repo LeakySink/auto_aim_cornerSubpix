@@ -48,6 +48,8 @@ class LiveSource:
         self._last_alive = {}
         self._lost_since = {}
         self._last_senders = []
+        self._img_streams = []
+        self._last_img_sub = 0.0
 
     def attach(self, shell):
         self.shell = shell
@@ -55,6 +57,7 @@ class LiveSource:
         shell.page("/", "watch.html")
         shell.sse_route("/events", on_connect=self.push_state)
         shell.route("/select", self._handle_select)
+        shell.route("/img_subscribe", self._handle_img_subscribe)
 
     def start(self):
         self._running = True
@@ -100,11 +103,49 @@ class LiveSource:
     def select(self, name):
         self._selected = name or ""
         self.udp.set_filter(self._selected)
+        self._push_img_subscribe(force=True)
         self.push_state()
 
     def _handle_select(self, handler):
         self.select(handler.query.get("sender", [""])[0])
         handler.send(200, b'{"ok":true}', "application/json")
+
+    def _handle_img_subscribe(self, handler):
+        raw = handler.query.get("streams", [""])[0]
+        streams = [s.strip() for s in raw.split(",") if s.strip()]
+        # dedupe preserve order
+        seen = set()
+        ordered = []
+        for s in streams:
+            if s not in seen:
+                seen.add(s)
+                ordered.append(s)
+        with self._lock:
+            self._img_streams = ordered
+        self._push_img_subscribe(force=True)
+        handler.send(
+            200,
+            json.dumps({"ok": True, "streams": ordered}).encode(),
+            "application/json",
+        )
+
+    def _push_img_subscribe(self, force=False):
+        now = time.monotonic()
+        if not force and now - self._last_img_sub < 1.0:
+            return
+        with self._lock:
+            streams = list(self._img_streams)
+            selected = self._selected
+            robots = dict(self.robots)
+        if not selected:
+            return
+        info = robots.get(selected)
+        if not info:
+            return
+        if now - info["last"] > BEACON_STALE_S:
+            return
+        self.client.img_subscribe(info["ip"], info["control"], streams)
+        self._last_img_sub = now
 
     def _is_head(self, robot):
         with self._lock:
@@ -175,6 +216,7 @@ class LiveSource:
         if info:
             self.client.head_alive(info["ip"], info["control"])
             self._last_alive[robot] = time.monotonic()
+        self._push_img_subscribe(force=True)
         self.push_state()
 
     def _follow(self, robot, head, queue):
@@ -237,3 +279,5 @@ class LiveSource:
                         self._lost_since[name] = now
                 else:
                     self._lost_since.pop(name, None)
+
+        self._push_img_subscribe(force=False)

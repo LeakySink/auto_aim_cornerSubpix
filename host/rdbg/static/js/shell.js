@@ -445,6 +445,10 @@ es.onmessage = function(e) {
     var snd = msg._from || (msg.data && msg.data._from) || (msg.meta && msg.meta._from) || '';
     if (msg.type === 'plot') { addPoint(msg.ts, msg.data || {}); setConnected(true, snd); }
     else if (msg.type === 'image') { setImage(msg.jpg_b64, msg.meta); setConnected(true, snd); }
+    else if (msg.type === 'img_streams') {
+      if (typeof setImgStreams === 'function') setImgStreams(msg.streams || []);
+      setConnected(true, snd);
+    }
     else if (msg.type === 'log') { addLog(msg.ts, msg.level, msg.msg); setConnected(true, snd); }
     else if (msg.type === 'status') { setConnected(msg.connected, msg.sender); }
     else if (msg.type === 'state') {

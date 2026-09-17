@@ -151,3 +151,12 @@ class RobotClient:
             "host_id": self.host_id,
             "peer_port": self.peer_port,
         })
+
+    def img_subscribe(self, ip, control_port, streams):
+        self._send(ip, control_port, {
+            "v": 1,
+            "type": "img_subscribe",
+            "host_id": self.host_id,
+            "peer_port": self.peer_port,
+            "streams": list(streams or []),
+        })
