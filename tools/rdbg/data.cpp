@@ -5,7 +5,8 @@
 #include "proto.hpp"
 
 #include <cstdio>
-#include <cstddef>
+#include <cstring>
+#include <sys/uio.h>
 
 namespace tools
 {
@@ -15,24 +16,24 @@ namespace rdbg
 namespace
 {
 
-void append_le16(std::vector<uint8_t> & out, uint16_t v)
+void put_le16(uint8_t * p, uint16_t v)
 {
-  out.push_back(static_cast<uint8_t>(v & 0xff));
-  out.push_back(static_cast<uint8_t>((v >> 8) & 0xff));
+  p[0] = static_cast<uint8_t>(v & 0xff);
+  p[1] = static_cast<uint8_t>((v >> 8) & 0xff);
 }
 
-void append_le32(std::vector<uint8_t> & out, uint32_t v)
+void put_le32(uint8_t * p, uint32_t v)
 {
-  out.push_back(static_cast<uint8_t>(v & 0xff));
-  out.push_back(static_cast<uint8_t>((v >> 8) & 0xff));
-  out.push_back(static_cast<uint8_t>((v >> 16) & 0xff));
-  out.push_back(static_cast<uint8_t>((v >> 24) & 0xff));
+  p[0] = static_cast<uint8_t>(v & 0xff);
+  p[1] = static_cast<uint8_t>((v >> 8) & 0xff);
+  p[2] = static_cast<uint8_t>((v >> 16) & 0xff);
+  p[3] = static_cast<uint8_t>((v >> 24) & 0xff);
 }
 
-void append_le64(std::vector<uint8_t> & out, uint64_t v)
+void put_le64(uint8_t * p, uint64_t v)
 {
   for (int i = 0; i < 8; ++i)
-    out.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
+    p[i] = static_cast<uint8_t>((v >> (8 * i)) & 0xff);
 }
 
 }  // namespace
@@ -49,25 +50,15 @@ void DataPlane::send_json(nlohmann::json j)
   ctrl_.send_to_head(payload.data(), payload.size());
 }
 
-void DataPlane::send_raw_json(uint64_t ts, const std::string & json_str)
+void DataPlane::send_raw_json(const std::string & json_str)
 {
-  try {
-    auto j = nlohmann::json::parse(json_str);
-    if (!j.contains("ts")) j["ts"] = ts;
-    send_json(std::move(j));
-  } catch (...) {
-    std::string payload = "{\"ts\":" + std::to_string(ts) + ",\"_from\":\"" +
-                          sender_ + "\",\"raw\":\"" + json_str + "\"}";
-    ctrl_.send_to_head(payload.data(), payload.size());
-  }
+  if (json_str.empty()) return;
+  ctrl_.send_to_head(json_str.data(), json_str.size());
 }
 
 void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
-                           const nlohmann::json & meta)
+                           const std::string & meta_str)
 {
-  auto jmeta = meta;
-  inject(jmeta);
-  std::string meta_str = jmeta.dump();
   if (meta_str.size() > 0xffff) {
     std::fprintf(stderr, "[RemoteLogger] image meta too large, skipped\n");
     return;
@@ -79,9 +70,7 @@ void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
 
   const uint16_t frame_seq = frame_seq_.fetch_add(1);
   const size_t from_len = sender_.size();
-  // Common: marker + ts + seq + idx + cnt + from_len + from
   const size_t common = 1 + 8 + 2 + 2 + 2 + 1 + from_len;
-  // Frag0 extra: meta_len + meta + jpg_total
   const size_t frag0_hdr = common + 2 + meta_str.size() + 4;
   if (frag0_hdr >= kUdpSafePayload) {
     std::fprintf(stderr, "[RemoteLogger] image header too large, skipped\n");
@@ -103,32 +92,53 @@ void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
   }
   const uint16_t frag_cnt = static_cast<uint16_t>(1 + extra);
 
+  // 头放栈上；JPEG 用 iovec 直接引用，不再拷进 packet 缓冲。
+  alignas(8) uint8_t hdr[kUdpSafePayload];
   size_t offset = 0;
   for (uint16_t idx = 0; idx < frag_cnt; ++idx) {
-    std::vector<uint8_t> pkt;
-    pkt.reserve(kUdpSafePayload);
-    pkt.push_back(kImgFragMarker);
-    append_le64(pkt, ts);
-    append_le16(pkt, frame_seq);
-    append_le16(pkt, idx);
-    append_le16(pkt, frag_cnt);
-    pkt.push_back(static_cast<uint8_t>(from_len));
-    pkt.insert(pkt.end(), sender_.begin(), sender_.end());
-
-    size_t cap = (idx == 0) ? frag0_cap : frag_n_cap;
-    if (idx == 0) {
-      append_le16(pkt, static_cast<uint16_t>(meta_str.size()));
-      pkt.insert(pkt.end(), meta_str.begin(), meta_str.end());
-      append_le32(pkt, static_cast<uint32_t>(jpg_size));
+    size_t h = 0;
+    hdr[h++] = kImgFragMarker;
+    put_le64(hdr + h, ts);
+    h += 8;
+    put_le16(hdr + h, frame_seq);
+    h += 2;
+    put_le16(hdr + h, idx);
+    h += 2;
+    put_le16(hdr + h, frag_cnt);
+    h += 2;
+    hdr[h++] = static_cast<uint8_t>(from_len);
+    if (from_len) {
+      std::memcpy(hdr + h, sender_.data(), from_len);
+      h += from_len;
     }
+
+    size_t cap = frag_n_cap;
+    if (idx == 0) {
+      put_le16(hdr + h, static_cast<uint16_t>(meta_str.size()));
+      h += 2;
+      if (!meta_str.empty()) {
+        std::memcpy(hdr + h, meta_str.data(), meta_str.size());
+        h += meta_str.size();
+      }
+      put_le32(hdr + h, static_cast<uint32_t>(jpg_size));
+      h += 4;
+      cap = frag0_cap;
+    }
+
     size_t remain = jpg_size - offset;
     size_t n = remain < cap ? remain : cap;
+    ::iovec iov[2];
+    int iovcnt = 1;
+    iov[0].iov_base = hdr;
+    iov[0].iov_len = h;
     if (n > 0) {
-      pkt.insert(pkt.end(), jpeg.begin() + static_cast<std::ptrdiff_t>(offset),
-                 jpeg.begin() + static_cast<std::ptrdiff_t>(offset + n));
+      iov[1].iov_base =
+        const_cast<uint8_t *>(jpeg.data() + offset);
+      iov[1].iov_len = n;
+      iovcnt = 2;
       offset += n;
     }
-    if (!ctrl_.send_to_head(pkt.data(), pkt.size())) return;
+    if (!ctrl_.send_to_head(iov, iovcnt)) return;
   }
 }
 

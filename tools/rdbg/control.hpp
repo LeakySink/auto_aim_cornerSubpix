@@ -46,6 +46,7 @@ public:
 
   bool has_head() const { return has_head_.load(); }
   bool send_to_head(const void * data, size_t len);
+  bool send_to_head(const struct iovec * iov, int iovcnt);
 
   // 任一台已入队 host 订阅的图像流并集；无人订阅则不发图 UDP。
   bool image_subscribed(const std::string & stream) const;

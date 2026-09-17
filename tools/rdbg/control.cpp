@@ -67,6 +67,14 @@ bool ControlPlane::send_to_head(const void * data, size_t len)
   return ctrl_.sendto(data, len, head_addr_);
 }
 
+bool ControlPlane::send_to_head(const struct iovec * iov, int iovcnt)
+{
+  if (!has_head_ || !ctrl_.valid()) return false;
+  std::lock_guard<std::mutex> lock(mtx_);
+  if (!has_head_) return false;
+  return ctrl_.sendmsg(iov, iovcnt, head_addr_);
+}
+
 bool ControlPlane::image_subscribed(const std::string & stream) const
 {
   std::lock_guard<std::mutex> lock(mtx_);

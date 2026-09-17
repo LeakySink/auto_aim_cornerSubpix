@@ -2,7 +2,9 @@
 #define TOOLS_RDBG_TRANSPORT_HPP
 
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +31,8 @@ public:
   ssize_t recvfrom_nb(void * buf, size_t len, sockaddr_in * from);
   bool sendto(const void * data, size_t len, const sockaddr_in & dest) const;
   bool sendto(const void * data, size_t len, in_addr ip, uint16_t port) const;
+  // 多段拼成一包 UDP，不把 payload 再拷进连续缓冲。
+  bool sendmsg(const struct iovec * iov, int iovcnt, const sockaddr_in & dest) const;
 
 private:
   int fd_{-1};

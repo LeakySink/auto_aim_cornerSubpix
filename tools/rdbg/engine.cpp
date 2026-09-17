@@ -76,11 +76,14 @@ void Engine::plot(const nlohmann::json & data)
 {
   if (!running_) return;
   uint64_t ts = now_ns();
-  if (data.contains("ts") && data["ts"].is_number()) ts = data["ts"].get<uint64_t>();
+  nlohmann::json j = data;
+  if (j.contains("ts") && j["ts"].is_number()) ts = j["ts"].get<uint64_t>();
+  else j["ts"] = ts;
+  if (!j.contains("_from")) j["_from"] = cfg_.sender_name;
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
     if (var_buf_.size() >= cfg_.var_buffer_size) var_buf_.erase(var_buf_.begin());
-    var_buf_.push_back({ts, data.dump()});
+    var_buf_.push_back({ts, j.dump()});
   }
   var_cv_.notify_one();
 }
@@ -146,16 +149,14 @@ void Engine::var_loop()
   std::vector<VarEntry> pending;
   auto flush = [&]() {
     if (pending.empty()) return;
-    if (cfg_.enable_local) {
-      std::vector<std::pair<uint64_t, std::string>> rec;
-      rec.reserve(pending.size());
-      for (const auto & e : pending) rec.push_back({e.ts, e.json_str});
-      session_.write_jsons(rec);
-    }
-    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
-      for (const auto & e : pending) data_.send_raw_json(e.ts, e.json_str);
-    }
+    std::vector<std::pair<uint64_t, std::string>> rec;
+    rec.reserve(pending.size());
+    for (auto & e : pending) rec.emplace_back(e.ts, std::move(e.json_str));
     pending.clear();
+    if (cfg_.enable_local) session_.write_jsons(rec);
+    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
+      for (const auto & e : rec) data_.send_raw_json(e.second);
+    }
   };
 
   while (running_) {
@@ -197,11 +198,12 @@ void Engine::img_loop()
 
     std::vector<uint8_t> jpeg;
     if (encode_jpeg(entry.img, cfg_.img_width, cfg_.img_quality, jpeg)) {
-      nlohmann::json meta = entry.meta;
+      nlohmann::json meta = std::move(entry.meta);
       data_.inject(meta);
       if (!meta.contains("ts")) meta["ts"] = entry.ts;
-      if (cfg_.enable_local) session_.write_image(entry.ts, meta, jpeg);
-      if (want_remote) data_.send_image(jpeg, entry.ts, entry.meta);
+      const std::string meta_str = meta.dump();
+      if (cfg_.enable_local) session_.write_image(entry.ts, meta_str, jpeg);
+      if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
     }
     entry.meta = nlohmann::json{};
     entry.img.release();
