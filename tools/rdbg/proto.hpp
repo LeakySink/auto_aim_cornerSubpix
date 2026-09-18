@@ -24,6 +24,7 @@ constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 50;
 constexpr int kCtrlWorkerPollMs = 200;
 constexpr uint32_t kImgCatalogIntervalMs = 1000;
+constexpr size_t kDiskQueueMax = 256;  // 落盘落后时丢最旧，不堵住发送
 constexpr size_t kMaxHosts = 32;
 
 }  // namespace rdbg

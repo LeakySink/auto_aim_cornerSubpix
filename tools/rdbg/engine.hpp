@@ -11,10 +11,12 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace tools
@@ -22,7 +24,7 @@ namespace tools
 namespace rdbg
 {
 
-// 把 L0–L3 拼起来：主线程只入队，三条 worker 各管一层。
+// 主线程只入队。发送与落盘分开：var/img 先 UDP，disk_worker 异步写 .rlog。
 class Engine
 {
 public:
@@ -39,9 +41,20 @@ private:
     std::string json_str;
   };
 
+  struct DiskJob
+  {
+    bool image{false};
+    uint64_t ts{0};
+    std::string meta;
+    std::vector<uint8_t> jpeg;
+    std::vector<std::pair<uint64_t, std::string>> jsons;
+  };
+
   void var_loop();
   void img_loop();
   void ctrl_loop();
+  void disk_loop();
+  void enqueue_disk(DiskJob job);
   void note_stream(const std::string & name);
   void maybe_send_catalog();
   static std::string resolve_sender(const std::string & name);
@@ -65,9 +78,15 @@ private:
   std::unordered_set<std::string> known_streams_;
   std::chrono::steady_clock::time_point last_catalog_{};
 
+  std::deque<DiskJob> disk_q_;
+  std::mutex disk_mtx_;
+  std::condition_variable disk_cv_;
+  std::atomic<bool> disk_open_{false};
+
   std::thread var_worker_;
   std::thread img_worker_;
   std::thread ctrl_worker_;
+  std::thread disk_worker_;
   std::chrono::steady_clock::time_point last_hb_{};
 };
 

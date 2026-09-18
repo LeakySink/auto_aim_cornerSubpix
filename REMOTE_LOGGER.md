@@ -142,7 +142,7 @@ frag n: [chunk]
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG；`enable_local` 时用 `writev` 直写 `.rlog`（不再经 `FILE` 二次缓冲）；仅当该流被 host 订阅时再以 `sendmsg` 分片 UDP（JPEG 零拷贝进包）。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG。**先** `sendmsg` 分片 UDP（仅已订阅流），**再**把记录丢进落盘队列。`disk_worker` 用 `writev` 异步写 `.rlog`，不挡住发送；队列超过 256 条则丢掉最旧的。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 
@@ -166,23 +166,24 @@ type 0x01 image:
 
 ## 线程模型
 
-三条后台路径；本地会话与线上控制/数据解耦。
+四条后台路径。发送与落盘分开：`var_worker` / `img_worker` 先 UDP，`disk_worker` 延后写盘。
 
 ```
-主线程                         img_worker             var_worker        ctrl_worker
+主线程                         img_worker             var_worker        disk_worker
 ──────                         ──────────             ──────────        ───────────
 plot_image
   按 name 未到 30Hz → return
-  入选 → clone → mailbox(1) ──► JPEG
-                               session + data
-plot/log → var_buf  ──────────────────────────────► session + data（仅队首）
-shutdown → join                                     JSON              transport+control
+  入选 → clone → mailbox(1) ──► JPEG → UDP（订阅才发）
+                               └──────────────► 队列 → .rlog
+plot/log → var_buf  ──────────────────────────► UDP
+                               └──────────────► 队列 → .rlog
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
-| `var_worker` | JSON → `session` + `data` | `plot()` notify；空闲 poll 50ms |
-| `img_worker` | 邮箱 → JPEG → `session` + `data` | 入选帧 publish；空闲 poll 50ms |
+| `var_worker` | JSON → 先 UDP，再入落盘队列 | `plot()` notify；空闲 poll 50ms |
+| `img_worker` | 邮箱 → JPEG → 先 UDP，再入落盘队列 | 入选帧 publish；空闲 poll 50ms |
+| `disk_worker` | 队列 → `.rlog`（可落后，满则丢最旧） | 入队 notify |
 | `ctrl_worker` | `control`：beacon、队列、队首超时 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。

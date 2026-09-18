@@ -53,6 +53,8 @@ void Engine::init(const RemoteLogger::Config & cfg)
   if (cfg_.enable_remote) remote_ok_ = control_.start();
 
   running_ = true;
+  disk_open_ = cfg_.enable_local;
+  if (disk_open_) disk_worker_ = std::thread(&Engine::disk_loop, this);
   if (remote_ok_) ctrl_worker_ = std::thread(&Engine::ctrl_loop, this);
   var_worker_ = std::thread(&Engine::var_loop, this);
   img_worker_ = std::thread(&Engine::img_loop, this);
@@ -67,6 +69,9 @@ void Engine::shutdown()
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
+  disk_open_ = false;
+  disk_cv_.notify_all();
+  if (disk_worker_.joinable()) disk_worker_.join();
   control_.stop();
   remote_ok_ = false;
   session_.close();
@@ -153,9 +158,13 @@ void Engine::var_loop()
     rec.reserve(pending.size());
     for (auto & e : pending) rec.emplace_back(e.ts, std::move(e.json_str));
     pending.clear();
-    if (cfg_.enable_local) session_.write_jsons(rec);
     if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
       for (const auto & e : rec) data_.send_raw_json(e.second);
+    }
+    if (cfg_.enable_local) {
+      DiskJob job;
+      job.jsons = std::move(rec);
+      enqueue_disk(std::move(job));
     }
   };
 
@@ -202,13 +211,48 @@ void Engine::img_loop()
       data_.inject(meta);
       if (!meta.contains("ts")) meta["ts"] = entry.ts;
       const std::string meta_str = meta.dump();
-      if (cfg_.enable_local) session_.write_image(entry.ts, meta_str, jpeg);
       if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
+      if (cfg_.enable_local) {
+        DiskJob job;
+        job.image = true;
+        job.ts = entry.ts;
+        job.meta = meta_str;
+        job.jpeg = std::move(jpeg);
+        enqueue_disk(std::move(job));
+      }
     }
     entry.meta = nlohmann::json{};
     entry.img.release();
   }
   mailbox_.clear();
+}
+
+void Engine::enqueue_disk(DiskJob job)
+{
+  if (!disk_open_) return;
+  {
+    std::lock_guard<std::mutex> lock(disk_mtx_);
+    if (!disk_open_) return;
+    if (disk_q_.size() >= kDiskQueueMax) disk_q_.pop_front();
+    disk_q_.push_back(std::move(job));
+  }
+  disk_cv_.notify_one();
+}
+
+void Engine::disk_loop()
+{
+  while (true) {
+    DiskJob job;
+    {
+      std::unique_lock<std::mutex> lock(disk_mtx_);
+      disk_cv_.wait(lock, [&] { return !disk_q_.empty() || !disk_open_.load(); });
+      if (disk_q_.empty()) break;
+      job = std::move(disk_q_.front());
+      disk_q_.pop_front();
+    }
+    if (job.image) session_.write_image(job.ts, job.meta, job.jpeg);
+    else if (!job.jsons.empty()) session_.write_jsons(job.jsons);
+  }
 }
 
 void Engine::ctrl_loop()
