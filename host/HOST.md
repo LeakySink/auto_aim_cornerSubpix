@@ -30,6 +30,9 @@ Unix：
 ```bash
 ./host/watch.sh                          # http://localhost:8080  数据口 15001
 ./host/replay.sh logs/run_xxx.rlog       # 默认 http://127.0.0.1:8765
+./host/netcheck.sh discover              # 听车上 beacon
+./host/netcheck.sh echo --port 15050     # 一台开回显
+./host/netcheck.sh ping <IP> --size 1200 # 另一台测丢包/RTT（可再试 --size 20000）
 ```
 
 Windows：
