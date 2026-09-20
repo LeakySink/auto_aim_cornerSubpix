@@ -1,5 +1,6 @@
-// Replay driver — uses watch (shell.js) globals, does not change that file.
+// Replay driver — 全量显示曲线/日志；当前时刻用竖线/高亮；点击可跳转。
 (function() {
+  window.REPLAY_MODE = true;
   var duration = 0;
   var t0ns = 0;
   var currentT = 0;
@@ -11,15 +12,18 @@
   var plots = [];
   var logs = [];
   var frames = [];
-  var plotIdx = 0;
-  var logIdx = 0;
   var fileName = 'replay';
   var jpegB64 = [];
   var inflight = {};
   var lastImg = {};
+  var dataLoaded = false;
 
   function tsOf(t) {
     return t0ns + Math.round(t * 1e9);
+  }
+
+  function tOfTs(ts) {
+    return (ts - t0ns) / 1e9;
   }
 
   function fmt(t) {
@@ -96,54 +100,47 @@
     });
   }
 
-  function emitForward(toT) {
-    if (typeof firstTs !== 'undefined' && firstTs === null) firstTs = t0ns;
-    while (plotIdx < plots.length && plots[plotIdx].t <= toT) {
-      addPoint(tsOf(plots[plotIdx].t), plots[plotIdx].data);
-      plotIdx++;
-    }
-    while (logIdx < logs.length && logs[logIdx].t <= toT) {
-      addLog(logs[logIdx].ts || tsOf(logs[logIdx].t), logs[logIdx].level, logs[logIdx].msg);
-      logIdx++;
-    }
-    applyImages(toT);
-    keepAlive();
-  }
-
-  function rebuildTo(t) {
+  /** 一次性载入全部曲线与日志（含当前时刻之后），之后只移动游标。 */
+  function loadAllData() {
     plotData = [];
     firstTs = t0ns;
     lastX = 0;
+    fieldMeta = {};
+    colorIdx = 0;
     logBuffer = [];
-    plotIdx = 0;
-    logIdx = 0;
-    lastImg = {};
-    while (plotIdx < plots.length && plots[plotIdx].t <= t) {
-      var p = plots[plotIdx];
+
+    for (var i = 0; i < plots.length; i++) {
+      var p = plots[i];
       var pt = { x: p.t, fields: {} };
       for (var k in p.data) {
-        if (typeof ensureField === 'function') ensureField(k);
+        if (typeof p.data[k] !== 'number') continue;
+        ensureField(k);
         pt.fields[k] = p.data[k];
       }
       plotData.push(pt);
       lastX = p.t;
-      plotIdx++;
     }
-    while (logIdx < logs.length && logs[logIdx].t <= t) {
+    if (duration > lastX) lastX = duration;
+
+    for (var j = 0; j < logs.length; j++) {
       logBuffer.push({
-        ts: logs[logIdx].ts || tsOf(logs[logIdx].t),
-        level: logs[logIdx].level,
-        msg: logs[logIdx].msg,
+        ts: logs[j].ts || tsOf(logs[j].t),
+        level: logs[j].level,
+        msg: logs[j].msg,
       });
-      logIdx++;
     }
-    if (typeof LOG_CAP === 'number') {
-      while (logBuffer.length > LOG_CAP) logBuffer.shift();
-    }
+
     if (typeof rebuildAllCharts === 'function') rebuildAllCharts();
     if (typeof refreshAllLogPanels === 'function') refreshAllLogPanels();
-    applyImages(t);
+    dataLoaded = true;
     keepAlive();
+  }
+
+  function updateCursor(t) {
+    if (typeof setReplayCursor === 'function') setReplayCursor(t);
+    if (typeof setReplayLogCursor === 'function') setReplayLogCursor(tsOf(t));
+    if (typeof lastX !== 'undefined') lastX = t;
+    if (typeof updateAllCharts === 'function') updateAllCharts();
   }
 
   function updateScrub() {
@@ -157,9 +154,10 @@
 
   function seek(t, fromScrub) {
     t = Math.max(0, Math.min(duration, t));
-    if (t < currentT - 1e-4) rebuildTo(t);
-    else emitForward(t);
     currentT = t;
+    updateCursor(t);
+    applyImages(t);
+    keepAlive();
     if (playing) {
       playWall0 = performance.now();
       playT0 = currentT;
@@ -170,6 +168,16 @@
       if (label) label.textContent = fmt(currentT) + ' / ' + fmt(duration) + ' s';
     }
   }
+
+  window.replaySeek = function(tSec) {
+    if (playing) setPlaying(false);
+    seek(tSec, false);
+  };
+
+  window.replaySeekByTs = function(tsNs) {
+    if (playing) setPlaying(false);
+    seek(tOfTs(tsNs), false);
+  };
 
   function setPlaying(on) {
     playing = !!on;
@@ -189,16 +197,15 @@
     var dt = (now - playWall0) / 1000 * speed;
     var t = playT0 + dt;
     if (t >= duration) {
-      currentT = duration;
-      emitForward(duration);
-      updateScrub();
+      seek(duration, false);
       setPlaying(false);
       return;
     }
-    var prev = currentT;
     currentT = t;
-    emitForward(currentT);
+    updateCursor(currentT);
+    applyImages(currentT);
     updateScrub();
+    keepAlive();
     rafId = requestAnimationFrame(tick);
   }
 
@@ -271,6 +278,7 @@
       if (st) st.textContent = '回放';
 
       keepAlive();
+      loadAllData();
       seek(0, false);
       applyImages(0);
       if (frames.length && Object.keys(latestImages(0)).length === 0) {
@@ -295,5 +303,10 @@
     }
   }
 
-  init();
+  // 面板晚于 replay.js 创建时，等 shell 建好默认面板后再灌数据
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(init, 0); });
+  } else {
+    setTimeout(init, 0);
+  }
 })();

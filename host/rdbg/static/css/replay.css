@@ -10,3 +10,4 @@
 #replay-bar .hint{text-align:center;color:#505060;font-size:11px;margin-top:2px}
 #replay-time{font-variant-numeric:tabular-nums;min-width:130px}
 #replay-play{min-width:36px}
+/* 曲线当前时刻竖线由 Chart 插件绘制；日志见 .log-current / .log-progress */

@@ -2,6 +2,8 @@
 var LOG_CAP = 500;
 var logBuffer = [];
 var logLevelOn = { DEBUG: true, INFO: true, WARN: true, ERROR: true };
+var replayLogCursorTs = null;  // ns; null = no cursor highlight
+var replayLogLastIdx = -1;
 
 function normLogLevel(lv) {
   lv = String(lv || 'INFO').toUpperCase();
@@ -50,10 +52,18 @@ function makeLogLine(entry) {
   div.className = 'log-line';
   var lv = normLogLevel(entry.level);
   var msg = String(entry.msg == null ? '' : entry.msg);
+  div.dataset.ts = String(entry.ts);
   div.innerHTML = '<span class="log-ts">' + formatLogTs(entry.ts) +
     '</span><span class="log-lv ' + lv + '">' + lv +
     '</span><span class="log-msg"></span>';
   div.querySelector('.log-msg').textContent = msg;
+  if (typeof window.replaySeekByTs === 'function') {
+    div.classList.add('log-clickable');
+    div.title = '跳转到此时刻';
+    div.onclick = function() {
+      window.replaySeekByTs(Number(div.dataset.ts));
+    };
+  }
   return div;
 }
 
@@ -61,31 +71,103 @@ function isLogStuckToBottom(el) {
   return el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
 }
 
+function visibleLogEntries() {
+  var out = [];
+  for (var i = 0; i < logBuffer.length; i++) {
+    if (logLevelVisible(logBuffer[i].level)) out.push(logBuffer[i]);
+  }
+  return out;
+}
+
+function findCurrentLogIndex(entries, cursorTs) {
+  if (cursorTs == null || !entries.length) return -1;
+  var lo = 0, hi = entries.length - 1, ans = -1;
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1;
+    if (entries[mid].ts <= cursorTs) { ans = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return ans;
+}
+
+function updateLogProgress(p, curIdx, total) {
+  if (!p.logProgressThumb) return;
+  if (total <= 1 || curIdx < 0) {
+    p.logProgressThumb.style.top = '0%';
+    return;
+  }
+  var pct = (curIdx / (total - 1)) * 100;
+  p.logProgressThumb.style.top = pct + '%';
+}
+
 function replayLogsToPanel(p, stickBottom) {
   if (!p.logDiv) return;
+  var stick = stickBottom === true || (stickBottom !== false && isLogStuckToBottom(p.logDiv));
   p.logDiv.innerHTML = '';
-  var n = 0;
-  for (var i = 0; i < logBuffer.length; i++) {
-    if (!logLevelVisible(logBuffer[i].level)) continue;
-    p.logDiv.appendChild(makeLogLine(logBuffer[i]));
-    n++;
+  var entries = visibleLogEntries();
+  var curIdx = findCurrentLogIndex(entries, replayLogCursorTs);
+  var currentEl = null;
+  for (var i = 0; i < entries.length; i++) {
+    var line = makeLogLine(entries[i]);
+    if (i === curIdx) {
+      line.classList.add('log-current');
+      currentEl = line;
+    }
+    p.logDiv.appendChild(line);
   }
-  p.logCount.textContent = n ? String(n) : '';
-  if (stickBottom !== false) p.logDiv.scrollTop = p.logDiv.scrollHeight;
+  p.logCount.textContent = entries.length ? String(entries.length) : '';
+  updateLogProgress(p, curIdx, entries.length);
+  if (window.REPLAY_MODE && currentEl) {
+    currentEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  } else if (stick) {
+    p.logDiv.scrollTop = p.logDiv.scrollHeight;
+  }
+}
+
+function setReplayLogCursor(tsNs) {
+  replayLogCursorTs = (tsNs == null || !isFinite(tsNs)) ? null : tsNs;
+  var entries = visibleLogEntries();
+  var curIdx = findCurrentLogIndex(entries, replayLogCursorTs);
+  var moved = curIdx !== replayLogLastIdx;
+  replayLogLastIdx = curIdx;
+  forEachPanel(function(p) {
+    if (p.type !== 'log' || !p.logDiv) return;
+    var kids = p.logDiv.children;
+    // 若过滤后行数与 buffer 可见数不一致则整表重建
+    if (kids.length !== entries.length) {
+      replayLogsToPanel(p, false);
+      return;
+    }
+    var currentEl = null;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].classList.toggle('log-current', i === curIdx);
+      if (i === curIdx) currentEl = kids[i];
+    }
+    updateLogProgress(p, curIdx, kids.length);
+    if (moved && currentEl) {
+      currentEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+    }
+  });
 }
 
 function refreshAllLogPanels() {
   forEachPanel(function(p) {
-    if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, true);
+    if (p.type === 'log' && p.logDiv) replayLogsToPanel(p, !window.REPLAY_MODE);
   });
 }
 
 function addLog(ts, level, msg) {
   logBuffer.push({ ts: ts, level: level, msg: msg });
-  while (logBuffer.length > LOG_CAP) logBuffer.shift();
+  if (!window.REPLAY_MODE) {
+    while (logBuffer.length > LOG_CAP) logBuffer.shift();
+  }
   var visible = logLevelVisible(level);
   forEachPanel(function(p) {
     if (p.type !== 'log' || !p.logDiv) return;
+    if (window.REPLAY_MODE) {
+      replayLogsToPanel(p, false);
+      return;
+    }
     var stick = isLogStuckToBottom(p.logDiv);
     if (visible) p.logDiv.appendChild(makeLogLine({ ts: ts, level: level, msg: msg }));
     while (p.logDiv.children.length > LOG_CAP) p.logDiv.firstChild.remove();
@@ -119,6 +201,29 @@ function setupLogBody(p, body) {
   body.appendChild(logs);
   p.logDiv = logs;
   p.logCount = lc;
+
+  if (window.REPLAY_MODE) {
+    var track = document.createElement('div');
+    track.className = 'log-progress';
+    track.title = '日志时间进度（点击跳转）';
+    var thumb = document.createElement('div');
+    thumb.className = 'log-progress-thumb';
+    track.appendChild(thumb);
+    body.appendChild(track);
+    p.logProgress = track;
+    p.logProgressThumb = thumb;
+    track.onclick = function(e) {
+      if (typeof window.replaySeek !== 'function') return;
+      var rect = track.getBoundingClientRect();
+      var ratio = (e.clientY - rect.top) / Math.max(1, rect.height);
+      ratio = Math.max(0, Math.min(1, ratio));
+      var entries = visibleLogEntries();
+      if (!entries.length) return;
+      var idx = Math.round(ratio * (entries.length - 1));
+      window.replaySeekByTs(entries[idx].ts);
+    };
+  }
+
   replayLogsToPanel(p, true);
 }
 

@@ -61,6 +61,9 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 .splitter-v{width:3px;cursor:col-resize}
 
 .log-line{padding:0 8px;display:flex;gap:8px;font-size:13px;line-height:1.5;align-items:flex-start}
+.log-line.log-clickable{cursor:pointer}
+.log-line.log-clickable:hover{background:#1c1c28}
+.log-line.log-current{background:#2a2218;box-shadow:inset 3px 0 0 #ff7043}
 .log-ts{color:#404050;flex-shrink:0}
 .log-lv{flex-shrink:0;font-weight:bold;min-width:48px}
 .log-lv.INFO{color:#80b0e0}
@@ -68,3 +71,12 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 .log-lv.ERROR,.log-lv.FATAL{color:#e04a4a}
 .log-lv.DEBUG{color:#505060}
 .log-msg{overflow-wrap:anywhere;word-break:break-word}
+.log-body{position:relative}
+.log-progress{
+  position:absolute;top:28px;right:2px;bottom:4px;width:6px;z-index:2;
+  background:#16161e;border-radius:3px;cursor:pointer
+}
+.log-progress-thumb{
+  position:absolute;left:0;right:0;height:10px;margin-top:-5px;
+  background:#ff7043;border-radius:3px;pointer-events:none
+}

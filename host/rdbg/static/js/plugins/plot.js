@@ -2,9 +2,47 @@
 const COLORS = ['#4fc3f7','#ffb74d','#81c784','#e57373','#ba68c8','#4dd0e1','#fff176','#a1887f','#90a4ae','#f48fb1','#ef5350','#26c6da','#7e57c2','#66bb6a','#ff7043'];
 var fieldMeta = {}, colorIdx = 0, xField = 'ts', firstTs = null, lastX = 0;
 var plotData = [], activePanelId = null;
+var replayCursorX = null;  // seconds; null = watch 模式不画竖线
 const MAX_PTS = 50000;
 
 function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
+
+var replayCursorPlugin = {
+  id: 'replayCursor',
+  afterDraw: function(chart) {
+    if (replayCursorX == null || !isFinite(replayCursorX)) return;
+    var xScale = chart.scales.x;
+    if (!xScale) return;
+    var x = xScale.getPixelForValue(replayCursorX);
+    var area = chart.chartArea;
+    if (x < area.left || x > area.right) return;
+    var ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, area.top);
+    ctx.lineTo(x, area.bottom);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ff7043';
+    ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, area.top);
+    ctx.lineTo(x - 4, area.top - 5);
+    ctx.lineTo(x + 4, area.top - 5);
+    ctx.closePath();
+    ctx.fillStyle = '#ff7043';
+    ctx.fill();
+    ctx.restore();
+  }
+};
+if (typeof Chart !== 'undefined' && Chart.register) Chart.register(replayCursorPlugin);
+
+function setReplayCursor(tSec) {
+  replayCursorX = (tSec == null || !isFinite(tSec)) ? null : tSec;
+  forEachPanel(function(p) {
+    if (p.type === 'plot' && p.chart) p.chart.update('none');
+  });
+}
 
 function getPanelById(id) {
   return panelMap[id] || null;
@@ -137,15 +175,19 @@ function pushDataToPanel(p) {
     var ds = p.chart.data.datasets[i];
     var yv = last.fields[ds.label];
     ds.data.push({ x: last.x, y: yv !== undefined ? yv : NaN });
-    while (ds.data.length > 1 && ds.data[0].x < last.x - history) ds.data.shift();
-    if (ds.data.length > MAX_PTS) ds.data.splice(0, ds.data.length - MAX_PTS);
+    if (!window.REPLAY_MODE) {
+      while (ds.data.length > 1 && ds.data[0].x < last.x - history) ds.data.shift();
+      if (ds.data.length > MAX_PTS) ds.data.splice(0, ds.data.length - MAX_PTS);
+    }
   }
   renderLegend(p);
   updatePanelView(p);
 }
 
 function updatePanelView(p) {
-  if (!p.chart || lastX === 0) return;
+  if (!p.chart) return;
+  var followX = (replayCursorX != null && isFinite(replayCursorX)) ? replayCursorX : lastX;
+  if (followX == null || (!followX && followX !== 0)) return;
   if (p.manualView) { p.chart.update('none'); return; }
   var modeEl = document.querySelector('input[name="mode"]:checked');
   var mode = modeEl ? modeEl.value : 'sliding';
@@ -153,11 +195,11 @@ function updatePanelView(p) {
   var win = parseFloat(winEl && winEl.value) || 10;
   if (mode === 'paused') { p.chart.update('none'); return; }
   else if (mode === 'centered') {
-    p.chart.options.scales.x.min = lastX - win / 2;
-    p.chart.options.scales.x.max = lastX + win / 2;
+    p.chart.options.scales.x.min = followX - win / 2;
+    p.chart.options.scales.x.max = followX + win / 2;
   } else {
-    p.chart.options.scales.x.min = Math.max(0, lastX - win);
-    p.chart.options.scales.x.max = Math.max(win, lastX);
+    p.chart.options.scales.x.min = Math.max(0, followX - win);
+    p.chart.options.scales.x.max = Math.max(win, followX);
   }
   p.chart.update('none');
 }
@@ -184,14 +226,17 @@ function addPoint(ts, data) {
     pt.fields[k] = data[k];
   }
   plotData.push(pt);
-  var history = parseFloat(document.getElementById('history-sel').value);
-  while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
-  if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
+  if (!window.REPLAY_MODE) {
+    var history = parseFloat(document.getElementById('history-sel').value);
+    while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
+    if (plotData.length > MAX_PTS) plotData.splice(0, plotData.length - MAX_PTS);
+  }
 
   forEachPanel(function(p) { pushDataToPanel(p); });
 }
 
 function trimData() {
+  if (window.REPLAY_MODE) return;
   var history = parseFloat(document.getElementById('history-sel').value);
   if (lastX === 0) return;
   while (plotData.length > 1 && plotData[0].x < lastX - history) plotData.shift();
@@ -224,6 +269,13 @@ function initPlotPanel(p) {
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: 'nearest', intersect: false },
+      onClick: function(evt, _els, chart) {
+        if (typeof window.replaySeek !== 'function') return;
+        var xScale = chart.scales.x;
+        if (!xScale || !evt || evt.x == null) return;
+        var t = xScale.getValueForPixel(evt.x);
+        if (t != null && isFinite(t)) window.replaySeek(t);
+      },
       plugins: {
         legend: { display: false },
         zoom: {

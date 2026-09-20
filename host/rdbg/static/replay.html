@@ -8,10 +8,11 @@
 <script src="/static/vendor/hammer.min.js"></script>
 <script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
 
-<link rel="stylesheet" href="/static/css/shell.css?v=8">
-<link rel="stylesheet" href="/static/css/replay.css?v=1">
+<link rel="stylesheet" href="/static/css/shell.css?v=9">
+<link rel="stylesheet" href="/static/css/replay.css?v=2">
 </head>
 <body>
+<script>window.REPLAY_MODE = true;</script>
 
 <div id="sidebar">
   <button id="sidebar-toggle" title="Toggle sidebar">◀</button>
@@ -65,15 +66,15 @@
   </div>
   <div id="replay-bar">
     <input type="range" id="replay-scrub" min="0" max="1000" value="0" step="1">
-    <div class="hint">拖动进度条 · 空格播放 · ← → 步进 · 面板可拆分、图像可切换 name</div>
+    <div class="hint">全量曲线/日志 · 橙线=当前时刻 · 点击曲线或日志跳转 · 空格播放 · ← → 步进</div>
   </div>
 </div>
 
 <script src="/static/js/registry.js?v=1"></script>
-<script src="/static/js/plugins/plot.js?v=1"></script>
+<script src="/static/js/plugins/plot.js?v=2"></script>
 <script src="/static/js/plugins/image.js?v=1"></script>
-<script src="/static/js/plugins/log.js?v=1"></script>
+<script src="/static/js/plugins/log.js?v=2"></script>
 <script src="/static/js/shell.js?v=8"></script>
-<script src="/static/js/replay.js?v=1"></script>
+<script src="/static/js/replay.js?v=2"></script>
 </body>
 </html>
