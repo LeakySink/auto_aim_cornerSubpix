@@ -3,6 +3,7 @@
 #include "clock.hpp"
 #include "proto.hpp"
 
+#include <cerrno>
 #include <cstdio>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -25,9 +26,11 @@ void Session::close()
 {
   std::lock_guard<std::mutex> lock(mtx_);
   if (fd_ < 0) return;
+  sync_locked(true);
   ::close(fd_);
   fd_ = -1;
   path_.clear();
+  last_sync_ = {};
 }
 
 bool Session::ensure_file()
@@ -49,6 +52,7 @@ bool Session::ensure_file()
     path_.clear();
     return false;
   }
+  last_sync_ = {};
   std::fprintf(stderr, "[RemoteLogger] local session %s\n", path_.c_str());
   return true;
 }
@@ -60,6 +64,27 @@ bool Session::writev_all(const struct ::iovec * iov, int iovcnt)
   for (int i = 0; i < iovcnt; ++i) total += iov[i].iov_len;
   ssize_t n = ::writev(fd_, iov, iovcnt);
   return n >= 0 && static_cast<size_t>(n) == total;
+}
+
+void Session::sync_locked(bool force)
+{
+  if (fd_ < 0) return;
+  auto now = std::chrono::steady_clock::now();
+  if (!force && last_sync_.time_since_epoch().count() != 0) {
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sync_);
+    if (ms.count() < static_cast<int64_t>(kDiskSyncIntervalMs)) return;
+  }
+  if (::fdatasync(fd_) != 0) {
+    std::fprintf(stderr, "[RemoteLogger] fdatasync failed errno=%d\n", errno);
+    return;
+  }
+  last_sync_ = now;
+}
+
+void Session::sync(bool force)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  sync_locked(force);
 }
 
 void Session::write_json(uint64_t ts, const std::string & json)
@@ -114,7 +139,7 @@ void Session::write_image(uint64_t ts, const std::string & meta_json,
   iov[5].iov_base = const_cast<uint8_t *>(jpeg.data());
   iov[5].iov_len = jpeg.size();
   if (!writev_all(iov, 6)) {
-      std::fprintf(stderr, "[RemoteLogger] Failed to write img record\n");
+    std::fprintf(stderr, "[RemoteLogger] Failed to write img record\n");
   }
 }
 

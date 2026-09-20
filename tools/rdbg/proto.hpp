@@ -20,6 +20,7 @@ constexpr size_t kSessionIoBuf = 256 * 1024;
 constexpr int kImgSaveFps = 30;
 constexpr uint64_t kImgSavePeriodNs = 1000000000ULL / kImgSaveFps;
 constexpr uint32_t kSessionFlushMs = 200;
+constexpr uint32_t kDiskSyncIntervalMs = 1000;  // 周期刷到介质，异常退出最多丢约 1s
 constexpr int kVarWorkerPollMs = 50;
 constexpr int kImgWorkerPollMs = 50;
 constexpr int kCtrlWorkerPollMs = 200;

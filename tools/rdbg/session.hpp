@@ -1,6 +1,7 @@
 #ifndef TOOLS_RDBG_SESSION_HPP
 #define TOOLS_RDBG_SESSION_HPP
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -20,20 +21,25 @@ class Session
 {
 public:
   void open(const std::string & log_dir);
-  void close();
+  void close();  // 关闭前 force sync
   void write_json(uint64_t ts, const std::string & json);
   void write_jsons(const std::vector<std::pair<uint64_t, std::string>> & entries);
   void write_image(uint64_t ts, const std::string & meta_json,
                    const std::vector<uint8_t> & jpeg);
 
+  // force=true 立刻 fdatasync；false 则按 kDiskSyncIntervalMs 节流。
+  void sync(bool force = true);
+
 private:
   bool ensure_file();  // 已持有 mtx_
   bool writev_all(const struct ::iovec * iov, int iovcnt);
+  void sync_locked(bool force);  // 已持有 mtx_
 
   std::mutex mtx_;
   std::string log_dir_;
   std::string path_;
   int fd_{-1};
+  std::chrono::steady_clock::time_point last_sync_{};
 };
 
 }  // namespace rdbg
