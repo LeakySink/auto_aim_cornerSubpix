@@ -180,6 +180,7 @@ void Engine::var_loop()
     if (cfg_.enable_local) {
       DiskJob job;
       job.prio = prio;
+      job.urgent = (prio >= 3);
       job.jsons = std::move(rec);
       enqueue_disk(std::move(job));
     }
@@ -278,8 +279,8 @@ void Engine::disk_loop()
     }
     if (job.image) session_.write_image(job.ts, job.meta, job.jpeg);
     else if (!job.jsons.empty()) session_.write_jsons(job.jsons);
-    // 节流 fdatasync：kill -9 / 掉电时最多丢约 1s
-    session_.sync(false);
+    if (job.urgent) session_.sync(true);
+    else session_.sync(false);
   }
   session_.sync(true);
 }
