@@ -85,12 +85,24 @@ void Engine::plot(const nlohmann::json & data)
   if (j.contains("ts") && j["ts"].is_number()) ts = j["ts"].get<uint64_t>();
   else j["ts"] = ts;
   if (!j.contains("_from")) j["_from"] = cfg_.sender_name;
+  uint8_t prio = 1;
+  if (j.contains("level") && j["level"].is_string())
+    prio = level_prio(j["level"].get<std::string>());
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
     if (var_buf_.size() >= cfg_.var_buffer_size) var_buf_.erase(var_buf_.begin());
-    var_buf_.push_back({ts, j.dump()});
+    var_buf_.push_back({ts, j.dump(), prio});
   }
   var_cv_.notify_one();
+}
+
+uint8_t Engine::level_prio(const std::string & level)
+{
+  if (level == "ERROR" || level == "error" || level == "FATAL" || level == "fatal")
+    return 3;
+  if (level == "WARN" || level == "warn" || level == "WARNING" || level == "warning")
+    return 2;
+  return 1;
 }
 
 void Engine::log(const std::string & level, const std::string & msg)
@@ -156,13 +168,18 @@ void Engine::var_loop()
     if (pending.empty()) return;
     std::vector<std::pair<uint64_t, std::string>> rec;
     rec.reserve(pending.size());
-    for (auto & e : pending) rec.emplace_back(e.ts, std::move(e.json_str));
+    uint8_t prio = 1;
+    for (auto & e : pending) {
+      if (e.prio > prio) prio = e.prio;
+      rec.emplace_back(e.ts, std::move(e.json_str));
+    }
     pending.clear();
     if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
       for (const auto & e : rec) data_.send_raw_json(e.second);
     }
     if (cfg_.enable_local) {
       DiskJob job;
+      job.prio = prio;
       job.jsons = std::move(rec);
       enqueue_disk(std::move(job));
     }
@@ -215,6 +232,7 @@ void Engine::img_loop()
       if (cfg_.enable_local) {
         DiskJob job;
         job.image = true;
+        job.prio = 0;
         job.ts = entry.ts;
         job.meta = meta_str;
         job.jpeg = std::move(jpeg);
@@ -233,7 +251,15 @@ void Engine::enqueue_disk(DiskJob job)
   {
     std::lock_guard<std::mutex> lock(disk_mtx_);
     if (!disk_open_) return;
-    if (disk_q_.size() >= kDiskQueueMax) disk_q_.pop_front();
+    while (disk_q_.size() >= kDiskQueueMax) {
+      // 丢最低优先级；同级丢最旧。图像(0) < normal(1) < warn(2) < error(3)
+      auto victim = disk_q_.begin();
+      for (auto it = disk_q_.begin(); it != disk_q_.end(); ++it) {
+        if (it->prio < victim->prio) victim = it;
+        if (victim->prio == 0) break;
+      }
+      disk_q_.erase(victim);
+    }
     disk_q_.push_back(std::move(job));
   }
   disk_cv_.notify_one();

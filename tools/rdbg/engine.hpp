@@ -39,11 +39,14 @@ private:
   {
     uint64_t ts;
     std::string json_str;
+    uint8_t prio{1};  // 0=image 1=normal 2=warn 3=error
   };
 
   struct DiskJob
   {
     bool image{false};
+    bool urgent{false};  // 写后立刻 fdatasync
+    uint8_t prio{1};
     uint64_t ts{0};
     std::string meta;
     std::vector<uint8_t> jpeg;
@@ -55,6 +58,7 @@ private:
   void ctrl_loop();
   void disk_loop();
   void enqueue_disk(DiskJob job);
+  static uint8_t level_prio(const std::string & level);
   void note_stream(const std::string & name);
   void maybe_send_catalog();
   static std::string resolve_sender(const std::string & name);
