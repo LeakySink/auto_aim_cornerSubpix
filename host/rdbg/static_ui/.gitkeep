@@ -1,0 +1,2 @@
+# Placeholder until `cd host/ui && npm run build`
+# Hub serves SPA from this directory.

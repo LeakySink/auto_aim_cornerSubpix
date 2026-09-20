@@ -11,7 +11,14 @@ def _parser():
     )
     sub = p.add_subparsers(dest="cmd")
 
-    watch = sub.add_parser("watch", aliases=["debugger"], help="live UDP debugger")
+    serve = sub.add_parser("serve", aliases=["hub"], help="unified portal (default)")
+    serve.add_argument("--host", default="0.0.0.0", help="HTTP bind address")
+    serve.add_argument("--port", type=int, default=8080, help="HTTP port")
+    serve.add_argument("--no-browser", action="store_true")
+    serve.add_argument("--open", default="/", dest="open_path",
+                       help="path to open in browser (e.g. /watch)")
+
+    watch = sub.add_parser("watch", aliases=["debugger"], help="live UDP debugger (legacy)")
     watch.add_argument("--port", type=int, default=8080, help="HTTP port")
     watch.add_argument("--data-port", type=int, default=15001, help="UDP data port")
     watch.add_argument("--peer-port", type=int, default=15100, help="host-to-host peer port")
@@ -22,7 +29,7 @@ def _parser():
                        help="download Chart.js / Hammer / zoom for offline use")
     watch.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
-    rpl = sub.add_parser("replay", help="play local .rlog file")
+    rpl = sub.add_parser("replay", help="play local .rlog file (legacy)")
     rpl.add_argument("rlog", help="path to .rlog")
     rpl.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
     rpl.add_argument("--port", type=int, default=8765, help="HTTP port (auto +1 if busy)")
@@ -41,15 +48,19 @@ def _parser():
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        argv = ["watch"]
+        argv = ["serve"]
     elif argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
-        argv = ["watch"] + argv
+        argv = ["serve"] + argv
 
     args = _parser().parse_args(argv)
     if getattr(args, "download_assets", False):
         from .http.httputil import download_vendor
         download_vendor()
         return 0
+
+    if args.cmd in ("serve", "hub"):
+        from .apps.hub_app import run
+        return run(args.host, args.port, args.no_browser, args.open_path)
 
     if args.cmd in ("watch", "debugger"):
         from .apps.watch import run

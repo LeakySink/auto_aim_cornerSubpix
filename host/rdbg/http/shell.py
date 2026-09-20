@@ -88,6 +88,7 @@ class Shell:
                 path = parsed.path
                 self.route_path = path
                 self.query = parse_qs(parsed.query)
+                self.body = b""
 
                 html = shell._pages.get(path)
                 if html:
@@ -107,5 +108,31 @@ class Shell:
                 if try_serve_static(self, self.path):
                     return
                 self.send_error(404)
+
+            def do_POST(self):
+                parsed = urlparse(self.path)
+                path = parsed.path
+                self.route_path = path
+                self.query = parse_qs(parsed.query)
+                length = int(self.headers.get("Content-Length") or 0)
+                self.body = self.rfile.read(length) if length > 0 else b""
+
+                fn = shell._exact.get(("POST", path))
+                if fn:
+                    fn(self)
+                    return
+
+                for method, prefix, fn in shell._prefixes:
+                    if method == "POST" and path.startswith(prefix):
+                        fn(self)
+                        return
+                self.send_error(404)
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.end_headers()
 
         return Handler
