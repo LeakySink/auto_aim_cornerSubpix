@@ -3,9 +3,24 @@ const COLORS = ['#4fc3f7','#ffb74d','#81c784','#e57373','#ba68c8','#4dd0e1','#ff
 var fieldMeta = {}, colorIdx = 0, xField = 'ts', firstTs = null, lastX = 0;
 var plotData = [], activePanelId = null;
 var replayCursorX = null;  // seconds; null = watch 模式不画竖线
+var replayCursorSelected = false;
+var replayCursorDragging = false;
+var REPLAY_CURSOR_HIT_PX = 10;
 const MAX_PTS = 50000;
 
 function getColor() { var c = COLORS[colorIdx % COLORS.length]; colorIdx++; return c; }
+
+function replayCursorPixel(chart) {
+  if (replayCursorX == null || !isFinite(replayCursorX) || !chart.scales || !chart.scales.x)
+    return null;
+  return chart.scales.x.getPixelForValue(replayCursorX);
+}
+
+function hitReplayCursor(chart, pixelX) {
+  var x = replayCursorPixel(chart);
+  if (x == null) return false;
+  return Math.abs(pixelX - x) <= REPLAY_CURSOR_HIT_PX;
+}
 
 var replayCursorPlugin = {
   id: 'replayCursor',
@@ -15,23 +30,39 @@ var replayCursorPlugin = {
     if (!xScale) return;
     var x = xScale.getPixelForValue(replayCursorX);
     var area = chart.chartArea;
-    if (x < area.left || x > area.right) return;
+    if (x < area.left - 2 || x > area.right + 2) return;
     var ctx = chart.ctx;
+    var selected = replayCursorSelected || replayCursorDragging;
     ctx.save();
+    // 命中热区提示（选中时更明显）
+    if (selected) {
+      ctx.beginPath();
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = 'rgba(255,112,67,0.18)';
+      ctx.stroke();
+    }
     ctx.beginPath();
     ctx.moveTo(x, area.top);
     ctx.lineTo(x, area.bottom);
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = selected ? 2.5 : 1.5;
     ctx.strokeStyle = '#ff7043';
-    ctx.setLineDash([]);
     ctx.stroke();
+    // 顶部把手（可点选/拖动）
+    var hw = selected ? 7 : 5;
     ctx.beginPath();
     ctx.moveTo(x, area.top);
-    ctx.lineTo(x - 4, area.top - 5);
-    ctx.lineTo(x + 4, area.top - 5);
+    ctx.lineTo(x - hw, area.top - 6);
+    ctx.lineTo(x + hw, area.top - 6);
     ctx.closePath();
-    ctx.fillStyle = '#ff7043';
+    ctx.fillStyle = selected ? '#ffab91' : '#ff7043';
     ctx.fill();
+    if (selected) {
+      ctx.strokeStyle = '#fff3e0';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
     ctx.restore();
   }
 };
@@ -41,6 +72,16 @@ function setReplayCursor(tSec) {
   replayCursorX = (tSec == null || !isFinite(tSec)) ? null : tSec;
   forEachPanel(function(p) {
     if (p.type === 'plot' && p.chart) p.chart.update('none');
+  });
+}
+
+function setReplayCursorSelected(on) {
+  replayCursorSelected = !!on;
+  forEachPanel(function(p) {
+    if (p.type === 'plot' && p.chart) {
+      p.chart.canvas.style.cursor = on ? 'ew-resize' : '';
+      p.chart.update('none');
+    }
   });
 }
 
@@ -271,8 +312,15 @@ function initPlotPanel(p) {
       interaction: { mode: 'nearest', intersect: false },
       onClick: function(evt, _els, chart) {
         if (typeof window.replaySeek !== 'function') return;
+        if (replayCursorDragging) return;
         var xScale = chart.scales.x;
         if (!xScale || !evt || evt.x == null) return;
+        // 点在游标上：只选中，不跳转
+        if (hitReplayCursor(chart, evt.x)) {
+          setReplayCursorSelected(true);
+          return;
+        }
+        setReplayCursorSelected(false);
         var t = xScale.getValueForPixel(evt.x);
         if (t != null && isFinite(t)) window.replaySeek(t);
       },
@@ -284,13 +332,20 @@ function initPlotPanel(p) {
             pinch: { enabled: true },
             mode: function() { return p.lastMouseX < 50 ? 'y' : 'x'; },
             overScaleMode: 'y',
-            onZoomStart: function() { p.manualView = true; }
+            onZoomStart: function() {
+              if (replayCursorDragging) return false;
+              p.manualView = true;
+            }
           },
           pan: {
             enabled: true,
             mode: 'x',
             overScaleMode: 'y',
-            onPanStart: function() { p.manualView = true; }
+            onPanStart: function() {
+              if (replayCursorDragging || replayCursorSelected) return false;
+              if (p.chart && hitReplayCursor(p.chart, p.lastMouseX)) return false;
+              p.manualView = true;
+            }
           },
           limits: { x: { min: 0 } }
         }
@@ -301,10 +356,49 @@ function initPlotPanel(p) {
       }
     }
   });
-  p.chart.canvas.addEventListener('mousemove', function(e) {
-    var r = p.chart.canvas.getBoundingClientRect();
-    p.lastMouseX = e.clientX - r.left;
+
+  var canvas = p.chart.canvas;
+  canvas.addEventListener('mousemove', function(e) {
+    var r = canvas.getBoundingClientRect();
+    var mx = e.clientX - r.left;
+    p.lastMouseX = mx;
+    if (!window.REPLAY_MODE || replayCursorX == null) return;
+    if (replayCursorDragging) {
+      canvas.style.cursor = 'ew-resize';
+      return;
+    }
+    canvas.style.cursor = hitReplayCursor(p.chart, mx) ? 'ew-resize' : '';
   });
+
+  canvas.addEventListener('mousedown', function(e) {
+    if (!window.REPLAY_MODE || typeof window.replaySeek !== 'function') return;
+    if (e.button !== 0) return;
+    var r = canvas.getBoundingClientRect();
+    var mx = e.clientX - r.left;
+    if (!hitReplayCursor(p.chart, mx)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setReplayCursorSelected(true);
+    replayCursorDragging = true;
+    canvas.style.cursor = 'ew-resize';
+
+    function onMove(ev) {
+      if (!replayCursorDragging || !p.chart) return;
+      var rect = canvas.getBoundingClientRect();
+      var x = ev.clientX - rect.left;
+      var t = p.chart.scales.x.getValueForPixel(x);
+      if (t == null || !isFinite(t)) return;
+      window.replaySeek(t);
+    }
+    function onUp() {
+      replayCursorDragging = false;
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('mouseup', onUp, true);
+    }
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+  }, true);
+
   renderLegend(p);
   rebuildPanelChart(p);
 }

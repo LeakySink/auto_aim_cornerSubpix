@@ -60,7 +60,7 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 .splitter-h{height:3px;cursor:row-resize}
 .splitter-v{width:3px;cursor:col-resize}
 
-.log-line{padding:0 8px;display:flex;gap:8px;font-size:13px;line-height:1.5;align-items:flex-start}
+.log-line{padding:6px 10px 6px 14px;display:flex;gap:8px;font-size:13px;line-height:1.7;align-items:flex-start}
 .log-line.log-clickable{cursor:pointer}
 .log-line.log-clickable:hover{background:#1c1c28}
 .log-line.log-current{background:#2a2218;box-shadow:inset 3px 0 0 #ff7043}
@@ -72,6 +72,20 @@ body{display:flex;height:100vh;font-family:'Consolas','Courier New',monospace;ba
 .log-lv.DEBUG{color:#505060}
 .log-msg{overflow-wrap:anywhere;word-break:break-word}
 .log-body{position:relative}
+.log-stream-wrap{position:absolute;top:28px;left:0;right:0;bottom:0;overflow:hidden}
+.log-stream-wrap .log-stream{position:absolute;inset:0;overflow-y:scroll;overflow-x:hidden;padding:4px 10px 4px 0;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#686880 #16161e}
+.log-cursor-marker{
+  position:absolute;left:0;z-index:3;pointer-events:none;
+  display:none;transform:translateY(-50%)
+}
+.log-cursor-marker.visible{display:block}
+.log-cursor-marker.between{
+  width:0;height:0;border-style:solid;
+  border-width:6px 0 6px 9px;
+  border-color:transparent transparent transparent #ff7043;
+  left:2px;filter:drop-shadow(0 0 1px #000)
+}
+.log-cursor-marker.on-line{display:none} /* 行上用 .log-current 表示 */
 .log-progress{
   position:absolute;top:28px;right:2px;bottom:4px;width:6px;z-index:2;
   background:#16161e;border-radius:3px;cursor:pointer
