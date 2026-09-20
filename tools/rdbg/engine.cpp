@@ -42,6 +42,11 @@ void Engine::init(const RemoteLogger::Config & cfg)
     known_streams_.clear();
   }
 
+  {
+    std::lock_guard<std::mutex> lock(disk_mtx_);
+    disk_q_.clear();
+  }
+
   control_.control_port = cfg_.control_port;
   control_.beacon_port = cfg_.beacon_port;
   control_.beacon_interval_ms = cfg_.beacon_interval_ms;
@@ -69,6 +74,16 @@ void Engine::shutdown()
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
+
+  // 生产者已停：等待落盘队列排空，再停 disk_worker 并强制 sync。
+  {
+    std::unique_lock<std::mutex> lock(disk_mtx_);
+    disk_cv_.notify_all();
+    if (disk_open_.load()) {
+      disk_idle_cv_.wait_for(lock, std::chrono::seconds(5),
+                             [&] { return disk_q_.empty(); });
+    }
+  }
   disk_open_ = false;
   disk_cv_.notify_all();
   if (disk_worker_.joinable()) disk_worker_.join();
@@ -273,9 +288,13 @@ void Engine::disk_loop()
     {
       std::unique_lock<std::mutex> lock(disk_mtx_);
       disk_cv_.wait(lock, [&] { return !disk_q_.empty() || !disk_open_.load(); });
-      if (disk_q_.empty()) break;
+      if (disk_q_.empty()) {
+        disk_idle_cv_.notify_all();
+        break;
+      }
       job = std::move(disk_q_.front());
       disk_q_.pop_front();
+      if (disk_q_.empty()) disk_idle_cv_.notify_all();
     }
     if (job.image) session_.write_image(job.ts, job.meta, job.jpeg);
     else if (!job.jsons.empty()) session_.write_jsons(job.jsons);

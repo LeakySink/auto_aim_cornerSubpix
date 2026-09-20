@@ -168,6 +168,8 @@ type 0x01 image:
 
 四条后台路径。发送与落盘分开：`var_worker` / `img_worker` 先 UDP，`disk_worker` 延后写盘。
 
+落盘可靠性：`disk_worker` 约每 1s `fdatasync`；`ERROR` 写后立刻 sync；队列满时优先丢图像、保留 WARN/ERROR；`shutdown()`（含析构）先排空队列再强制 sync。`kill -9`/掉电仍可能丢最近约 1s。
+
 ```
 主线程                         img_worker             var_worker        disk_worker
 ──────                         ──────────             ──────────        ───────────

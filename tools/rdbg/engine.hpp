@@ -85,6 +85,7 @@ private:
   std::deque<DiskJob> disk_q_;
   std::mutex disk_mtx_;
   std::condition_variable disk_cv_;
+  std::condition_variable disk_idle_cv_;
   std::atomic<bool> disk_open_{false};
 
   std::thread var_worker_;
