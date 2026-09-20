@@ -23,7 +23,7 @@ host/
       control.py           Discovery + RobotClient
       peer.py              subscribe / 原样转发
       udp.py               数据口解析
-    log/                   .rlog 解析与预加载
+    log/                   .rlog 解析、dump、预加载
     sources/               数据源插件（live / replay）
     apps/                  把壳和数据源拼起来
     static/                浏览器资源
@@ -112,11 +112,13 @@ class FooSource:
 |---|---|
 | `watch` | 实时。别名 `debugger`（旧脚本） |
 | `replay <file.rlog>` | 本地回放 |
+| `dump <file.rlog>` | 导出到目录：`log.txt` / `plot.txt` / `images.mp4` |
 
 无参数或参数以 `-` 开头（且不是 `-h`）时，默认 `watch`。
 
 `watch` 参数：`--port`(8080) `--data-port`(15001) `--peer-port`(15100) `--discover-port`(15999) `--download-assets` `--no-browser`  
-`replay` 参数：`rlog` `--host`(127.0.0.1) `--port`(8765) `--max-mb`(1024) `--no-browser`
+`replay` 参数：`rlog` `--host`(127.0.0.1) `--port`(8765) `--max-mb`(1024) `--no-browser`  
+`dump` 参数：`rlog` `-o/--output`（默认旁路 `<stem>_dump/`） `--fps`(10)
 
 ### 4.2 `rdbg.http.shell.Shell`
 
@@ -237,10 +239,20 @@ summarize(path) -> (n_json, n_img, sender_name)
 
 ```python
 {"kind": "json", "ts": int, "obj": dict}
-{"kind": "img",  "ts": int, "meta": dict, "jpeg": bytes}  # include_jpeg=False 时 jpeg=b""
+{"kind": "img",  "ts": int, "meta": dict, "jpeg": bytes, "jpeg_len": int}
+# include_jpeg=False 时 jpeg=b""，jpeg_len 仍为文件中长度
 ```
 
 Magic：v1 `0x524C4F47`（仅 JSON），v2 `0x32474C52`（`RLG2`）。v2：`type 0x00` json，`0x01` image。截断则打印 stderr 并停止。文件格式细节见 `REMOTE_LOGGER.md`。
+
+### 4.7b `rdbg.log.dump`
+
+```python
+dump_rlog(path, out_dir, fps=10.0) -> dict
+dump_rlog_to_path(rlog_path, output=None, fps=10.0) -> exit_code
+```
+
+输出目录内：`log.txt`、`plot.txt`（行格式 `[t][LOG|PLOT]-----...`），以及按时间序合成的 `images.mp4`（需 OpenCV）。相对时间相对文件首条 `ts`。
 
 ### 4.8 `rdbg.log.session`
 

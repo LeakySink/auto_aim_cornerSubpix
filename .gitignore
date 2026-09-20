@@ -18,3 +18,4 @@ docs/
 CLAUDE.md
 __pycache__/
 *.py[cod]
+host/.venv/
