@@ -2,52 +2,85 @@
 
 给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
-本文约定：路径相对 `host/`。包名 `rdbg`。Unix 用 `watch.sh` / `replay.sh`，Windows 用 `watch.bat` / `replay.bat`，把 `host/` 加进 `PYTHONPATH` 后跑 `python -m rdbg …`。`run.py` 只看 `sys.platform`，Windows 调 `.bat`，否则调 `.sh`。
+本文约定：路径相对 `host/`。包名 `rdbg`。主入口 `./host/start.sh` → `python -m rdbg serve`。
 
 ---
 
-## 1. 分层
+## 0. Hub + Feature 框架（当前主线）
 
 ```
 host/
-  watch.sh / replay.sh     Unix 入口
-  watch.bat / replay.bat   Windows 入口
-  run.py                   按平台转发到上面
-  HOST.md                  使用者
-  DESIGN.md                本文件
-  PROTOCOL.md              车/host 控制协议
-  rdbg/                    Python 包（不要直接当脚本跑）
-    cli.py                 子命令
-    http/                  HTTP 壳：路由、SSE、静态
-    net/                   发现、向车注册、数据 UDP、host 转发
-      control.py           Discovery + RobotClient
-      peer.py              subscribe / 原样转发
-      udp.py               数据口解析
-    log/                   .rlog 解析、dump、预加载
-    sources/               数据源插件（live / replay）
-    apps/                  把壳和数据源拼起来
-    static/                浏览器资源
-      watch.html / replay.html
-      css/shell.css        共用壳样式
-      css/replay.css       回放条
-      js/registry.js       Rdbg 面板注册表
-      js/shell.js          分屏 + SSE 分发
-      js/replay.js         回放进度条（驱动壳的全局函数）
-      js/plugins/          面板插件
-      vendor/              Chart.js 等
+  start.sh                 统一门户
+  ui/                      Vite+React+TS（FeatureModule 注册表）
+  rdbg/
+    apps/hub_app.py        单进程 HTTP + FeatureRegistry
+    features/              Feature 插件（独立线程生命周期）
+      base.py / registry.py
+      watch.py / replay.py / dump.py / netcheck.py
+    static_ui/             ui 构建产物（SPA）
+    sources/ live|replay   仍被 Feature 薄封装复用
+    static/                旧 watch.html/replay.html（legacy）
 ```
 
-不要把协议细节写进 `apps/`，不要把分屏写进某个面板插件。
+```mermaid
+flowchart LR
+  SPA[static_ui SPA] --> API["/api/features*"]
+  SPA --> W["/api/watch/*"]
+  SPA --> R["/api/replay/*"]
+  Reg[FeatureRegistry] --> Tw[WatchThread]
+  Reg --> Tr[ReplayThread]
+  Reg --> Td[DumpJobs]
+  Reg --> Tn[NetcheckWorkers]
+```
+
+### 扩展新功能
+
+1. **后端**：`features/foo.py` 继承 `Feature`，实现 `attach` / `run`；在 `features/__init__.py` 的 `builtin_features()` 注册。
+2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。
+3. `./host/ui/build.sh`，再 `./host/start.sh`。
+
+控制面：`GET /api/features`，`POST /api/features/<id>/start|stop`，`GET .../status`。  
+业务 API 挂在 `/api/<id>/...`。Feature `start()` 开守护线程；UI 切换不自动 `stop`。
+
+### CLI
+
+`python3 -m rdbg <cmd>`
+
+| cmd | 含义 |
+|---|---|
+| `serve` / `hub` | 统一门户（默认） |
+| `watch` | legacy 独立 watch 进程 |
+| `replay <file>` | legacy 独立 replay 进程 |
+| `dump <file>` | 命令行导出 |
+
+---
+
+## 1. 分层（协议与旧静态页）
+
+```
+host/
+  start.sh / watch.sh / replay.sh / dump.sh
+  ui/                      新门户源码
+  rdbg/
+    cli.py
+    http/                  路由、SSE、static + static_ui
+    net/                   UDP / 发现 / peer
+    log/                   .rlog / dump / session
+    sources/               live / replay（被 features 复用）
+    features/              Hub 插件
+    apps/                  hub_app / watch / replay
+    static_ui/             SPA
+    static/                legacy HTML/JS
+```
 
 | 层 | 职责 | 禁止 |
 |---|---|---|
 | `net/` | UDP 字节 ↔ JSON 事件 | 不知道 HTTP |
 | `log/` | 文件字节 ↔ 会话 dict | 不知道浏览器 |
-| `http/` | 端口、路由、静态、SSE | 不知道 plot/image 语义 |
-| `sources/` | 把 net/log 接到壳上 | 不写 Handler 类 |
-| `apps/` | `run()` 生命周期 | 不写业务解析 |
-| `static/js/shell.js` | 分屏、类型切换、SSE | 不画曲线/图/日志 |
-| `static/js/plugins/` | 一种视图 | 不改分屏算法 |
+| `http/` | 端口、路由、静态、SSE | 不知道 plot 语义 |
+| `features/` | 功能线程 + `/api/<id>` | 不改 SPA 构建 |
+| `ui/` | 门户与 Feature 页 | 不直接碰 UDP |
+| `sources/` | 被 Feature 复用的数据源 | 不写 Handler 类 |
 
 ---
 
@@ -56,27 +89,24 @@ host/
 ```
 车上 RemoteLogger
   plot/log  → JSON UDP
-  plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片发给队首
-  周期 img_streams 目录 JSON
+  plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片
 
-watch:
-  net/control  听 beacon，向车 register
-  队首 net/udp 收车包；peer 原样转发
-  follower 收队首转发 → JSON 行 → sources/live → shell.sse
-
-replay:
-  log/rlog + log/session 预加载
-  sources/replay 提供 /api/meta 与 /api/frame/N
-  replay.js 按时间轴调用与 watch 相同的全局函数
+Hub:
+  Feature watch → LiveSource → /api/watch/events (SSE)
+  Feature replay → session → /api/replay/meta|/frame
+  Feature dump → dump_rlog 后台 job
+  Feature netcheck → discover/echo/ping workers
 ```
 
-watch 与 replay **两个进程**。前端插件相同；差别只在数据源和 `replay.js`。
+旧「两进程 watch/replay」仍可通过 `python -m rdbg watch|replay` 使用；推荐统一 Hub。
 
 ---
 
-## 3. 怎么加能力
+## 3. 怎么加能力（legacy 面板说明）
 
-### 3.1 新数据源
+旧 `static/js/plugins` 仅服务 legacy HTML。新面板做在 React `DebugWorkbench` / 各 Feature 页。
+
+### 3.1 新数据源（仍可用于 Feature 内部）
 
 1. `rdbg/sources/foo.py` 实现：
 
