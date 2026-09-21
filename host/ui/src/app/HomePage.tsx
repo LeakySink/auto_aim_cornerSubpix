@@ -52,73 +52,98 @@ export function HomePage() {
   };
 
   return (
-    <div className="home">
-      <h1>rdbg Host</h1>
-      <p className="sub">每次打开都是独立页面和线程，可以多开。关掉页面就会停掉对应线程。</p>
-      {err && <p style={{ color: "var(--err)" }}>{err}</p>}
-      <div className="grid">
-        {FEATURE_MODULES.map((m) => (
-          <button key={m.id} type="button" className="card" onClick={() => onCard(m.id)}>
-            <h2>{m.title}</h2>
-            <p>{m.description}</p>
-            <div className="state">新开页面</div>
-          </button>
-        ))}
+    <div className="app-shell">
+      <header className="topbar">
+        <span className="brand">rdbg</span>
+        <span className="topbar-sep" />
+        <span className="topbar-title">Host</span>
+        <div className="spacer" />
+        <span className="pill">{rows.length ? `${rows.length} 个页面` : "无打开页面"}</span>
+      </header>
+      <div className="main">
+        <div className="home">
+          <header className="page-head">
+            <h1>调试入口</h1>
+            <p className="sub">每次打开都是独立页面和线程，可以多开。关掉页面就会停掉对应线程。</p>
+          </header>
+          {err && <p className="err-text">{err}</p>}
+          <section className="block">
+            <div className="sec-label">功能</div>
+            <div className="launcher">
+              {FEATURE_MODULES.map((m) => (
+                <button key={m.id} type="button" className="tool" onClick={() => onCard(m.id)}>
+                  <span className="tool-id">{m.id}</span>
+                  <span className="tool-body">
+                    <span className="tool-title">{m.title}</span>
+                    <span className="tool-desc">{m.description}</span>
+                  </span>
+                  <span className="tool-go">新窗口</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          {picking && (
+            <section className="block">
+              <div className="sec-label">Watch · 选择车辆</div>
+              <div className="panel">
+                <p className="sub">每辆车分配一个空闲 UDP 口。这个页面只看你选中的那一辆。</p>
+                {robots.length > 0 && (
+                  <div className="robot-list">
+                    {robots.map((r) => (
+                      <button
+                        key={r.name}
+                        type="button"
+                        className="robot"
+                        onClick={() => open("watch", { sender: r.name })}
+                      >
+                        <span className="robot-name">{r.name}</span>
+                        <span className="robot-meta mono">
+                          {r.ip}
+                          {r.data_port ? ` · UDP ${r.data_port}` : " · 将分配新端口"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {robots.length === 0 && <p className="empty">还没有发现车辆，可以直接填车名。</p>}
+                <div className="form-row">
+                  <input
+                    value={manual}
+                    placeholder="车名 sender_name"
+                    onChange={(e) => setManual(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    disabled={!manual.trim()}
+                    onClick={() => open("watch", { sender: manual.trim() })}
+                  >
+                    打开
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+          {rows.length > 0 && (
+            <section className="block">
+              <div className="sec-label">已打开</div>
+              <ul className="inst-list">
+                {rows.map((r) => (
+                  <li key={r.instance}>
+                    <a href={`/i/${r.instance}`} target="_blank" rel="noreferrer">
+                      <span className="inst-title">
+                        {r.title}
+                        {r.sender ? ` · ${r.sender}` : ""}
+                      </span>
+                      <span className="inst-meta mono">{r.data_port ? `UDP ${r.data_port}` : r.instance}</span>
+                      <span className={`state-tag s-${r.state}`}>{r.state}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       </div>
-      {picking && (
-        <div style={{ marginTop: "1.5rem" }}>
-          <h3>Watch：选择车辆</h3>
-          <p className="sub">每辆车分配一个空闲 UDP 口。这个页面只看你选中的那一辆。</p>
-          <div className="grid">
-            {robots.map((r) => (
-              <button
-                key={r.name}
-                type="button"
-                className="card"
-                onClick={() => open("watch", { sender: r.name })}
-              >
-                <h2>{r.name}</h2>
-                <p>
-                  {r.ip}
-                  {r.data_port ? ` · UDP ${r.data_port}` : " · 将分配新端口"}
-                </p>
-              </button>
-            ))}
-          </div>
-          {robots.length === 0 && <p className="sub">还没有发现车辆，可以直接填车名。</p>}
-          <div className="form-row" style={{ marginTop: "1rem" }}>
-            <input
-              value={manual}
-              placeholder="车名 sender_name"
-              onChange={(e) => setManual(e.target.value)}
-            />
-            <button
-              type="button"
-              disabled={!manual.trim()}
-              onClick={() => open("watch", { sender: manual.trim() })}
-            >
-              打开
-            </button>
-          </div>
-        </div>
-      )}
-      {rows.length > 0 && (
-        <div style={{ marginTop: "1.5rem" }}>
-          <h3>已打开</h3>
-          <ul>
-            {rows.map((r) => (
-              <li key={r.instance}>
-                <a href={`/i/${r.instance}`} target="_blank" rel="noreferrer">
-                  {r.title}
-                  {r.sender ? ` · ${r.sender}` : ""}
-                  {r.data_port ? ` · UDP ${r.data_port}` : ""}
-                  {` · ${r.state}`}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
@@ -150,14 +175,16 @@ export function InstancePage() {
         <a href="/" className="brand" target="_blank" rel="noreferrer">
           rdbg
         </a>
+        <span className="topbar-sep" />
+        {mod && <span className="topbar-title">{mod.title}</span>}
+        <div className="spacer" />
+        {mod && <span className="pill on">{mod.id}</span>}
         <button type="button" className="ghost" onClick={close}>
           关闭
         </button>
-        <div className="spacer" />
-        {mod && <span className="pill on">{mod.title}</span>}
       </header>
       <div className="main">
-        {err && <p style={{ padding: "1rem" }}>{err}</p>}
+        {err && <p className="err-text page-pad">{err}</p>}
         {mod && iid && (
           <InstanceProvider value={{ id: iid, feature: mod.id, base: `/api/i/${iid}` }}>
             <mod.Component />

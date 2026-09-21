@@ -129,7 +129,7 @@ export function WatchPage() {
       <div className="feature-toolbar">
         <strong>Watch</strong>
         <span className="mono">{selected || "未选择车辆"}{port ? ` · UDP ${port}` : ""} · {state}</span>
-        {err && <span style={{ color: "var(--err)" }}>{err}</span>}
+        {err && <span className="err-text">{err}</span>}
         <button type="button" className="ghost" onClick={() => busRef.current?.clear()}>
           清除
         </button>
@@ -158,19 +158,24 @@ export function WatchPage() {
       </div>
       <div className="feature-body fill">
         {!selected && (
-          <div className="home" style={{ padding: "1rem" }}>
-            <h3>选择要查看的车</h3>
+          <div className="pick-pane">
+            <div className="sec-label">选择车辆</div>
             <p className="sub">选中后才会占用一个空闲 UDP 口，并只接收这辆车的数据。</p>
-            <div className="grid">
-              {robots.map((r) => (
-                <button key={r.name} type="button" className="card" onClick={() => bind(r.name)}>
-                  <h2>{r.name}</h2>
-                  <p>{r.ip}{r.data_port ? ` · 已在 UDP ${r.data_port}` : " · 将分配新端口"}</p>
-                </button>
-              ))}
-            </div>
-            {robots.length === 0 && <p className="sub">还没有发现车辆。</p>}
-            <div className="form-row" style={{ marginTop: "1rem" }}>
+            {robots.length > 0 && (
+              <div className="robot-list">
+                {robots.map((r) => (
+                  <button key={r.name} type="button" className="robot" onClick={() => bind(r.name)}>
+                    <span className="robot-name">{r.name}</span>
+                    <span className="robot-meta mono">
+                      {r.ip}
+                      {r.data_port ? ` · 已在 UDP ${r.data_port}` : " · 将分配新端口"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {robots.length === 0 && <p className="empty">还没有发现车辆。</p>}
+            <div className="form-row">
               <input value={manual} placeholder="车名 sender_name" onChange={(e) => setManual(e.target.value)} />
               <button type="button" disabled={!manual.trim()} onClick={() => bind(manual.trim())}>
                 查看这辆车

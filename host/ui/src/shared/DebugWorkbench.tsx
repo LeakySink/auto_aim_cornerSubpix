@@ -266,8 +266,20 @@ export function DebugWorkbench({
           },
         },
         scales: {
-          x: { type: "linear", min: 0, max: 10, ticks: { color: "#8b9bb0" }, grid: { color: "#243044" } },
-          y: { type: "linear", ticks: { color: "#8b9bb0" }, grid: { color: "#243044" } },
+          x: {
+            type: "linear",
+            min: 0,
+            max: 10,
+            ticks: { color: "#8e8e9c", font: { size: 11, family: "ui-monospace, monospace" } },
+            grid: { color: "rgba(255,255,255,0.06)" },
+            border: { color: "rgba(255,255,255,0.08)" },
+          },
+          y: {
+            type: "linear",
+            ticks: { color: "#8e8e9c", font: { size: 11, family: "ui-monospace, monospace" } },
+            grid: { color: "rgba(255,255,255,0.06)" },
+            border: { color: "rgba(255,255,255,0.08)" },
+          },
         },
       },
     });
@@ -533,7 +545,7 @@ export function DebugWorkbench({
                     <canvas ref={canvasRef} />
                   </div>
                 ) : (
-                  <div className="mono" style={{ padding: 8, color: "var(--muted)" }}>
+                  <div className="mono muted" style={{ padding: 8 }}>
                     绘图已在其他面板
                   </div>
                 ))}
@@ -642,7 +654,7 @@ function LogPane({
             stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
           }}
         >
-          {visible.length === 0 && <div className="L-DEBUG">(no log)</div>}
+          {visible.length === 0 && <div className="log-line L-DEBUG"><span className="log-msg">无日志</span></div>}
           {visible.map((l, idx) => (
             <div
               key={idx}
@@ -687,48 +699,52 @@ function ImagePane({
   }, [sel]);
 
   return (
-    <div
-      className="img-view"
-      onWheel={(e) => {
-        e.preventDefault();
-        setScale((s) => Math.min(15, Math.max(0.1, s * (e.deltaY > 0 ? 0.9 : 1.1))));
-      }}
-      onMouseDown={(e) => {
-        if (e.button !== 0) return;
-        drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
-      }}
-      onMouseMove={(e) => {
-        if (!drag.current) return;
-        setPan({
-          x: drag.current.px + e.clientX - drag.current.x,
-          y: drag.current.py + e.clientY - drag.current.y,
-        });
-      }}
-      onMouseUp={() => {
-        drag.current = null;
-      }}
-      onMouseLeave={() => {
-        drag.current = null;
-      }}
-    >
-      <select value={sel} onChange={(e) => onSel(e.target.value)}>
-        {names.length === 0 && <option value="">(no image)</option>}
-        {names.map((n) => (
-          <option key={n} value={n}>
-            {n}
-          </option>
-        ))}
-      </select>
-      {url ? (
-        <img
-          src={url}
-          alt=""
-          draggable={false}
-          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
-        />
-      ) : (
-        <span className="mono">{sel ? `等待 ${sel}…` : "waiting…"}</span>
-      )}
+    <div className="img-pane">
+      <div className="img-bar">
+        <select value={sel} onChange={(e) => onSel(e.target.value)}>
+          {names.length === 0 && <option value="">无图像</option>}
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div
+        className="img-view"
+        onWheel={(e) => {
+          e.preventDefault();
+          setScale((s) => Math.min(15, Math.max(0.1, s * (e.deltaY > 0 ? 0.9 : 1.1))));
+        }}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+        }}
+        onMouseMove={(e) => {
+          if (!drag.current) return;
+          setPan({
+            x: drag.current.px + e.clientX - drag.current.x,
+            y: drag.current.py + e.clientY - drag.current.y,
+          });
+        }}
+        onMouseUp={() => {
+          drag.current = null;
+        }}
+        onMouseLeave={() => {
+          drag.current = null;
+        }}
+      >
+        {url ? (
+          <img
+            src={url}
+            alt=""
+            draggable={false}
+            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          />
+        ) : (
+          <span className="mono muted">{sel ? `等待 ${sel}…` : "等待图像…"}</span>
+        )}
+      </div>
     </div>
   );
 }

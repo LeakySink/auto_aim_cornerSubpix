@@ -59,9 +59,10 @@ export function NetcheckPage() {
     <div className="feature-page">
       <div className="feature-toolbar">
         <strong>Netcheck</strong>
-        {err && <span style={{ color: "var(--err)" }}>{err}</span>}
+        {err && <span className="err-text">{err}</span>}
       </div>
       <div className="feature-body">
+        <section className="sheet">
         <h3>Discover（听 beacon）</h3>
         <div className="form-row">
           <button
@@ -98,7 +99,9 @@ export function NetcheckPage() {
                 .join("\n")}
         </div>
 
-        <h3 style={{ marginTop: "1.5rem" }}>Echo 服务</h3>
+        </section>
+        <section className="sheet">
+        <h3>Echo 服务</h3>
         <div className="form-row">
           <label>port</label>
           <input
@@ -129,7 +132,9 @@ export function NetcheckPage() {
           <span className="mono">{echoStats}</span>
         </div>
 
-        <h3 style={{ marginTop: "1.5rem" }}>Ping</h3>
+        </section>
+        <section className="sheet">
+        <h3>Ping</h3>
         <div className="form-row">
           <label>host</label>
           <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="对方 IP" />
@@ -180,6 +185,7 @@ export function NetcheckPage() {
           </button>
         </div>
         <div className="pre mono">{pingOut || "(ping result)"}</div>
+        </section>
       </div>
     </div>
   );

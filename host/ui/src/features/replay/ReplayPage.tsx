@@ -210,11 +210,11 @@ export function ReplayPage() {
         <button type="button" className="ghost" onClick={() => stopFeature(inst.id)}>
           停止线程
         </button>
-        {err && <span style={{ color: "var(--err)" }}>{err}</span>}
+        {err && <span className="err-text">{err}</span>}
         {meta && <span className="mono">{meta.file}</span>}
       </div>
       {meta && (
-        <div className="feature-toolbar">
+        <div className="feature-toolbar scrub">
           <input
             type="range"
             min={0}
@@ -228,7 +228,7 @@ export function ReplayPage() {
           <span className="mono">
             {t.toFixed(2)} / {(meta.duration || 0).toFixed(2)} s
           </span>
-          <span className="mono" style={{ color: "var(--muted)" }}>
+          <span className="mono muted">
             全量曲线/日志 · 拖橙线或点日志跳转 · ← → 0.05s · 空格播放
           </span>
         </div>
