@@ -90,12 +90,14 @@ export function DebugWorkbench({
   const cursorRef = useRef<number | null>(cursorT);
   const seekRef = useRef(onSeek);
   const dragCursor = useRef(false);
+  const mouseX = useRef(0);
   replayRef.current = replay;
   cursorRef.current = cursorT;
   seekRef.current = onSeek;
 
   fieldsRef.current = fields;
-  viewRef.current = { mode, win, history, manual };
+  // manual 由滚轮/拖动立刻写入。不能在这里用 state 覆盖，否则下一帧数据会把缩放清掉。
+  viewRef.current = { ...viewRef.current, mode, win, history };
 
   const syncChart = useCallback(() => {
     const chart = chartRef.current;
@@ -242,19 +244,25 @@ export function DebugWorkbench({
             pan: {
               enabled: true,
               mode: "x" as const,
+              overScaleMode: "y" as const,
               onPanStart: () => {
                 if (dragCursor.current) return false;
+                viewRef.current = { ...viewRef.current, manual: true };
                 setManual(true);
               },
             },
             zoom: {
               wheel: { enabled: true },
               pinch: { enabled: true },
-              mode: "x",
+              mode: () => (mouseX.current < 50 ? "y" : "x"),
+              overScaleMode: "y" as const,
               onZoomStart: () => {
+                if (dragCursor.current) return false;
+                viewRef.current = { ...viewRef.current, manual: true };
                 setManual(true);
               },
             },
+            limits: { x: { min: 0 } },
           },
         },
         scales: {
@@ -264,6 +272,11 @@ export function DebugWorkbench({
       },
     });
     chartRef.current = chart;
+    const onMove = (e: MouseEvent) => {
+      const r = canvas.getBoundingClientRect();
+      mouseX.current = e.clientX - r.left;
+    };
+    canvas.addEventListener("mousemove", onMove);
     let lastW = 0;
     let lastH = 0;
     const fit = () => {
@@ -280,6 +293,7 @@ export function DebugWorkbench({
     fit();
     syncChart();
     return () => {
+      canvas.removeEventListener("mousemove", onMove);
       ro.disconnect();
       chart.destroy();
       chartRef.current = null;
@@ -379,7 +393,10 @@ export function DebugWorkbench({
         });
       },
       resetView() {
+        viewRef.current = { ...viewRef.current, manual: false };
         setManual(false);
+        const chart = chartRef.current as (Chart & { resetZoom?: () => void }) | null;
+        chart?.resetZoom?.();
         chartDirty.current = true;
         schedule();
       },
