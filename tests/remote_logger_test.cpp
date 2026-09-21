@@ -18,6 +18,7 @@ int main(int argc, char * argv[])
   uint32_t hb = 0;
   int rate = 50;
   std::string video_path;
+  bool local = true;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
@@ -28,6 +29,7 @@ int main(int argc, char * argv[])
       std::printf("  --hb=MS         Heartbeat ms   (default: 0=off)\n");
       std::printf("  --rate=HZ       Send rate      (default: 50)\n");
       std::printf("  --video=PATH    Video file     (optional)\n");
+      std::printf("  --no-local      Do not write .rlog\n");
       std::printf("  Hosts find this process via UDP beacon; --host is ignored.\n");
       return 0;
     }
@@ -40,6 +42,7 @@ int main(int argc, char * argv[])
     else if (k == "--hb") hb = static_cast<uint32_t>(std::stoul(v));
     else if (k == "--rate") rate = std::stoi(v);
     else if (k == "--video") video_path = v;
+    else if (k == "--no-local") local = false;
   }
 
   cv::VideoCapture cap;
@@ -57,6 +60,7 @@ int main(int argc, char * argv[])
   cfg.control_port = ctrl_port;
   cfg.sender_name = name;
   cfg.heartbeat_interval_ms = hb;
+  cfg.enable_local = local;
   cfg.log_dir = "./logs";
   cfg.img_width = 320;
   cfg.img_quality = 40;
