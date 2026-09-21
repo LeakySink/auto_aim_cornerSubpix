@@ -164,12 +164,62 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .workbench-root {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 1;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
+}
+.dbg-side {
+  width: 220px;
+  flex-shrink: 0;
+  background: #101018;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.dbg-side.collapsed { width: 28px; }
+.side-toggle {
+  background: #181820;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 0;
+  padding: 4px 0;
+}
+.side-body { overflow: auto; flex: 1; }
+.side-title { padding: 8px 10px; font-weight: 700; color: var(--muted); }
+.side-sec { padding: 6px 10px; border-bottom: 1px solid #1a1a26; }
+.side-h { font-size: 12px; color: #606070; margin-bottom: 4px; letter-spacing: 0.04em; }
+.side-sec label { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; color: #a0a0b0; }
+.side-sec input[type="number"], .side-sec select { width: 100%; margin-top: 4px; }
+.field-row { cursor: pointer; }
+.swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+.log-pane { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.log-toolbar {
+  display: flex; align-items: center; gap: 10px; padding: 4px 8px;
+  background: #16161e; border-bottom: 1px solid var(--border); font-size: 12px; flex-shrink: 0;
+}
+.log-toolbar label { display: inline-flex; align-items: center; gap: 3px; color: #a0a0b0; }
+.log-count { margin-left: auto; color: #505060; }
+.log-stream {
+  flex: 1; min-height: 0; overflow-y: scroll; overflow-x: hidden;
+  padding: 4px 0; scrollbar-gutter: stable;
+}
+.log-line { display: flex; gap: 8px; padding: 4px 10px; font-size: 13px; line-height: 1.6; }
+.log-ts { color: #505060; flex-shrink: 0; }
+.log-lv { flex-shrink: 0; font-weight: 700; min-width: 48px; }
+.log-msg { overflow-wrap: anywhere; }
+.img-view img {
+  max-width: 92%;
+  max-height: calc(100% - 2.2rem);
+  object-fit: contain;
+  transform-origin: center center;
+  cursor: grab;
 }
 .tile-root {
   display: flex;
@@ -225,8 +275,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   top: 0;
 }
 .log-view {
-  height: 100%;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
   overflow: auto;
   padding: 0.5rem;
   font-family: ui-monospace, monospace;

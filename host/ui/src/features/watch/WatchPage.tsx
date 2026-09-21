@@ -18,7 +18,12 @@ function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: {
     return;
   }
   if (type === "log") {
-    bus.addLog(String(msg.level || "INFO"), String(msg.msg || ""));
+    bus.addLog(String(msg.level || "INFO"), String(msg.msg || ""), Number(msg.ts) || undefined);
+    return;
+  }
+  if (type === "img_streams") {
+    const list = (msg.streams as string[]) || [];
+    bus.setStreams(list.filter((s) => typeof s === "string"));
     return;
   }
   if (type === "image") {
@@ -70,6 +75,11 @@ export function WatchPage() {
     busRef.current = b;
   }, []);
 
+  const imageSubscribe = useCallback((names: string[]) => {
+    const q = names.map(encodeURIComponent).join(",");
+    fetch(`/api/watch/img_subscribe?streams=${q}`).catch(() => {});
+  }, []);
+
   useSSE(
     running ? "/api/watch/events" : null,
     (msg) => {
@@ -111,6 +121,9 @@ export function WatchPage() {
         <button type="button" className="ghost" onClick={() => busRef.current?.clear()}>
           清除
         </button>
+        <button type="button" className="ghost" onClick={() => busRef.current?.resetView()}>
+          重置
+        </button>
         <button
           type="button"
           className="ghost"
@@ -132,7 +145,7 @@ export function WatchPage() {
         </button>
       </div>
       <div className="feature-body fill">
-        <DebugWorkbench busOut={onBus} />
+        <DebugWorkbench busOut={onBus} imageSubscribe={imageSubscribe} />
       </div>
     </div>
   );
