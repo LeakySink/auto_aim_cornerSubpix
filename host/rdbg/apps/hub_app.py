@@ -8,12 +8,15 @@ import time
 from ..features.registry import KINDS, FeatureRegistry
 from ..http.httputil import STATIC_UI_DIR, open_browser
 from ..http.shell import Shell
+from ..sources.fleet import fleet
 
 
 def run(host="0.0.0.0", port=8080, no_browser=False, open_path="/"):
     registry = FeatureRegistry()
     shell = Shell(name="hub")
     registry.attach(shell)
+    fleet.attach(shell)
+    fleet.start()
 
     if not (STATIC_UI_DIR / "index.html").is_file():
         print(
@@ -36,5 +39,6 @@ def run(host="0.0.0.0", port=8080, no_browser=False, open_path="/"):
 
     def _stop():
         registry.stop_all()
+        fleet.stop()
 
     return shell.serve(httpd, threaded=False, on_stop=_stop)

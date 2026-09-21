@@ -36,7 +36,7 @@ flowchart LR
 3. `./host/ui/build.sh`，再 `./host/start.sh`。
 
 控制面：`GET /api/features`（种类），`POST /api/open` 新建实例并启动线程，`GET /api/instances`，`POST /api/instances/<id>/stop?forget=1`（关页时）。  
-业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。多个 Watch 共用一个 UDP `LiveSource`（引用计数）。
+业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。发现口 `15999` 全局一个。每辆车单独分配数据口（自 15001）和对等口（自 15100）；打开 Watch 时选定车辆。同一辆车的多个 Watch 共用这一对口。`GET /api/robots` 列出当前 beacon。
 
 ### CLI
 

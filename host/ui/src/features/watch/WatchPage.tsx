@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startFeature, stopFeature, featureStatus } from "../../shared/api";
+import { featureStatus, getJson, postJson, startFeature, stopFeature } from "../../shared/api";
 import { useSSE } from "../../shared/useSSE";
 import { useInstance } from "../../shared/instance";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
@@ -44,8 +44,10 @@ export function WatchPage() {
   const inst = useInstance();
   const [state, setState] = useState("idle");
   const [err, setErr] = useState("");
-  const [senders, setSenders] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
+  const [port, setPort] = useState(0);
+  const [robots, setRobots] = useState<{ name: string; ip: string; data_port: number }[]>([]);
+  const [manual, setManual] = useState("");
   const busRef = useRef<DataBus | null>(null);
   const t0Ref = useRef<number | null>(null);
   const [running, setRunning] = useState(false);
@@ -55,7 +57,9 @@ export function WatchPage() {
       const st = await featureStatus(inst.id);
       setState(st.state);
       setErr(st.error || "");
-      setRunning(st.state === "running");
+      setRunning(st.state === "running" && !!st.sender);
+      setSelected(st.sender || "");
+      setPort(st.data_port || 0);
     } catch (e) {
       setErr(String(e));
     }
@@ -80,10 +84,6 @@ export function WatchPage() {
     running ? `${inst.base}/events` : null,
     (msg) => {
       if (msg.type === "state") {
-        const list = (msg.senders as string[]) || [];
-        setSenders((prev) =>
-          prev.length === list.length && prev.every((s, i) => s === list[i]) ? prev : list
-        );
         if (msg.active_sender) {
           const next = String(msg.active_sender);
           setSelected((prev) => (prev === next ? prev : next));
@@ -95,25 +95,41 @@ export function WatchPage() {
     running
   );
 
-  const onSelect = async (name: string) => {
-    setSelected(name);
-    await fetch(`${inst.base}/select?sender=${encodeURIComponent(name)}`);
+  useEffect(() => {
+    if (selected) return;
+    let dead = false;
+    const tick = async () => {
+      try {
+        const r = await getJson<{ robots: { name: string; ip: string; data_port: number }[] }>("/api/robots");
+        if (!dead) setRobots(r.robots || []);
+      } catch {
+        /* ignore */
+      }
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => {
+      dead = true;
+      clearInterval(t);
+    };
+  }, [selected]);
+
+  const bind = async (name: string) => {
+    setErr("");
+    try {
+      await postJson(`${inst.base}/bind`, { sender: name });
+      await refresh();
+    } catch (e) {
+      setErr(String(e));
+    }
   };
 
   return (
     <div className="feature-page">
       <div className="feature-toolbar">
         <strong>Watch</strong>
-        <span className="mono">{state}</span>
+        <span className="mono">{selected || "未选择车辆"}{port ? ` · UDP ${port}` : ""} · {state}</span>
         {err && <span style={{ color: "var(--err)" }}>{err}</span>}
-        <select value={selected} onChange={(e) => onSelect(e.target.value)}>
-          {senders.length === 0 && <option value="">(no robot)</option>}
-          {senders.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
         <button type="button" className="ghost" onClick={() => busRef.current?.clear()}>
           清除
         </button>
@@ -133,7 +149,7 @@ export function WatchPage() {
         <button
           type="button"
           onClick={async () => {
-            await startFeature(inst.id, {});
+            await startFeature(inst.id, { sender: selected });
             await refresh();
           }}
         >
@@ -141,6 +157,27 @@ export function WatchPage() {
         </button>
       </div>
       <div className="feature-body fill">
+        {!selected && (
+          <div className="home" style={{ padding: "1rem" }}>
+            <h3>选择要查看的车</h3>
+            <p className="sub">选中后才会占用一个空闲 UDP 口，并只接收这辆车的数据。</p>
+            <div className="grid">
+              {robots.map((r) => (
+                <button key={r.name} type="button" className="card" onClick={() => bind(r.name)}>
+                  <h2>{r.name}</h2>
+                  <p>{r.ip}{r.data_port ? ` · 已在 UDP ${r.data_port}` : " · 将分配新端口"}</p>
+                </button>
+              ))}
+            </div>
+            {robots.length === 0 && <p className="sub">还没有发现车辆。</p>}
+            <div className="form-row" style={{ marginTop: "1rem" }}>
+              <input value={manual} placeholder="车名 sender_name" onChange={(e) => setManual(e.target.value)} />
+              <button type="button" disabled={!manual.trim()} onClick={() => bind(manual.trim())}>
+                查看这辆车
+              </button>
+            </div>
+          </div>
+        )}
         <DebugWorkbench busOut={onBus} imageSubscribe={imageSubscribe} />
       </div>
     </div>

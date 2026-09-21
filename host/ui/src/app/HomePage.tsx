@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { FEATURE_MODULES } from "../features/registry";
-import { featureStatus, listInstances, openFeature } from "../shared/api";
+import { featureStatus, getJson, listInstances, openFeature } from "../shared/api";
 import { InstanceProvider } from "../shared/instance";
 
-type Row = { instance: string; feature: string; title: string; state: string };
+type Row = { instance: string; feature: string; title: string; state: string; sender?: string; data_port?: number };
+type Robot = { name: string; ip: string; data_port: number; watches: number };
 
 export function HomePage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [robots, setRobots] = useState<Robot[]>([]);
   const [err, setErr] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [manual, setManual] = useState("");
 
   useEffect(() => {
     let dead = false;
@@ -16,6 +20,8 @@ export function HomePage() {
       try {
         const r = await listInstances();
         if (!dead) setRows(r.instances || []);
+        const bots = await getJson<{ robots: Robot[] }>("/api/robots");
+        if (!dead) setRobots(bots.robots || []);
       } catch {
         /* hub down */
       }
@@ -28,15 +34,21 @@ export function HomePage() {
     };
   }, []);
 
-  const open = async (feature: string) => {
+  const open = async (feature: string, config: Record<string, unknown> = {}) => {
     setErr("");
     try {
-      const r = await openFeature(feature);
+      const r = await openFeature(feature, config);
       const w = window.open(r.path, "_blank");
       if (!w) setErr("浏览器拦截了新窗口，请允许弹窗后重试");
+      else setPicking(false);
     } catch (e) {
       setErr(String(e));
     }
+  };
+
+  const onCard = (id: string) => {
+    if (id === "watch") setPicking(true);
+    else open(id);
   };
 
   return (
@@ -46,13 +58,50 @@ export function HomePage() {
       {err && <p style={{ color: "var(--err)" }}>{err}</p>}
       <div className="grid">
         {FEATURE_MODULES.map((m) => (
-          <button key={m.id} type="button" className="card" onClick={() => open(m.id)}>
+          <button key={m.id} type="button" className="card" onClick={() => onCard(m.id)}>
             <h2>{m.title}</h2>
             <p>{m.description}</p>
             <div className="state">新开页面</div>
           </button>
         ))}
       </div>
+      {picking && (
+        <div style={{ marginTop: "1.5rem" }}>
+          <h3>Watch：选择车辆</h3>
+          <p className="sub">每辆车分配一个空闲 UDP 口。这个页面只看你选中的那一辆。</p>
+          <div className="grid">
+            {robots.map((r) => (
+              <button
+                key={r.name}
+                type="button"
+                className="card"
+                onClick={() => open("watch", { sender: r.name })}
+              >
+                <h2>{r.name}</h2>
+                <p>
+                  {r.ip}
+                  {r.data_port ? ` · UDP ${r.data_port}` : " · 将分配新端口"}
+                </p>
+              </button>
+            ))}
+          </div>
+          {robots.length === 0 && <p className="sub">还没有发现车辆，可以直接填车名。</p>}
+          <div className="form-row" style={{ marginTop: "1rem" }}>
+            <input
+              value={manual}
+              placeholder="车名 sender_name"
+              onChange={(e) => setManual(e.target.value)}
+            />
+            <button
+              type="button"
+              disabled={!manual.trim()}
+              onClick={() => open("watch", { sender: manual.trim() })}
+            >
+              打开
+            </button>
+          </div>
+        </div>
+      )}
       {rows.length > 0 && (
         <div style={{ marginTop: "1.5rem" }}>
           <h3>已打开</h3>
@@ -60,7 +109,10 @@ export function HomePage() {
             {rows.map((r) => (
               <li key={r.instance}>
                 <a href={`/i/${r.instance}`} target="_blank" rel="noreferrer">
-                  {r.title} · {r.state}
+                  {r.title}
+                  {r.sender ? ` · ${r.sender}` : ""}
+                  {r.data_port ? ` · UDP ${r.data_port}` : ""}
+                  {` · ${r.state}`}
                 </a>
               </li>
             ))}

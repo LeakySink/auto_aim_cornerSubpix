@@ -20,4 +20,7 @@ export type FeatureStatus = {
   state: string;
   error?: string;
   config?: Record<string, unknown>;
+  feature?: string;
+  sender?: string;
+  data_port?: number;
 };
