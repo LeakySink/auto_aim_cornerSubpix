@@ -1,3 +1,5 @@
+// 多车协议自检的假车（multi_sender_test 默认 --bin=fake_robot）。
+// 按命令行起 RemoteLogger：beacon、带 elapsed 的 plot、以及 0xFE 图像。
 #include <chrono>
 #include <cmath>
 #include <cstdio>

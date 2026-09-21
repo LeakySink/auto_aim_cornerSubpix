@@ -222,13 +222,13 @@ int main(int argc, char * argv[])
   int timeout_s = 20;
   std::string bin = argv[0];
   auto slash = bin.rfind('/');
-  bin = (slash != std::string::npos ? bin.substr(0, slash + 1) : "./") + "remote_logger_test";
+  bin = (slash != std::string::npos ? bin.substr(0, slash + 1) : "./") + "fake_robot";
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
       std::printf("Usage: %s [--bin=PATH] [--rate=HZ] [--timeout=SEC]\n", argv[0]);
-      std::printf("  Spawns one remote_logger_test per robot, then acts as the host:\n");
+      std::printf("  Spawns one fake_robot per robot, then acts as the host:\n");
       std::printf("  beacon :%u, per-robot control, data from %u, peer from %u.\n",
                   kDiscoverPort, kDataBase, kPeerBase);
       std::printf("  Exits 0 when each robot's plot and 0xFE image arrive on its own data port.\n");
