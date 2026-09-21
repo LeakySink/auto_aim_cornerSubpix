@@ -16,9 +16,9 @@ def _parser():
     serve.add_argument("--port", type=int, default=8080, help="HTTP port")
     serve.add_argument("--no-browser", action="store_true")
     serve.add_argument("--open", default="/", dest="open_path",
-                       help="path to open in browser (e.g. /watch)")
+                       help="path to open in browser")
 
-    watch = sub.add_parser("watch", aliases=["debugger"], help="open portal at /watch")
+    watch = sub.add_parser("watch", aliases=["debugger"], help="open portal home")
     watch.add_argument("--port", type=int, default=8080, help="HTTP port")
     watch.add_argument("--data-port", type=int, default=15001, help="ignored (feature starts from UI)")
     watch.add_argument("--peer-port", type=int, default=15100, help="ignored")
@@ -27,7 +27,7 @@ def _parser():
     watch.add_argument("--download-assets", action="store_true", help="ignored")
     watch.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
-    rpl = sub.add_parser("replay", help="open portal at /replay")
+    rpl = sub.add_parser("replay", help="open portal home")
     rpl.add_argument("rlog", help="path to .rlog")
     rpl.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
     rpl.add_argument("--port", type=int, default=8765, help="HTTP port (auto +1 if busy)")
@@ -58,12 +58,12 @@ def main(argv=None):
 
     if args.cmd in ("watch", "debugger"):
         from .apps.hub_app import run
-        return run("0.0.0.0", args.port, args.no_browser, "/watch")
+        return run("0.0.0.0", args.port, args.no_browser, "/")
 
     if args.cmd == "replay":
-        print(f"[replay] open /replay and load: {args.rlog}", file=sys.stderr)
+        print(f"[replay] open home, then Replay, and load: {args.rlog}", file=sys.stderr)
         from .apps.hub_app import run
-        return run(args.host, args.port, args.no_browser, "/replay")
+        return run(args.host, args.port, args.no_browser, "/")
 
     if args.cmd == "dump":
         from .log.dump import dump_rlog_to_path

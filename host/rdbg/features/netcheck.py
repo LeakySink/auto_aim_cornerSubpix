@@ -37,14 +37,15 @@ class NetcheckFeature(Feature):
         self._beacon_lock = threading.Lock()
 
     def attach(self, shell):
-        shell.route("/api/netcheck/discover/start", self._disc_start, methods=("POST",))
-        shell.route("/api/netcheck/discover/stop", self._disc_stop, methods=("POST",))
-        shell.route("/api/netcheck/discover/beacons", self._disc_list)
-        shell.route("/api/netcheck/echo/start", self._echo_start, methods=("POST",))
-        shell.route("/api/netcheck/echo/stop", self._echo_stop, methods=("POST",))
-        shell.route("/api/netcheck/echo/status", self._echo_status)
-        shell.route("/api/netcheck/ping", self._ping, methods=("POST",))
-        shell.route("/api/netcheck/jobs/", self._job, prefix=True)
+        p = getattr(self, "api_prefix", "/api/netcheck")
+        shell.route(p + "/discover/start", self._disc_start, methods=("POST",))
+        shell.route(p + "/discover/stop", self._disc_stop, methods=("POST",))
+        shell.route(p + "/discover/beacons", self._disc_list)
+        shell.route(p + "/echo/start", self._echo_start, methods=("POST",))
+        shell.route(p + "/echo/stop", self._echo_stop, methods=("POST",))
+        shell.route(p + "/echo/status", self._echo_status)
+        shell.route(p + "/ping", self._ping, methods=("POST",))
+        shell.route(p + "/jobs/", self._job, prefix=True)
 
     def on_start(self, config):
         pass
@@ -303,10 +304,10 @@ class NetcheckFeature(Feature):
 
     def _job(self, handler):
         parts = handler.route_path.strip("/").split("/")
-        if len(parts) < 4:
+        if len(parts) < 2 or parts[-2] != "jobs":
             handler.send_error(404)
             return
-        jid = parts[3]
+        jid = parts[-1]
         with self._wlock:
             w = self._workers.get(jid)
             if not w:

@@ -9,6 +9,64 @@ from ..sources.live import LiveSource
 from .base import Feature, send_json
 
 
+_bus_lock = threading.Lock()
+_bus = None
+_bus_refs = 0
+_subscribers = []
+
+
+class _Fanout:
+    """One LiveSource, many watch-page SSE queues."""
+
+    def put(self, line):
+        for q in list(_subscribers):
+            try:
+                q.put(line)
+            except Exception:
+                pass
+
+    @property
+    def sse(self):
+        return self
+
+
+_fanout = _Fanout()
+
+
+def _watch_acquire(sse, config):
+    global _bus, _bus_refs
+    with _bus_lock:
+        if sse not in _subscribers:
+            _subscribers.append(sse)
+            _bus_refs += 1
+        if _bus is None:
+            data_port = int(config.get("data_port") or 15001)
+            peer_port = int(config.get("peer_port") or 15100)
+            discover_port = int(config.get("discover_port") or 15999)
+            src = LiveSource(data_port, peer_port, discover_port)
+            src.shell = _fanout
+            src.udp.on_output = _fanout.put
+            src.start()
+            _bus = src
+        return _bus
+
+
+def _watch_release(sse):
+    global _bus, _bus_refs
+    with _bus_lock:
+        if sse not in _subscribers:
+            return
+        _subscribers.remove(sse)
+        _bus_refs -= 1
+        if _bus_refs <= 0 and _bus is not None:
+            try:
+                _bus.stop()
+            except Exception:
+                pass
+            _bus = None
+            _bus_refs = 0
+
+
 class WatchFeature(Feature):
     id = "watch"
     title = "Watch"
@@ -20,31 +78,18 @@ class WatchFeature(Feature):
         self.sse = SSEQueue()
 
     def attach(self, shell):
-        shell.route("/api/watch/events", self._handle_events)
-        shell.route("/api/watch/select", self._handle_select)
-        shell.route("/api/watch/img_subscribe", self._handle_img_subscribe)
-        shell.route("/api/watch/state", self._handle_state)
+        p = getattr(self, "api_prefix", "/api/watch")
+        shell.route(p + "/events", self._handle_events)
+        shell.route(p + "/select", self._handle_select)
+        shell.route(p + "/img_subscribe", self._handle_img_subscribe)
+        shell.route(p + "/state", self._handle_state)
 
     def on_start(self, config):
-        data_port = int(config.get("data_port") or 15001)
-        peer_port = int(config.get("peer_port") or 15100)
-        discover_port = int(config.get("discover_port") or 15999)
-        self._source = LiveSource(data_port, peer_port, discover_port)
-        # Wire SSE without attaching LiveSource pages to /
-        self._source.shell = self  # duck-type: push via self.sse
-        self._source.udp.on_output = lambda line: self.sse.put(line)
-        # Monkey-patch push to our sse: LiveSource uses shell.sse
-        # Provide compatible shell facade
-        self._source.shell = _SseFacade(self.sse, self._source)
-        self._source.start()
+        self._source = _watch_acquire(self.sse, config)
 
     def on_stop(self):
-        if self._source:
-            try:
-                self._source.stop()
-            except Exception:
-                pass
-            self._source = None
+        _watch_release(self.sse)
+        self._source = None
 
     def run(self, stop_event: threading.Event):
         while not stop_event.wait(0.5):
@@ -78,7 +123,7 @@ class WatchFeature(Feature):
 
 
 class _SseFacade:
-    """Minimal shell stand-in so LiveSource can push to our SSE queue."""
+    """Kept for older call sites; live fanout uses _Fanout."""
 
     def __init__(self, sse, source):
         self.sse = sse

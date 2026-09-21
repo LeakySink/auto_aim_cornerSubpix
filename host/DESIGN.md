@@ -23,23 +23,20 @@ host/
 
 ```mermaid
 flowchart LR
-  SPA[static_ui SPA] --> API["/api/features*"]
-  SPA --> W["/api/watch/*"]
-  SPA --> R["/api/replay/*"]
-  Reg[FeatureRegistry] --> Tw[WatchThread]
-  Reg --> Tr[ReplayThread]
-  Reg --> Td[DumpJobs]
-  Reg --> Tn[NetcheckWorkers]
+  SPA[static_ui SPA] --> Open["POST /api/open"]
+  Open -->   Page["/i/id 独立页面"]
+  Page --> API["/api/i/id/*"]
+  Reg[FeatureRegistry] --> Tw[每页一条线程]
 ```
 
 ### 扩展新功能
 
-1. **后端**：`features/foo.py` 继承 `Feature`，实现 `attach` / `run`；在 `features/__init__.py` 的 `builtin_features()` 注册。
-2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。
+1. **后端**：`features/foo.py` 继承 `Feature`，`attach` 里用 `self.api_prefix` 注册路由；把类加进 `features/registry.py` 的 `KINDS`。
+2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。页面里用 `useInstance().base` 调本实例 API。
 3. `./host/ui/build.sh`，再 `./host/start.sh`。
 
-控制面：`GET /api/features`，`POST /api/features/<id>/start|stop`，`GET .../status`。  
-业务 API 挂在 `/api/<id>/...`。Feature `start()` 开守护线程；UI 切换不自动 `stop`。
+控制面：`GET /api/features`（种类），`POST /api/open` 新建实例并启动线程，`GET /api/instances`，`POST /api/instances/<id>/stop?forget=1`（关页时）。  
+业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。多个 Watch 共用一个 UDP `LiveSource`（引用计数）。
 
 ### CLI
 

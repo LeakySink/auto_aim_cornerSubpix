@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getJson, postJson, startFeature } from "../../shared/api";
+import { getJson, postJson } from "../../shared/api";
+import { useInstance } from "../../shared/instance";
 
 type Beacon = { name: string; ip: string; control: number; from: string };
 type PingResult = {
@@ -11,6 +12,7 @@ type PingResult = {
 };
 
 export function NetcheckPage() {
+  const { base } = useInstance();
   const [beacons, setBeacons] = useState<Beacon[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [echoPort, setEchoPort] = useState(15050);
@@ -24,14 +26,10 @@ export function NetcheckPage() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    startFeature("netcheck", {}).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     if (!discovering) return;
     const t = setInterval(async () => {
       try {
-        const r = await getJson<{ beacons: Beacon[] }>("/api/netcheck/discover/beacons");
+        const r = await getJson<{ beacons: Beacon[] }>(`${base}/discover/beacons`);
         setBeacons(r.beacons || []);
       } catch {
         /* ignore */
@@ -45,7 +43,7 @@ export function NetcheckPage() {
     const t = setInterval(async () => {
       try {
         const r = await getJson<{ state: string; stats?: { replies: number; last: string } }>(
-          "/api/netcheck/echo/status"
+          `${base}/echo/status`
         );
         setEchoStats(
           `${r.state} replies=${r.stats?.replies ?? 0} last=${r.stats?.last || "-"}`
@@ -71,7 +69,7 @@ export function NetcheckPage() {
             onClick={async () => {
               setErr("");
               try {
-                await postJson("/api/netcheck/discover/start", {});
+                await postJson(`${base}/discover/start`, {});
                 setDiscovering(true);
               } catch (e) {
                 setErr(String(e));
@@ -84,7 +82,7 @@ export function NetcheckPage() {
             type="button"
             className="ghost"
             onClick={async () => {
-              await postJson("/api/netcheck/discover/stop", {});
+              await postJson(`${base}/discover/stop`, {});
               setDiscovering(false);
             }}
           >
@@ -112,7 +110,7 @@ export function NetcheckPage() {
           <button
             type="button"
             onClick={async () => {
-              await postJson("/api/netcheck/echo/start", { port: echoPort });
+              await postJson(`${base}/echo/start`, { port: echoPort });
               setEchoOn(true);
             }}
           >
@@ -122,7 +120,7 @@ export function NetcheckPage() {
             type="button"
             className="ghost"
             onClick={async () => {
-              await postJson("/api/netcheck/echo/stop", {});
+              await postJson(`${base}/echo/stop`, {});
               setEchoOn(false);
             }}
           >
@@ -150,7 +148,7 @@ export function NetcheckPage() {
               setPingOut("running…");
               setErr("");
               try {
-                const r = await postJson<{ ok: boolean; job_id: string }>("/api/netcheck/ping", {
+                const r = await postJson<{ ok: boolean; job_id: string }>(`${base}/ping`, {
                   host,
                   port: pingPort,
                   size,
@@ -161,7 +159,7 @@ export function NetcheckPage() {
                     state: string;
                     error?: string;
                     result?: PingResult;
-                  }>(`/api/netcheck/jobs/${r.job_id}`);
+                  }>(`${base}/jobs/${r.job_id}`);
                   if (j.state === "running") {
                     setTimeout(poll, 400);
                     return;

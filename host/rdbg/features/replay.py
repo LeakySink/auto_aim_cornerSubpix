@@ -22,11 +22,12 @@ class ReplayFeature(Feature):
         self._session = None
 
     def attach(self, shell):
-        shell.route("/api/replay/events", self._handle_events)
-        shell.route("/api/replay/meta", self._handle_meta)
-        shell.route("/api/replay/session", self._handle_meta)
-        shell.route("/api/replay/frame/", self._handle_frame, prefix=True)
-        shell.route("/api/replay/load", self._handle_load, methods=("POST",))
+        p = getattr(self, "api_prefix", "/api/replay")
+        shell.route(p + "/events", self._handle_events)
+        shell.route(p + "/meta", self._handle_meta)
+        shell.route(p + "/session", self._handle_meta)
+        shell.route(p + "/frame/", self._handle_frame, prefix=True)
+        shell.route(p + "/load", self._handle_load, methods=("POST",))
 
     def on_start(self, config):
         path = config.get("path") or config.get("rlog") or ""

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startFeature, stopFeature, featureStatus } from "../../shared/api";
 import { useSSE } from "../../shared/useSSE";
+import { useInstance } from "../../shared/instance";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
 
 function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: { current: number | null }) {
@@ -40,6 +41,7 @@ function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: {
 }
 
 export function WatchPage() {
+  const inst = useInstance();
   const [state, setState] = useState("idle");
   const [err, setErr] = useState("");
   const [senders, setSenders] = useState<string[]>([]);
@@ -50,26 +52,20 @@ export function WatchPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const st = await featureStatus("watch");
+      const st = await featureStatus(inst.id);
       setState(st.state);
       setErr(st.error || "");
       setRunning(st.state === "running");
     } catch (e) {
       setErr(String(e));
     }
-  }, []);
+  }, [inst.id]);
 
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
-  }, [refresh]);
-
-  useEffect(() => {
-    if (state === "idle" || state === "error") {
-      startFeature("watch", {}).then(refresh).catch((e) => setErr(String(e)));
-    }
-  }, []);
+  }, [inst.id]);
 
   const onBus = useCallback((b: DataBus) => {
     busRef.current = b;
@@ -77,11 +73,11 @@ export function WatchPage() {
 
   const imageSubscribe = useCallback((names: string[]) => {
     const q = names.map(encodeURIComponent).join(",");
-    fetch(`/api/watch/img_subscribe?streams=${q}`).catch(() => {});
-  }, []);
+    fetch(`${inst.base}/img_subscribe?streams=${q}`).catch(() => {});
+  }, [inst.base]);
 
   useSSE(
-    running ? "/api/watch/events" : null,
+    running ? `${inst.base}/events` : null,
     (msg) => {
       if (msg.type === "state") {
         const list = (msg.senders as string[]) || [];
@@ -101,7 +97,7 @@ export function WatchPage() {
 
   const onSelect = async (name: string) => {
     setSelected(name);
-    await fetch(`/api/watch/select?sender=${encodeURIComponent(name)}`);
+    await fetch(`${inst.base}/select?sender=${encodeURIComponent(name)}`);
   };
 
   return (
@@ -128,7 +124,7 @@ export function WatchPage() {
           type="button"
           className="ghost"
           onClick={async () => {
-            await stopFeature("watch");
+            await stopFeature(inst.id);
             await refresh();
           }}
         >
@@ -137,7 +133,7 @@ export function WatchPage() {
         <button
           type="button"
           onClick={async () => {
-            await startFeature("watch", {});
+            await startFeature(inst.id, {});
             await refresh();
           }}
         >

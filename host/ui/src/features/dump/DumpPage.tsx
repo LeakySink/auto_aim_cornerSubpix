@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getJson, postJson, startFeature } from "../../shared/api";
+import { getJson, postJson } from "../../shared/api";
+import { useInstance } from "../../shared/instance";
 
 type Job = {
   id: string;
@@ -10,6 +11,7 @@ type Job = {
 };
 
 export function DumpPage() {
+  const { base } = useInstance();
   const [path, setPath] = useState("");
   const [output, setOutput] = useState("");
   const [fps, setFps] = useState(10);
@@ -17,28 +19,24 @@ export function DumpPage() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    startFeature("dump", {}).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     if (!job || job.state === "done" || job.state === "error") return;
     const t = setInterval(async () => {
       try {
-        const j = await getJson<Job>(`/api/dump/jobs/${job.id}`);
+        const j = await getJson<Job>(`${base}/jobs/${job.id}`);
         setJob(j);
       } catch (e) {
         setErr(String(e));
       }
     }, 500);
     return () => clearInterval(t);
-  }, [job?.id, job?.state]);
+  }, [job?.id, job?.state, base]);
 
   const run = async () => {
     setErr("");
     setJob(null);
     try {
       const res = await postJson<{ ok: boolean; job_id?: string; error?: string }>(
-        "/api/dump/run",
+        `${base}/run`,
         { path, output: output || undefined, fps }
       );
       if (!res.ok || !res.job_id) throw new Error(res.error || "failed");

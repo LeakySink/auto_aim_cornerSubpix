@@ -98,6 +98,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .card {
   display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
   padding: 1.25rem;
   background: var(--panel);
   border: 1px solid var(--border);

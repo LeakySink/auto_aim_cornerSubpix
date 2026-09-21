@@ -20,8 +20,9 @@ class DumpFeature(Feature):
         self._jobs_lock = threading.Lock()
 
     def attach(self, shell):
-        shell.route("/api/dump/run", self._handle_run, methods=("POST",))
-        shell.route("/api/dump/jobs/", self._handle_job, prefix=True)
+        p = getattr(self, "api_prefix", "/api/dump")
+        shell.route(p + "/run", self._handle_run, methods=("POST",))
+        shell.route(p + "/jobs/", self._handle_job, prefix=True)
 
     def on_start(self, config):
         pass
@@ -75,11 +76,10 @@ class DumpFeature(Feature):
 
     def _handle_job(self, handler):
         parts = handler.route_path.strip("/").split("/")
-        # api dump jobs <id>
-        if len(parts) < 4:
+        if len(parts) < 2 or parts[-2] != "jobs":
             handler.send_error(404)
             return
-        job_id = parts[3]
+        job_id = parts[-1]
         with self._jobs_lock:
             job = self._jobs.get(job_id)
         if not job:

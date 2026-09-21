@@ -1,21 +1,17 @@
-"""Unified Hub app — one HTTP port, FeatureRegistry, SPA static_ui."""
+"""Unified Hub app — one HTTP port, per-page feature threads, SPA."""
 
 from __future__ import annotations
 
 import sys
 import time
 
-from ..features import builtin_features
-from ..features.registry import FeatureRegistry
+from ..features.registry import KINDS, FeatureRegistry
 from ..http.httputil import STATIC_UI_DIR, open_browser
 from ..http.shell import Shell
 
 
 def run(host="0.0.0.0", port=8080, no_browser=False, open_path="/"):
     registry = FeatureRegistry()
-    for feat in builtin_features():
-        registry.register(feat)
-
     shell = Shell(name="hub")
     registry.attach(shell)
 
@@ -33,7 +29,7 @@ def run(host="0.0.0.0", port=8080, no_browser=False, open_path="/"):
 
     url = f"http://127.0.0.1:{bound}{open_path}"
     print(f"[hub] {url}", file=sys.stderr)
-    print(f"[hub] features: {', '.join(f.id for f in registry.all())}", file=sys.stderr)
+    print(f"[hub] features: {', '.join(KINDS)}", file=sys.stderr)
     if not no_browser:
         time.sleep(0.15)
         open_browser(url)

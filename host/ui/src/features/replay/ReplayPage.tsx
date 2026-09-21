@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { postJson, startFeature, stopFeature } from "../../shared/api";
+import { postJson, stopFeature } from "../../shared/api";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
+import { useInstance } from "../../shared/instance";
 
 type Frame = { i: number; t: number; meta: { name?: string } };
 type LogRec = { t: number; ts?: number; level: string; msg: string };
@@ -14,6 +15,7 @@ type Meta = {
 };
 
 export function ReplayPage() {
+  const inst = useInstance();
   const [path, setPath] = useState("");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [err, setErr] = useState("");
@@ -30,10 +32,6 @@ export function ReplayPage() {
 
   tRef.current = t;
   rateRef.current = rate;
-
-  useEffect(() => {
-    startFeature("replay", {}).catch(() => {});
-  }, []);
 
   const applyImages = useCallback(async (time: number) => {
     const m = metaRef.current;
@@ -53,7 +51,7 @@ export function ReplayPage() {
         if (lastImg.current[name] === fr.i) return;
         lastImg.current[name] = fr.i;
         try {
-          const r = await fetch(`/api/replay/frame/${fr.i}`);
+          const r = await fetch(`${inst.base}/frame/${fr.i}`);
           if (!r.ok) return;
           if (lastImg.current[name] !== fr.i) return;
           const blob = await r.blob();
@@ -63,7 +61,7 @@ export function ReplayPage() {
         }
       })
     );
-  }, []);
+  }, [inst.base]);
 
   const seek = useCallback(
     (nt: number, keepPlay = false) => {
@@ -87,8 +85,7 @@ export function ReplayPage() {
     setErr("");
     setPlaying(false);
     try {
-      await startFeature("replay", { path });
-      const res = await postJson<{ ok: boolean; meta?: Meta; error?: string }>("/api/replay/load", { path });
+      const res = await postJson<{ ok: boolean; meta?: Meta; error?: string }>(`${inst.base}/load`, { path });
       if (!res.ok || !res.meta) throw new Error(res.error || "load failed");
       setMeta(res.meta);
       metaRef.current = res.meta;
@@ -210,7 +207,7 @@ export function ReplayPage() {
         <button type="button" className="ghost" onClick={() => busRef.current?.resetView()}>
           重置
         </button>
-        <button type="button" className="ghost" onClick={() => stopFeature("replay")}>
+        <button type="button" className="ghost" onClick={() => stopFeature(inst.id)}>
           停止线程
         </button>
         {err && <span style={{ color: "var(--err)" }}>{err}</span>}

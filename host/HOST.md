@@ -23,8 +23,8 @@ dump 导出视频依赖 `opencv-python-headless`（`requirements.txt`）。
 兼容旧入口（均转到门户）：
 
 ```bash
-./host/watch.sh                          # 打开 /watch
-./host/replay.sh logs/run_xxx.rlog       # 打开 /replay（在 UI 中填路径加载）
+./host/watch.sh                          # 打开门户首页，再点 Watch 新开页面
+./host/replay.sh logs/run_xxx.rlog       # 打开门户；在新开的 Replay 页填路径
 ./host/dump.sh logs/run_xxx.rlog         # 仍可命令行 dump；也可用门户 Dump 页
 ./host/netcheck.sh discover              # 仍可命令行；也可用门户 Netcheck 页
 ```
@@ -50,10 +50,11 @@ host/
 | `--port` | 8080 | HTTP |
 | `--host` | 0.0.0.0 | 绑定地址 |
 | `--no-browser` | off | 不自动开浏览器 |
-| `--open` | `/` | 打开路径（如 `/watch`） |
+| `--open` | `/` | 打开路径（首页） |
 
 ## 使用提示
 
-- 各功能在 **独立线程** 中运行；切回首页不会自动 stop，顶栏显示「运行中」。
+- 首页点功能会 **新开页面**，每个页面一条线程，可以多开。关掉页面（或点「关闭」）会停掉这条线程。
+- 多个 Watch 共用同一 UDP 口；最后一个 Watch 关掉后才停止接收。
 - Replay：在页面输入 `.rlog` 绝对/相对路径后点「加载」。
 - Dump：导出目录含 `log.txt` / `plot.txt` / `images.mp4`。

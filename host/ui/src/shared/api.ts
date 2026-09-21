@@ -17,19 +17,32 @@ export function listFeatures() {
   return req<{ features: import("./types").FeatureMeta[] }>("/api/features");
 }
 
+export function listInstances() {
+  return req<{ instances: Array<import("./types").FeatureStatus & { feature: string; instance: string; title: string }> }>(
+    "/api/instances"
+  );
+}
+
+export function openFeature(feature: string, config: Record<string, unknown> = {}) {
+  return req<{ ok: boolean; id: string; feature: string; path: string }>("/api/open", {
+    method: "POST",
+    body: JSON.stringify({ feature, config }),
+  });
+}
+
 export function featureStatus(id: string) {
-  return req<import("./types").FeatureStatus>(`/api/features/${id}/status`);
+  return req<import("./types").FeatureStatus & { feature?: string }>(`/api/instances/${id}/status`);
 }
 
 export function startFeature(id: string, config: Record<string, unknown> = {}) {
-  return req<import("./types").FeatureStatus>(`/api/features/${id}/start`, {
+  return req<import("./types").FeatureStatus>(`/api/instances/${id}/start`, {
     method: "POST",
     body: JSON.stringify(config),
   });
 }
 
 export function stopFeature(id: string) {
-  return req<import("./types").FeatureStatus>(`/api/features/${id}/stop`, {
+  return req<{ ok: boolean }>(`/api/instances/${id}/stop`, {
     method: "POST",
     body: JSON.stringify({}),
   });
