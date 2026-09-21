@@ -40,7 +40,6 @@ host/
     apps/hub_app.py        Hub 生命周期
     features/              Feature 插件（watch/replay/dump/netcheck）
     static_ui/             前端构建产物
-    static/                旧 HTML（legacy fallback）
   HOST.md / DESIGN.md / PROTOCOL.md
 ```
 

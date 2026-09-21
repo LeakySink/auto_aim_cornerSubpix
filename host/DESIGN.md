@@ -19,7 +19,6 @@ host/
       watch.py / replay.py / dump.py / netcheck.py
     static_ui/             ui 构建产物（SPA）
     sources/ live|replay   仍被 Feature 薄封装复用
-    static/                旧 watch.html/replay.html（legacy）
 ```
 
 ```mermaid
@@ -68,9 +67,8 @@ host/
     log/                   .rlog / dump / session
     sources/               live / replay（被 features 复用）
     features/              Hub 插件
-    apps/                  hub_app / watch / replay
+    apps/                  hub_app
     static_ui/             SPA
-    static/                legacy HTML/JS
 ```
 
 | 层 | 职责 | 禁止 |
@@ -98,13 +96,13 @@ Hub:
   Feature netcheck → discover/echo/ping workers
 ```
 
-旧「两进程 watch/replay」仍可通过 `python -m rdbg watch|replay` 使用；推荐统一 Hub。
+`python -m rdbg watch|replay` 也进入同一 Hub（分别打开 `/watch`、`/replay`）。
 
 ---
 
-## 3. 怎么加能力（legacy 面板说明）
+## 3. 怎么加能力
 
-旧 `static/js/plugins` 仅服务 legacy HTML。新面板做在 React `DebugWorkbench` / 各 Feature 页。
+新界面加在 `ui/src/features/`，并在 `registry.ts` 注册。不要再加独立 HTML。
 
 ### 3.1 新数据源（仍可用于 Feature 内部）
 
@@ -120,15 +118,11 @@ class FooSource:
 
 2. `attach` 里只用壳 API：`page` / `route` / `sse_route`。
 3. `rdbg/apps/foo.py` 写 `run()`：`Source` + `Shell` + `bind` + `serve`。
-4. `cli.py` 加子命令。根目录加 `foo.sh`（可选）。
+4. `cli.py` 加子命令，或做成 Hub `Feature`。根目录加 `foo.sh`（可选）。
 
 ### 3.2 新面板
 
-1. `static/js/plugins/foo.js` 里 `Rdbg.registerPanel({...})`。
-2. `watch.html` 和 `replay.html` 在 `shell.js` **之前**加一行 script。
-3. 类型下拉框自动出现。不要改 `shell.js` 的 `if (type === …)`（已经没有）。
-
-脚本顺序必须是：`registry.js` → 各 `plugins/*.js` → `shell.js` →（回放再）`replay.js`。
+在 `ui/src/features/<id>/` 写页面组件，并追加到 `ui/src/features/registry.ts`。曲线/日志/图像复用 `DebugWorkbench`。
 
 ---
 

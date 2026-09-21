@@ -54,7 +54,6 @@ class LiveSource:
     def attach(self, shell):
         self.shell = shell
         self.udp.on_output = lambda line: shell.sse.put(line)
-        shell.page("/", "watch.html")
         shell.sse_route("/events", on_connect=self.push_state)
         shell.route("/select", self._handle_select)
         shell.route("/img_subscribe", self._handle_img_subscribe)
