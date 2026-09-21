@@ -147,7 +147,13 @@ def _iter_v2(fp, include_jpeg):
                     return
                 fp.seek(cur + jpg_len)
                 jpeg = b""
-            yield {"kind": "img", "ts": ts, "meta": _meta_from(meta_raw), "jpeg": jpeg}
+            yield {
+                "kind": "img",
+                "ts": ts,
+                "meta": _meta_from(meta_raw),
+                "jpeg": jpeg,
+                "jpeg_len": jpg_len,
+            }
         else:
             print(f"[rlog] unknown type 0x{typ:02x}, stop", file=sys.stderr)
             return

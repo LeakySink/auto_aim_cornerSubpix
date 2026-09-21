@@ -34,8 +34,6 @@ class ReplaySource:
 
     def attach(self, shell):
         self.shell = shell
-        shell.page("/", "replay.html")
-        shell.page("/index.html", "replay.html")
         shell.sse_route("/events", on_connect=self.push_hello)
         shell.route("/select", self._handle_select)
         shell.route("/api/meta", self._handle_meta)

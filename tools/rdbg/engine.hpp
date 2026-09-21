@@ -11,9 +11,12 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace tools
@@ -21,7 +24,7 @@ namespace tools
 namespace rdbg
 {
 
-// 把 L0–L3 拼起来：主线程只入队，三条 worker 各管一层。
+// 主线程只入队。发送与落盘分开：var/img 先 UDP，disk_worker 异步写 .rlog。
 class Engine
 {
 public:
@@ -38,11 +41,28 @@ private:
   {
     uint64_t ts;
     std::string json_str;
+    uint8_t prio{1};  // 0=image 1=normal 2=warn 3=error
+  };
+
+  struct DiskJob
+  {
+    bool image{false};
+    bool urgent{false};  // 写后立刻 fdatasync
+    uint8_t prio{1};
+    uint64_t ts{0};
+    std::string meta;
+    std::vector<uint8_t> jpeg;
+    std::vector<std::pair<uint64_t, std::string>> jsons;
   };
 
   void var_loop();
   void img_loop();
   void ctrl_loop();
+  void disk_loop();
+  void enqueue_disk(DiskJob job);
+  static uint8_t level_prio(const std::string & level);
+  void note_stream(const std::string & name);
+  void maybe_send_catalog();
   static std::string resolve_sender(const std::string & name);
 
   RemoteLogger::Config cfg_;
@@ -60,9 +80,20 @@ private:
   std::condition_variable var_cv_;
   std::mutex var_wake_mtx_;
 
+  std::mutex stream_mtx_;
+  std::unordered_set<std::string> known_streams_;
+  std::chrono::steady_clock::time_point last_catalog_{};
+
+  std::deque<DiskJob> disk_q_;
+  std::mutex disk_mtx_;
+  std::condition_variable disk_cv_;
+  std::condition_variable disk_idle_cv_;
+  std::atomic<bool> disk_open_{false};
+
   std::thread var_worker_;
   std::thread img_worker_;
   std::thread ctrl_worker_;
+  std::thread disk_worker_;
   std::chrono::steady_clock::time_point last_hb_{};
 };
 

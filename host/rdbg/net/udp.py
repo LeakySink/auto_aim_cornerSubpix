@@ -9,7 +9,39 @@ import threading
 import time
 
 IMG_MARKER = 0xFF
+IMG_FRAG_MARKER = 0xFE
 MAX_UDP = 65536
+FRAG_TIMEOUT_S = 0.5
+FRAG_MAX_FRAMES = 32
+
+
+def _parse_from_legacy_image(data):
+    if len(data) < 17:
+        return ""
+    meta_len = struct.unpack_from("<I", data, 9)[0]
+    meta_off = 13
+    if len(data) < meta_off + meta_len:
+        return ""
+    try:
+        meta = json.loads(data[meta_off:meta_off + meta_len].decode("utf-8"))
+    except Exception:
+        return ""
+    if isinstance(meta, dict):
+        frm = meta.get("_from")
+        return frm if isinstance(frm, str) else ""
+    return ""
+
+
+def _parse_from_frag(data):
+    if len(data) < 16:
+        return ""
+    from_len = data[15]
+    if len(data) < 16 + from_len:
+        return ""
+    try:
+        return data[16:16 + from_len].decode("utf-8")
+    except Exception:
+        return ""
 
 
 def packet_sender(data):
@@ -17,18 +49,10 @@ def packet_sender(data):
     if not data:
         return ""
     try:
+        if data[0] == IMG_FRAG_MARKER:
+            return _parse_from_frag(data)
         if data[0] == IMG_MARKER:
-            if len(data) < 17:
-                return ""
-            meta_len = struct.unpack_from("<I", data, 9)[0]
-            meta_off = 13
-            if len(data) < meta_off + meta_len:
-                return ""
-            meta = json.loads(data[meta_off:meta_off + meta_len].decode("utf-8"))
-            if isinstance(meta, dict):
-                frm = meta.get("_from")
-                return frm if isinstance(frm, str) else ""
-            return ""
+            return _parse_from_legacy_image(data)
         j = json.loads(data.decode("utf-8"))
         if isinstance(j, dict):
             frm = j.get("_from")
@@ -36,6 +60,92 @@ def packet_sender(data):
     except Exception:
         return ""
     return ""
+
+
+class _FragAssembler:
+    """Reassemble 0xFE image fragments; drop incomplete frames on timeout."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        # (sender, frame_seq) -> state
+        self._frames = {}
+
+    def push(self, data):
+        if len(data) < 16:
+            return None
+        ts = struct.unpack_from("<Q", data, 1)[0]
+        frame_seq, frag_idx, frag_cnt = struct.unpack_from("<HHH", data, 9)
+        from_len = data[15]
+        off = 16
+        if from_len == 0 or len(data) < off + from_len:
+            return None
+        sender = data[off:off + from_len].decode("utf-8", errors="replace")
+        off += from_len
+        if frag_cnt == 0 or frag_idx >= frag_cnt:
+            return None
+
+        key = (sender, frame_seq)
+        now = time.monotonic()
+        with self._lock:
+            self._expire_locked(now)
+            st = self._frames.get(key)
+            if st is None:
+                if len(self._frames) >= FRAG_MAX_FRAMES:
+                    oldest = min(self._frames.items(), key=lambda kv: kv[1]["t"])
+                    self._frames.pop(oldest[0], None)
+                st = {
+                    "t": now,
+                    "ts": ts,
+                    "cnt": frag_cnt,
+                    "parts": {},
+                    "meta": None,
+                    "jpg_total": None,
+                    "sender": sender,
+                }
+                self._frames[key] = st
+            elif st["cnt"] != frag_cnt:
+                return None
+
+            if frag_idx in st["parts"]:
+                return None
+
+            if frag_idx == 0:
+                if len(data) < off + 2:
+                    return None
+                meta_len = struct.unpack_from("<H", data, off)[0]
+                off += 2
+                if len(data) < off + meta_len + 4:
+                    return None
+                meta_raw = data[off:off + meta_len]
+                off += meta_len
+                jpg_total = struct.unpack_from("<I", data, off)[0]
+                off += 4
+                try:
+                    st["meta"] = json.loads(meta_raw.decode("utf-8"))
+                except Exception:
+                    st["meta"] = meta_raw.decode("utf-8", errors="replace")
+                st["jpg_total"] = jpg_total
+                st["ts"] = ts
+
+            chunk = data[off:]
+            st["parts"][frag_idx] = chunk
+            st["t"] = now
+
+            if len(st["parts"]) != st["cnt"] or st["jpg_total"] is None:
+                return None
+
+            jpeg = b"".join(st["parts"][i] for i in range(st["cnt"]))
+            meta = st["meta"]
+            ts_out = st["ts"]
+            del self._frames[key]
+            if len(jpeg) != st["jpg_total"]:
+                return None
+            return ts_out, meta, jpeg, sender
+
+    def _expire_locked(self, now):
+        dead = [k for k, v in self._frames.items() if now - v["t"] > FRAG_TIMEOUT_S]
+        for k in dead:
+            del self._frames[k]
 
 
 class UdpBackend:
@@ -57,6 +167,7 @@ class UdpBackend:
         self._last_from = ""
         self._was_connected = False
         self._filter = ""
+        self._frags = _FragAssembler()
 
     @property
     def active_sender(self):
@@ -92,6 +203,7 @@ class UdpBackend:
             self._running = True
             self._last_pkt = 0.0
             self._was_connected = False
+            self._frags = _FragAssembler()
             self._thread = threading.Thread(target=self._recv_loop, daemon=True)
             self._thread.start()
             self._status_thread = threading.Thread(target=self._status_loop, daemon=True)
@@ -178,13 +290,41 @@ class UdpBackend:
             time.sleep(0.2)
 
     def _handle(self, data):
-        if data[0] == IMG_MARKER:
+        if data[0] == IMG_FRAG_MARKER:
+            self._handle_frag(data)
+        elif data[0] == IMG_MARKER:
             self._handle_image(data)
         else:
             self._handle_json(data)
 
     def _drop_filtered(self):
         return bool(self._filter and self._last_from and self._last_from != self._filter)
+
+    def _emit_image(self, ts, meta, jpeg):
+        if isinstance(meta, dict):
+            frm = meta.get("_from")
+            if isinstance(frm, str):
+                self._last_from = frm
+        if self._drop_filtered():
+            return
+        self._emit({
+            "type": "image",
+            "ts": ts,
+            "meta": meta,
+            "jpg_b64": base64.b64encode(jpeg).decode("ascii"),
+        })
+
+    def _handle_frag(self, data):
+        frm = _parse_from_frag(data)
+        if frm:
+            self._last_from = frm
+        got = self._frags.push(data)
+        if not got:
+            return
+        ts, meta, jpeg, sender = got
+        if sender:
+            self._last_from = sender
+        self._emit_image(ts, meta, jpeg)
 
     def _handle_image(self, data):
         if len(data) < 17:
@@ -203,18 +343,7 @@ class UdpBackend:
             meta = json.loads(meta_raw.decode("utf-8"))
         except Exception:
             meta = meta_raw.decode("utf-8", errors="replace")
-        if isinstance(meta, dict):
-            frm = meta.get("_from")
-            if isinstance(frm, str):
-                self._last_from = frm
-        if self._drop_filtered():
-            return
-        self._emit({
-            "type": "image",
-            "ts": ts,
-            "meta": meta,
-            "jpg_b64": base64.b64encode(jpeg).decode("ascii"),
-        })
+        self._emit_image(ts, meta, jpeg)
 
     def _handle_json(self, data):
         try:
@@ -227,6 +356,18 @@ class UdpBackend:
         if isinstance(frm, str):
             self._last_from = frm
         if "hb" in j:
+            return
+        if "img_streams" in j:
+            streams = j.get("img_streams") or []
+            if not isinstance(streams, list):
+                return
+            if self._drop_filtered():
+                return
+            self._emit({
+                "type": "img_streams",
+                "streams": [s for s in streams if isinstance(s, str)],
+                "_from": frm or "",
+            })
             return
         if self._drop_filtered():
             return

@@ -32,9 +32,19 @@ void Engine::init(const RemoteLogger::Config & cfg)
   fps_.reset();
   mailbox_.reset();
   last_hb_ = {};
+  last_catalog_ = {};
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
     var_buf_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(stream_mtx_);
+    known_streams_.clear();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(disk_mtx_);
+    disk_q_.clear();
   }
 
   control_.control_port = cfg_.control_port;
@@ -48,6 +58,8 @@ void Engine::init(const RemoteLogger::Config & cfg)
   if (cfg_.enable_remote) remote_ok_ = control_.start();
 
   running_ = true;
+  disk_open_ = cfg_.enable_local;
+  if (disk_open_) disk_worker_ = std::thread(&Engine::disk_loop, this);
   if (remote_ok_) ctrl_worker_ = std::thread(&Engine::ctrl_loop, this);
   var_worker_ = std::thread(&Engine::var_loop, this);
   img_worker_ = std::thread(&Engine::img_loop, this);
@@ -62,6 +74,19 @@ void Engine::shutdown()
   if (ctrl_worker_.joinable()) ctrl_worker_.join();
   if (var_worker_.joinable()) var_worker_.join();
   if (img_worker_.joinable()) img_worker_.join();
+
+  // 生产者已停：等待落盘队列排空，再停 disk_worker 并强制 sync。
+  {
+    std::unique_lock<std::mutex> lock(disk_mtx_);
+    disk_cv_.notify_all();
+    if (disk_open_.load()) {
+      disk_idle_cv_.wait_for(lock, std::chrono::seconds(5),
+                             [&] { return disk_q_.empty(); });
+    }
+  }
+  disk_open_ = false;
+  disk_cv_.notify_all();
+  if (disk_worker_.joinable()) disk_worker_.join();
   control_.stop();
   remote_ok_ = false;
   session_.close();
@@ -71,13 +96,28 @@ void Engine::plot(const nlohmann::json & data)
 {
   if (!running_) return;
   uint64_t ts = now_ns();
-  if (data.contains("ts") && data["ts"].is_number()) ts = data["ts"].get<uint64_t>();
+  nlohmann::json j = data;
+  if (j.contains("ts") && j["ts"].is_number()) ts = j["ts"].get<uint64_t>();
+  else j["ts"] = ts;
+  if (!j.contains("_from")) j["_from"] = cfg_.sender_name;
+  uint8_t prio = 1;
+  if (j.contains("level") && j["level"].is_string())
+    prio = level_prio(j["level"].get<std::string>());
   {
     std::lock_guard<std::mutex> lock(var_mtx_);
     if (var_buf_.size() >= cfg_.var_buffer_size) var_buf_.erase(var_buf_.begin());
-    var_buf_.push_back({ts, data.dump()});
+    var_buf_.push_back({ts, j.dump(), prio});
   }
   var_cv_.notify_one();
+}
+
+uint8_t Engine::level_prio(const std::string & level)
+{
+  if (level == "ERROR" || level == "error" || level == "FATAL" || level == "fatal")
+    return 3;
+  if (level == "WARN" || level == "warn" || level == "WARNING" || level == "warning")
+    return 2;
+  return 1;
 }
 
 void Engine::log(const std::string & level, const std::string & msg)
@@ -98,9 +138,16 @@ void Engine::plot_image(const cv::Mat & img, const nlohmann::json & meta)
   if (!running_) return;
   if (!cfg_.enable_local && !cfg_.enable_remote) return;
   if (img.empty()) return;
+  const auto name = stream_name(meta);
+  note_stream(name);
+
+  const bool want_remote =
+    cfg_.enable_remote && remote_ok_ && control_.image_subscribed(name);
+  if (!cfg_.enable_local && !want_remote) return;
+
   uint64_t ts = now_ns();
   if (meta.contains("ts") && meta["ts"].is_number()) ts = meta["ts"].get<uint64_t>();
-  if (!fps_.select(ts, stream_name(meta))) return;
+  if (!fps_.select(ts, name)) return;
   mailbox_.publish(ts, meta, img);
 }
 
@@ -108,21 +155,54 @@ bool Engine::poll_calib_cmd(std::string & cmd) { return control_.poll_calib_cmd(
 
 bool Engine::poll_json(nlohmann::json & data) { return control_.poll_json(data); }
 
+void Engine::note_stream(const std::string & name)
+{
+  if (name.empty()) return;
+  std::lock_guard<std::mutex> lock(stream_mtx_);
+  known_streams_.insert(name);
+}
+
+void Engine::maybe_send_catalog()
+{
+  if (!cfg_.enable_remote || !remote_ok_ || !control_.has_head()) return;
+  auto now = std::chrono::steady_clock::now();
+  if (last_catalog_.time_since_epoch().count() != 0) {
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_catalog_);
+    if (ms.count() < static_cast<int64_t>(kImgCatalogIntervalMs)) return;
+  }
+  std::vector<std::string> streams;
+  {
+    std::lock_guard<std::mutex> lock(stream_mtx_);
+    if (known_streams_.empty()) return;
+    streams.assign(known_streams_.begin(), known_streams_.end());
+  }
+  last_catalog_ = now;
+  data_.send_img_catalog(streams);
+}
+
 void Engine::var_loop()
 {
   std::vector<VarEntry> pending;
   auto flush = [&]() {
     if (pending.empty()) return;
-    if (cfg_.enable_local) {
-      std::vector<std::pair<uint64_t, std::string>> rec;
-      rec.reserve(pending.size());
-      for (const auto & e : pending) rec.push_back({e.ts, e.json_str});
-      session_.write_jsons(rec);
-    }
-    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
-      for (const auto & e : pending) data_.send_raw_json(e.ts, e.json_str);
+    std::vector<std::pair<uint64_t, std::string>> rec;
+    rec.reserve(pending.size());
+    uint8_t prio = 1;
+    for (auto & e : pending) {
+      if (e.prio > prio) prio = e.prio;
+      rec.emplace_back(e.ts, std::move(e.json_str));
     }
     pending.clear();
+    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
+      for (const auto & e : rec) data_.send_raw_json(e.second);
+    }
+    if (cfg_.enable_local) {
+      DiskJob job;
+      job.prio = prio;
+      job.urgent = (prio >= 3);
+      job.jsons = std::move(rec);
+      enqueue_disk(std::move(job));
+    }
   };
 
   while (running_) {
@@ -152,20 +232,80 @@ void Engine::img_loop()
       if (!running_.load()) break;
       continue;
     }
+    const auto name = stream_name(entry.meta);
+    const bool want_remote =
+      cfg_.enable_remote && remote_ok_ && control_.has_head() &&
+      control_.image_subscribed(name);
+    if (!cfg_.enable_local && !want_remote) {
+      entry.meta = nlohmann::json{};
+      entry.img.release();
+      continue;
+    }
+
     std::vector<uint8_t> jpeg;
     if (encode_jpeg(entry.img, cfg_.img_width, cfg_.img_quality, jpeg)) {
-      nlohmann::json meta = entry.meta;
+      nlohmann::json meta = std::move(entry.meta);
       data_.inject(meta);
       if (!meta.contains("ts")) meta["ts"] = entry.ts;
-      if (cfg_.enable_local) session_.write_image(entry.ts, meta, jpeg);
-      if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
-        data_.send_image(jpeg, entry.ts, entry.meta);
+      const std::string meta_str = meta.dump();
+      if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
+      if (cfg_.enable_local) {
+        DiskJob job;
+        job.image = true;
+        job.prio = 0;
+        job.ts = entry.ts;
+        job.meta = meta_str;
+        job.jpeg = std::move(jpeg);
+        enqueue_disk(std::move(job));
       }
     }
     entry.meta = nlohmann::json{};
     entry.img.release();
   }
   mailbox_.clear();
+}
+
+void Engine::enqueue_disk(DiskJob job)
+{
+  if (!disk_open_) return;
+  {
+    std::lock_guard<std::mutex> lock(disk_mtx_);
+    if (!disk_open_) return;
+    while (disk_q_.size() >= kDiskQueueMax) {
+      // 丢最低优先级；同级丢最旧。图像(0) < normal(1) < warn(2) < error(3)
+      auto victim = disk_q_.begin();
+      for (auto it = disk_q_.begin(); it != disk_q_.end(); ++it) {
+        if (it->prio < victim->prio) victim = it;
+        if (victim->prio == 0) break;
+      }
+      disk_q_.erase(victim);
+    }
+    disk_q_.push_back(std::move(job));
+  }
+  disk_cv_.notify_one();
+}
+
+void Engine::disk_loop()
+{
+  while (true) {
+    DiskJob job;
+    {
+      std::unique_lock<std::mutex> lock(disk_mtx_);
+      disk_cv_.wait(lock, [&] { return !disk_q_.empty() || !disk_open_.load(); });
+      if (disk_q_.empty()) {
+        disk_idle_cv_.notify_all();
+        break;
+      }
+      job = std::move(disk_q_.front());
+      disk_q_.pop_front();
+      if (disk_q_.empty()) disk_idle_cv_.notify_all();
+    }
+    if (job.image) session_.write_image(job.ts, job.meta, job.jpeg);
+    else if (!job.jsons.empty()) session_.write_jsons(job.jsons);
+    if (job.urgent) session_.sync(true);
+    else session_.sync(false);
+  }
+  session_.sync(true);
 }
 
 void Engine::ctrl_loop()
@@ -175,6 +315,7 @@ void Engine::ctrl_loop()
     control_.poll();
     control_.check_head_timeout();
     control_.maybe_beacon();
+    maybe_send_catalog();
     if (control_.has_head() && cfg_.heartbeat_interval_ms > 0) {
       auto now = std::chrono::steady_clock::now();
       if (last_hb_.time_since_epoch().count() == 0) {

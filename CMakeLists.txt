@@ -69,7 +69,6 @@ add_executable(usbcamera_test tests/usbcamera_test.cpp)
 add_executable(handeye_test tests/handeye_test.cpp)
 add_executable(dm_test tests/dm_test.cpp)
 add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
-add_executable(remote_logger_test tests/remote_logger_test.cpp)
 add_executable(calibrate_test tests/calibrate_test.cpp calibration/calibrator.cpp)
 
 target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
@@ -87,11 +86,15 @@ target_link_libraries(usbcamera_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(handeye_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 target_link_libraries(dm_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
-target_link_libraries(remote_logger_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 target_link_libraries(calibrate_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
+
+# 多车协议自检的假车，不是独立测试。multi_sender_test 默认拉起同目录下的 fake_robot。
+add_executable(fake_robot tests/fake_robot.cpp)
+target_link_libraries(fake_robot ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 
 add_executable(multi_sender_test tests/multi_sender_test.cpp)
 target_link_libraries(multi_sender_test ${OpenCV_LIBS} fmt::fmt tools)
+add_dependencies(multi_sender_test fake_robot)
 
 add_executable(gimbal_test tests/gimbal_test.cpp)
 target_link_libraries(gimbal_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)

@@ -14,10 +14,13 @@ from ..net.udp import UdpBackend, packet_sender
 class LiveSource:
     id = "live"
 
-    def __init__(self, data_port=15001, peer_port=15100, discover_port=15999):
+    def __init__(self, data_port=15001, peer_port=15100, discover_port=15999,
+                 target="", manage_discovery=True):
         self.data_port = int(data_port)
         self.peer_port = int(peer_port)
         self.discover_port = int(discover_port)
+        self._target = (target or "").strip()
+        self._manage_discovery = bool(manage_discovery)
         self.host_id = uuid.uuid4().hex
         self.host_name = socket.gethostname() or "watch"
 
@@ -48,19 +51,26 @@ class LiveSource:
         self._last_alive = {}
         self._lost_since = {}
         self._last_senders = []
+        self._img_by_key = {}
+        self._last_img_sub = 0.0
+        if self._target:
+            self._selected = self._target
 
     def attach(self, shell):
         self.shell = shell
         self.udp.on_output = lambda line: shell.sse.put(line)
-        shell.page("/", "watch.html")
         shell.sse_route("/events", on_connect=self.push_state)
         shell.route("/select", self._handle_select)
+        shell.route("/img_subscribe", self._handle_img_subscribe)
 
     def start(self):
         self._running = True
         self.peer.start()
-        self.discover.start()
-        self.udp.start(self.data_port, sender_name="")
+        if self._manage_discovery:
+            self.discover.start()
+        self.udp.start(self.data_port, sender_name=self._target)
+        if self._target:
+            self.udp.set_filter(self._target)
         self._poller = threading.Thread(target=self.poller, daemon=True)
         self._poller.start()
         self.push_state()
@@ -74,7 +84,8 @@ class LiveSource:
         for name, info in robots.items():
             self.client.deregister(info["ip"], info["control"])
         self.udp.stop()
-        self.discover.stop()
+        if self._manage_discovery:
+            self.discover.stop()
         self.peer.stop()
         self.client.close()
 
@@ -97,20 +108,83 @@ class LiveSource:
         }
         self.shell.sse.put(json.dumps(state))
 
+    def note_beacon(self, name, ip, control):
+        self._on_beacon(name, ip, control, None)
+
     def select(self, name):
+        if self._target and name and name != self._target:
+            return
         self._selected = name or ""
         self.udp.set_filter(self._selected)
+        self._push_img_subscribe(force=True)
         self.push_state()
 
     def _handle_select(self, handler):
         self.select(handler.query.get("sender", [""])[0])
         handler.send(200, b'{"ok":true}', "application/json")
 
+    def _handle_img_subscribe(self, handler):
+        raw = handler.query.get("streams", [""])[0]
+        streams = [s.strip() for s in raw.split(",") if s.strip()]
+        # dedupe preserve order
+        seen = set()
+        ordered = []
+        for s in streams:
+            if s not in seen:
+                seen.add(s)
+                ordered.append(s)
+        self.set_img_streams("query", ordered)
+        handler.send(
+            200,
+            json.dumps({"ok": True, "streams": ordered}).encode(),
+            "application/json",
+        )
+
+    def set_img_streams(self, key, streams):
+        with self._lock:
+            self._img_by_key[key] = list(streams or [])
+        self._push_img_subscribe(force=True)
+
+    def clear_img_key(self, key):
+        with self._lock:
+            self._img_by_key.pop(key, None)
+        self._push_img_subscribe(force=True)
+
+    def _push_img_subscribe(self, force=False):
+        now = time.monotonic()
+        if not force and now - self._last_img_sub < 1.0:
+            return
+        with self._lock:
+            streams = self._streams_locked()
+            selected = self._target or self._selected
+            robots = dict(self.robots)
+        if not selected:
+            return
+        info = robots.get(selected)
+        if not info:
+            return
+        if now - info["last"] > BEACON_STALE_S:
+            return
+        self.client.img_subscribe(info["ip"], info["control"], streams)
+        self._last_img_sub = now
+
+    def _streams_locked(self):
+        seen = set()
+        ordered = []
+        for streams in self._img_by_key.values():
+            for s in streams:
+                if s not in seen:
+                    seen.add(s)
+                    ordered.append(s)
+        return ordered
+
     def _is_head(self, robot):
         with self._lock:
             return self.roles.get(robot) == "head"
 
     def _on_beacon(self, name, ip, control, _addr):
+        if self._target and name != self._target:
+            return
         now = time.monotonic()
         changed = False
         with self._lock:
@@ -175,6 +249,7 @@ class LiveSource:
         if info:
             self.client.head_alive(info["ip"], info["control"])
             self._last_alive[robot] = time.monotonic()
+        self._push_img_subscribe(force=True)
         self.push_state()
 
     def _follow(self, robot, head, queue):
@@ -209,15 +284,23 @@ class LiveSource:
             robots = dict(self.robots)
             roles = dict(self.roles)
 
-        senders = self.live_senders()
-        if senders != self._last_senders:
-            self._last_senders = list(senders)
-            if senders and (not self._selected or self._selected not in senders):
-                self.select(senders[0])
-            else:
-                self.push_state()
+        if self._target:
+            if self._selected != self._target:
+                self.select(self._target)
+        else:
+            senders = self.live_senders()
+            if senders != self._last_senders:
+                self._last_senders = list(senders)
+                if senders and (not self._selected or self._selected not in senders):
+                    self.select(senders[0])
+                else:
+                    self.push_state()
 
-        for name, info in robots.items():
+        names = [self._target] if self._target else list(robots)
+        for name in names:
+            info = robots.get(name)
+            if not info:
+                continue
             stale = now - info["last"] > BEACON_STALE_S
             if stale:
                 continue
@@ -237,3 +320,5 @@ class LiveSource:
                         self._lost_since[name] = now
                 else:
                     self._lost_since.pop(name, None)
+
+        self._push_img_subscribe(force=False)

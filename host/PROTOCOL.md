@@ -2,7 +2,7 @@
 
 用法见 [`HOST.md`](HOST.md)，host 模块 API 见 [`DESIGN.md`](DESIGN.md)，车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
-数据平面（plot/log JSON、`0xFF` 图像、`.rlog` RLG2）与旧版相同。控制平面：车 DHCP；host 向车注册并排队；车只与 **队首** 发数据和心跳；后入调试机从队首拉流。车上数据面始终一份单播。
+数据平面：plot/log JSON、图像 **`0xFE` UDP 分片**（兼容收旧 `0xFF` 单包）、`.rlog` RLG2。控制平面：车 DHCP；host 向车注册并排队；车只与 **队首** 发数据和心跳；后入调试机从队首拉流。车上数据面始终一份单播。**图像仅在有 host `img_subscribe` 时发送**；本地 `.rlog` 不受订阅影响。
 
 车 yaml 里若仍留着 `remote_host` / `register_retry_ms`，会被忽略。
 
@@ -47,7 +47,7 @@
 
 | 口 | 默认 | bind | 用途 |
 |---|---|---|---|
-| 车控制 | **15000** | 仅车 | host → 车：`register` / `deregister` / `head_alive` / `query_head` |
+| 车控制 | **15000** | 仅车 | host → 车：`register` / `deregister` / `head_alive` / `query_head` / `img_subscribe` |
 | 发现 | **15999** | 每个 host | 车 → `255.255.255.255:15999`：`beacon`；host 可发 `who` |
 | host 数据 | **15001** | 每个 host | 收车（队首）或队首转发的 plot / 图像 / `hb` |
 | host 对等 | **15100** | 每个 host | `subscribe` / `promote` / `queue_update` / `peer_handoff` |
@@ -168,10 +168,32 @@ host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 b
 {"hb":1, "_from":"sentry", "ts":...}
 ```
 
-图像：
+图像（默认，MTU-safe 分片，每片 ≤1200B）：
 
 ```
-[1B 0xFF][8B ts_le][4B meta_len_le][meta utf-8][4B jpg_len_le][jpeg]
+公共头: [1B 0xFE][8B ts][2B frame_seq][2B frag_idx][2B frag_cnt][1B from_len][from]
+frag0+: [2B meta_len][meta][4B jpg_total][chunk...]
+frag n: [chunk...]
+```
+
+字段一律小端。host 收齐后重组；缺片超时丢弃。旧版整包 `0xFF` 仍可解析。
+
+目录（约 1s，有队首且车上出现过 `plot_image` 名时）：
+
+```json
+{"img_streams":["reprojection","result"],"_from":"sentry","ts":...}
+```
+
+**按需发图**：无人订阅时车不发图像 UDP（仍可写 `.rlog`）。host → 车：
+
+```json
+{"v":1,"type":"img_subscribe","host_id":"...","peer_port":15100,"streams":["reprojection"]}
+```
+
+`streams: []` 表示该 host 退订。车对队列内各 host 的订阅取并集；出队时清掉该 host 的订阅。ack：
+
+```json
+{"v":1,"type":"img_subscribe_ack","status":"ok","streams":["reprojection"]}
 ```
 
 心跳间隔 `heartbeat_interval_ms`（默认 500）。host 侧仍丢弃带 `"hb"` 的 JSON，只当链路活着。
@@ -321,12 +343,12 @@ H2 开始转发；其余改 subscribe H2
 | `tools/remote_logger.hpp` | 对外 API（`init` / `plot` / `log` / `plot_image`） |
 | `tools/rdbg/transport` | L0 UDP |
 | `tools/rdbg/control` | L1 beacon + host 队列 |
-| `tools/rdbg/data` | L2 只向队首发 JSON/图像/hb |
+| `tools/rdbg/data` | L2 只向队首发 JSON/分片图像/hb/目录 |
 | `tools/rdbg/session` | L3 本地 `.rlog` |
-| `tools/rdbg/image` + `engine` | 30fps 邮箱、worker 拼层 |
-| `host/rdbg/net/control.py` | 发现 + 向车 `register` / `head_alive` |
+| `tools/rdbg/image` + `engine` | 30fps 邮箱、订阅门控、worker |
+| `host/rdbg/net/control.py` | 发现 + 向车 `register` / `head_alive` / `img_subscribe` |
 | `host/rdbg/net/peer.py` | `subscribe` / 原样转发 / `handoff` |
-| `host/rdbg/net/udp.py` | 数据面解析 + `on_raw` 转发给 peer |
+| `host/rdbg/net/udp.py` | 分片重组 + 数据面解析 + `on_raw` 转发 |
 
 ---
 

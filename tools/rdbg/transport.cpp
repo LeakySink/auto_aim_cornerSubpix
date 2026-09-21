@@ -65,6 +65,18 @@ bool UdpSocket::sendto(const void * data, size_t len, const sockaddr_in & dest) 
                   sizeof(dest)) >= 0;
 }
 
+bool UdpSocket::sendmsg(const struct iovec * iov, int iovcnt,
+                        const sockaddr_in & dest) const
+{
+  if (fd_ < 0 || !iov || iovcnt <= 0) return false;
+  msghdr msg{};
+  msg.msg_name = const_cast<sockaddr_in *>(&dest);
+  msg.msg_namelen = sizeof(dest);
+  msg.msg_iov = const_cast<struct iovec *>(iov);
+  msg.msg_iovlen = static_cast<size_t>(iovcnt);
+  return ::sendmsg(fd_, &msg, 0) >= 0;
+}
+
 bool UdpSocket::sendto(const void * data, size_t len, in_addr ip, uint16_t port) const
 {
   sockaddr_in dest{};

@@ -18,3 +18,7 @@ docs/
 CLAUDE.md
 __pycache__/
 *.py[cod]
+host/.venv/
+host/ui/node_modules/
+host/ui/.tools/
+

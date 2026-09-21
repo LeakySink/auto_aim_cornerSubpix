@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Pick the platform launcher: *.bat on Windows, *.sh elsewhere.
+"""Pick the platform launcher.
 
-  python3 host/run.py              # watch
-  python3 host/run.py watch --no-browser
-  python3 host/run.py replay logs/run.rlog
+  python3 host/run.py              # start hub portal
+  python3 host/run.py start
+  python3 host/run.py watch
+  python3 host/run.py dump logs/run.rlog
 """
 
 import os
@@ -17,11 +18,14 @@ HOST = Path(__file__).resolve().parent
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0].startswith("-"):
-        name, rest = "watch", argv
-    elif argv[0] in ("watch", "replay", "calibrate"):
+        name, rest = "start", argv
+    elif argv[0] in ("start", "watch", "replay", "dump", "netcheck", "calibrate"):
         name, rest = argv[0], argv[1:]
+    elif argv[0] in ("serve", "hub"):
+        name, rest = "start", argv[1:]
     else:
-        print("Usage: run.py [watch|replay|calibrate] [args...]", file=sys.stderr)
+        print("Usage: run.py [start|watch|replay|dump|netcheck|calibrate] [args...]",
+              file=sys.stderr)
         return 2
 
     win = sys.platform == "win32"

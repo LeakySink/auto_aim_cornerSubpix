@@ -16,7 +16,7 @@ namespace tools
 /// 车上调试日志。实现在 tools/rdbg/（传输 / 控制 / 数据 / 本地会话）。
 ///
 ///   plot / log     → 本地 .rlog + UDP（仅队首）
-///   plot_image     → 30fps 入选 clone → JPEG → .rlog + UDP（仅队首）
+///   plot_image     → 30fps 入选 → JPEG → .rlog；UDP 分片仅当 host 订阅该流
 ///   enable_remote  → beacon + host 队列（host 来注册）
 class RemoteLogger
 {

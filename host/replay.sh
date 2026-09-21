@@ -1,22 +1,17 @@
 #!/bin/bash
-# Unix replay. Usage: ./host/replay.sh logs/run.rlog
+# Compatibility: open hub portal at /replay
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}"
+# shellcheck source=_env.sh
+. "$DIR/_env.sh"
 
 if [ $# -lt 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-  echo "Usage: $0 <file.rlog> [--port P] [--host IP] [--max-mb N] [--no-browser]"
+  echo "Usage: $0 <file.rlog>   # opens hub /replay (prefer ./host/start.sh)"
   exit 1
 fi
 
-if command -v python3 >/dev/null 2>&1; then
-  PY=python3
-elif command -v python >/dev/null 2>&1; then
-  PY=python
-else
-  echo "[replay] Python 3 not found" >&2
-  exit 1
-fi
-
-echo "[replay] $1"
-exec "$PY" -m rdbg replay "$@"
+RLOG="$1"
+shift || true
+echo "[replay] hub portal; load rlog in UI: $RLOG"
+# pass path via query for future; UI still needs manual path for now
+exec "$HOST_PY" -m rdbg serve --open "/replay" "$@"

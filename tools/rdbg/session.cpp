@@ -3,9 +3,12 @@
 #include "clock.hpp"
 #include "proto.hpp"
 
-#include <chrono>
+#include <cerrno>
 #include <cstdio>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 namespace tools
 {
@@ -22,47 +25,66 @@ void Session::open(const std::string & log_dir)
 void Session::close()
 {
   std::lock_guard<std::mutex> lock(mtx_);
-  if (!fp_) return;
-  std::fflush(fp_);
-  std::fclose(fp_);
-  fp_ = nullptr;
+  if (fd_ < 0) return;
+  sync_locked(true);
+  ::close(fd_);
+  fd_ = -1;
   path_.clear();
+  last_sync_ = {};
 }
 
 bool Session::ensure_file()
 {
-  if (fp_) return true;
+  if (fd_ >= 0) return true;
   if (log_dir_.empty()) return false;
   path_ = log_dir_ + "/run_" + std::to_string(now_ns()) + ".rlog";
-  fp_ = std::fopen(path_.c_str(), "wb");
-  if (!fp_) {
+  fd_ = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd_ < 0) {
     std::fprintf(stderr, "[RemoteLogger] Failed to open %s\n", path_.c_str());
     path_.clear();
     return false;
   }
-  std::setvbuf(fp_, nullptr, _IOFBF, kSessionIoBuf);
   uint32_t magic = kFileMagicV2;
-  if (std::fwrite(&magic, sizeof(magic), 1, fp_) != 1) {
+  if (::write(fd_, &magic, sizeof(magic)) != static_cast<ssize_t>(sizeof(magic))) {
     std::fprintf(stderr, "[RemoteLogger] Failed to write magic to %s\n", path_.c_str());
-    std::fclose(fp_);
-    fp_ = nullptr;
+    ::close(fd_);
+    fd_ = -1;
     path_.clear();
     return false;
   }
+  last_sync_ = {};
   std::fprintf(stderr, "[RemoteLogger] local session %s\n", path_.c_str());
   return true;
 }
 
-void Session::flush_maybe(bool force)
+bool Session::writev_all(const struct ::iovec * iov, int iovcnt)
 {
-  if (!fp_) return;
+  if (fd_ < 0 || !iov || iovcnt <= 0) return false;
+  size_t total = 0;
+  for (int i = 0; i < iovcnt; ++i) total += iov[i].iov_len;
+  ssize_t n = ::writev(fd_, iov, iovcnt);
+  return n >= 0 && static_cast<size_t>(n) == total;
+}
+
+void Session::sync_locked(bool force)
+{
+  if (fd_ < 0) return;
   auto now = std::chrono::steady_clock::now();
-  if (!force && last_flush_.time_since_epoch().count() != 0) {
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_flush_);
-    if (ms.count() < static_cast<int64_t>(kSessionFlushMs)) return;
+  if (!force && last_sync_.time_since_epoch().count() != 0) {
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sync_);
+    if (ms.count() < static_cast<int64_t>(kDiskSyncIntervalMs)) return;
   }
-  std::fflush(fp_);
-  last_flush_ = now;
+  if (::fdatasync(fd_) != 0) {
+    std::fprintf(stderr, "[RemoteLogger] fdatasync failed errno=%d\n", errno);
+    return;
+  }
+  last_sync_ = now;
+}
+
+void Session::sync(bool force)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  sync_locked(force);
 }
 
 void Session::write_json(uint64_t ts, const std::string & json)
@@ -77,37 +99,48 @@ void Session::write_jsons(const std::vector<std::pair<uint64_t, std::string>> & 
   if (!ensure_file()) return;
   for (const auto & e : entries) {
     uint8_t type = kRecJson;
+    uint64_t ts = e.first;
     uint32_t len = static_cast<uint32_t>(e.second.size());
-    if (std::fwrite(&type, sizeof(type), 1, fp_) != 1 ||
-        std::fwrite(&e.first, sizeof(e.first), 1, fp_) != 1 ||
-        std::fwrite(&len, sizeof(len), 1, fp_) != 1 ||
-        std::fwrite(e.second.data(), 1, len, fp_) != len) {
+    ::iovec iov[4];
+    iov[0].iov_base = &type;
+    iov[0].iov_len = sizeof(type);
+    iov[1].iov_base = &ts;
+    iov[1].iov_len = sizeof(ts);
+    iov[2].iov_base = &len;
+    iov[2].iov_len = sizeof(len);
+    iov[3].iov_base = const_cast<char *>(e.second.data());
+    iov[3].iov_len = e.second.size();
+    if (!writev_all(iov, 4)) {
       std::fprintf(stderr, "[RemoteLogger] Failed to write var record\n");
       return;
     }
   }
-  flush_maybe(false);
 }
 
-void Session::write_image(uint64_t ts, const nlohmann::json & meta,
-                         const std::vector<uint8_t> & jpeg)
+void Session::write_image(uint64_t ts, const std::string & meta_json,
+                          const std::vector<uint8_t> & jpeg)
 {
   std::lock_guard<std::mutex> lock(mtx_);
   if (!ensure_file()) return;
-  std::string meta_str = meta.dump();
   uint8_t type = kRecImg;
-  uint32_t meta_len = static_cast<uint32_t>(meta_str.size());
+  uint32_t meta_len = static_cast<uint32_t>(meta_json.size());
   uint32_t jpg_len = static_cast<uint32_t>(jpeg.size());
-  if (std::fwrite(&type, sizeof(type), 1, fp_) != 1 ||
-      std::fwrite(&ts, sizeof(ts), 1, fp_) != 1 ||
-      std::fwrite(&meta_len, sizeof(meta_len), 1, fp_) != 1 ||
-      std::fwrite(meta_str.data(), 1, meta_len, fp_) != meta_len ||
-      std::fwrite(&jpg_len, sizeof(jpg_len), 1, fp_) != 1 ||
-      std::fwrite(jpeg.data(), 1, jpg_len, fp_) != jpg_len) {
+  ::iovec iov[6];
+  iov[0].iov_base = &type;
+  iov[0].iov_len = sizeof(type);
+  iov[1].iov_base = &ts;
+  iov[1].iov_len = sizeof(ts);
+  iov[2].iov_base = &meta_len;
+  iov[2].iov_len = sizeof(meta_len);
+  iov[3].iov_base = const_cast<char *>(meta_json.data());
+  iov[3].iov_len = meta_json.size();
+  iov[4].iov_base = &jpg_len;
+  iov[4].iov_len = sizeof(jpg_len);
+  iov[5].iov_base = const_cast<uint8_t *>(jpeg.data());
+  iov[5].iov_len = jpeg.size();
+  if (!writev_all(iov, 6)) {
     std::fprintf(stderr, "[RemoteLogger] Failed to write img record\n");
-    return;
   }
-  flush_maybe(false);
 }
 
 }  // namespace rdbg

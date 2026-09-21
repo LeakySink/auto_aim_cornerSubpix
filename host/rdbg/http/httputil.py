@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 
 RDBG_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = RDBG_DIR / "static"
+STATIC_UI_DIR = RDBG_DIR / "static_ui"
 VENDOR_DIR = STATIC_DIR / "vendor"
 
 MIME = {
@@ -22,8 +23,12 @@ MIME = {
     ".map": "application/json",
     ".png": "image/png",
     ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
 }
 
 CDN = {
@@ -46,16 +51,20 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 
-def _safe_file(rel):
+def _safe_under(root, rel):
     rel = rel.lstrip("/").replace("\\", "/")
     if ".." in Path(rel).parts:
         return None
-    path = (STATIC_DIR / rel).resolve()
+    path = (root / rel).resolve()
     try:
-        path.relative_to(STATIC_DIR.resolve())
+        path.relative_to(root.resolve())
     except ValueError:
         return None
     return path if path.is_file() else None
+
+
+def _safe_file(rel):
+    return _safe_under(STATIC_DIR, rel)
 
 
 def send_file(handler, path, cache="public, max-age=3600"):
@@ -91,6 +100,34 @@ def _serve_vendor(handler, filename):
     return False
 
 
+def try_serve_static_ui(handler, raw_path):
+    """Serve Vite SPA from static_ui/; unknown paths → index.html."""
+    if not STATIC_UI_DIR.is_dir():
+        return False
+    path = unquote(urlparse(raw_path).path)
+    if path.startswith("/api/") or path.startswith("/static/"):
+        return False
+    if path in ("", "/"):
+        index = STATIC_UI_DIR / "index.html"
+        if index.is_file():
+            send_file(handler, index, cache="no-cache")
+            return True
+        return False
+    rel = path.lstrip("/")
+    fp = _safe_under(STATIC_UI_DIR, rel)
+    if fp:
+        cache = "no-cache" if fp.suffix in (".html", ".js", ".css") else "public, max-age=3600"
+        send_file(handler, fp, cache=cache)
+        return True
+    # SPA client routes
+    if "." not in Path(rel).name:
+        index = STATIC_UI_DIR / "index.html"
+        if index.is_file():
+            send_file(handler, index, cache="no-cache")
+            return True
+    return False
+
+
 def try_serve_static(handler, raw_path):
     path = unquote(urlparse(raw_path).path)
     alias = VENDOR_ALIASES.get(path)
@@ -105,6 +142,8 @@ def try_serve_static(handler, raw_path):
             send_file(handler, fp, cache=cache)
             return True
         handler.send_error(404)
+        return True
+    if try_serve_static_ui(handler, raw_path):
         return True
     return False
 
