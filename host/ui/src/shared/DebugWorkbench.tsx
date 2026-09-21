@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Chart,
   LineController,
@@ -11,6 +11,8 @@ import zoomPlugin from "chartjs-plugin-zoom";
 import Hammer from "hammerjs";
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, Legend, zoomPlugin);
+// chartjs-plugin-zoom looks up Hammer on window for pinch/pan. It binds the
+// canvas only; the plot host is clipped so this cannot cover the toolbar.
 (window as unknown as { Hammer: typeof Hammer }).Hammer = Hammer;
 
 export type DataBus = {
@@ -20,7 +22,8 @@ export type DataBus = {
   clear: () => void;
 };
 
-type PanelKind = "plot" | "image" | "log";
+type PanelKind = "plot" | "log" | "image";
+type LogLine = { level: string; msg: string };
 
 const COLORS = ["#3d8bfd", "#3ecf8e", "#e6a23c", "#f07178", "#c792ea", "#89ddff"];
 
@@ -30,22 +33,91 @@ export function DebugWorkbench({
   busOut: (bus: DataBus) => void;
 }) {
   const [kinds, setKinds] = useState<PanelKind[]>(["plot", "log", "image"]);
-  const [logs, setLogs] = useState<{ level: string; msg: string }[]>([]);
+  const [logs, setLogs] = useState<LogLine[]>([]);
   const [images, setImages] = useState<Record<string, string>>({});
   const [imgSel, setImgSel] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const seriesRef = useRef<Record<string, { x: number; y: number }[]>>({});
+  const logBuf = useRef<LogLine[]>([]);
+  const imgBuf = useRef<Record<string, string>>({});
+  const chartDirty = useRef(false);
+  const rafRef = useRef(0);
+
+  const syncChart = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const labels = Object.keys(seriesRef.current);
+    chart.data.datasets = labels.map((label, i) => ({
+      label,
+      data: seriesRef.current[label],
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length],
+      pointRadius: 0,
+      borderWidth: 1.5,
+    }));
+    chart.update("none");
+  }, []);
+
+  const flush = useCallback(() => {
+    rafRef.current = 0;
+    if (chartDirty.current) {
+      chartDirty.current = false;
+      syncChart();
+    }
+    if (logBuf.current.length) {
+      const batch = logBuf.current;
+      logBuf.current = [];
+      setLogs((prev) => {
+        const next = prev.concat(batch);
+        return next.length > 2000 ? next.slice(-1600) : next;
+      });
+    }
+    const pending = imgBuf.current;
+    const names = Object.keys(pending);
+    if (names.length) {
+      imgBuf.current = {};
+      setImages((prev) => {
+        const next = { ...prev };
+        for (const name of names) {
+          const url = pending[name];
+          const old = next[name];
+          if (old && old.startsWith("blob:") && old !== url) URL.revokeObjectURL(old);
+          next[name] = url;
+        }
+        return next;
+      });
+      setImgSel(names[names.length - 1]);
+    }
+  }, [syncChart]);
+
+  const schedule = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(flush);
+  }, [flush]);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
-    if (chartRef.current) return;
-    const chart = new Chart(canvasRef.current, {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const plotIndex = kinds.indexOf("plot");
+
+  // responsive:false + our own ResizeObserver. Chart.js responsive mode plus
+  // CSS width/height 100% !important on the canvas resizes every frame and
+  // freezes the main thread (clicks never run).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const host = hostRef.current;
+    if (plotIndex < 0 || !canvas || !host) return;
+    const chart = new Chart(canvas, {
       type: "line",
       data: { datasets: [] },
       options: {
         animation: false,
-        responsive: true,
+        responsive: false,
         maintainAspectRatio: false,
         scales: {
           x: { type: "linear" },
@@ -65,54 +137,63 @@ export function DebugWorkbench({
       },
     });
     chartRef.current = chart;
+    let lastW = 0;
+    let lastH = 0;
+    const fit = () => {
+      const w = Math.floor(host.clientWidth);
+      const h = Math.floor(host.clientHeight);
+      if (w < 2 || h < 2) return;
+      // Ignore 1px jitter (scrollbar / border) so the observer cannot loop.
+      if (Math.abs(w - lastW) <= 1 && Math.abs(h - lastH) <= 1) return;
+      lastW = w;
+      lastH = h;
+      chart.resize(w, h);
+    };
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(host);
+    fit();
+    if (Object.keys(seriesRef.current).length) syncChart();
     return () => {
+      ro.disconnect();
       chart.destroy();
       chartRef.current = null;
     };
-  }, [kinds.includes("plot")]);
+  }, [plotIndex, syncChart]);
 
   const bus = useMemo<DataBus>(() => {
-    const syncChart = () => {
-      const chart = chartRef.current;
-      if (!chart) return;
-      const labels = Object.keys(seriesRef.current);
-      chart.data.datasets = labels.map((label, i) => ({
-        label,
-        data: seriesRef.current[label],
-        borderColor: COLORS[i % COLORS.length],
-        backgroundColor: COLORS[i % COLORS.length],
-        pointRadius: 0,
-        borderWidth: 1.5,
-      }));
-      chart.update("none");
-    };
     return {
       addPoint(field, t, v) {
         if (!seriesRef.current[field]) seriesRef.current[field] = [];
         const arr = seriesRef.current[field];
         arr.push({ x: t, y: v });
         if (arr.length > 4000) arr.splice(0, arr.length - 3500);
-        syncChart();
+        chartDirty.current = true;
+        schedule();
       },
       addLog(level, msg) {
-        setLogs((prev) => {
-          const next = [...prev, { level, msg }];
-          return next.length > 2000 ? next.slice(-1600) : next;
-        });
+        logBuf.current.push({ level, msg });
+        if (logBuf.current.length > 2000) logBuf.current.splice(0, logBuf.current.length - 1600);
+        schedule();
       },
       setImage(name, objectUrl) {
-        setImages((prev) => {
-          const old = prev[name];
-          if (old && old.startsWith("blob:")) URL.revokeObjectURL(old);
-          return { ...prev, [name]: objectUrl };
-        });
-        setImgSel(name);
+        const queued = imgBuf.current[name];
+        if (queued && queued.startsWith("blob:") && queued !== objectUrl) {
+          URL.revokeObjectURL(queued);
+        }
+        imgBuf.current[name] = objectUrl;
+        schedule();
       },
       clear() {
         seriesRef.current = {};
+        logBuf.current = [];
+        chartDirty.current = false;
+        Object.values(imgBuf.current).forEach((u) => {
+          if (u.startsWith("blob:")) URL.revokeObjectURL(u);
+        });
+        imgBuf.current = {};
         if (chartRef.current) {
           chartRef.current.data.datasets = [];
-          chartRef.current.update();
+          chartRef.current.update("none");
         }
         setLogs([]);
         setImages((prev) => {
@@ -124,7 +205,7 @@ export function DebugWorkbench({
         setImgSel("");
       },
     };
-  }, []);
+  }, [schedule]);
 
   useEffect(() => {
     busOut(bus);
@@ -132,11 +213,10 @@ export function DebugWorkbench({
 
   const names = Object.keys(images);
   const activeImg = images[imgSel] || images[names[0]];
-  const plotIndex = kinds.indexOf("plot");
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div className="tile-root" style={{ flex: 1 }}>
+    <div className="workbench-root">
+      <div className="tile-root">
         {kinds.map((k, i) => (
           <div className="tile-pane" key={i}>
             <div className="tile-head">
@@ -154,19 +234,19 @@ export function DebugWorkbench({
               </select>
             </div>
             <div className="tile-content">
-              {k === "plot" && (
-                <div style={{ height: "100%", padding: 4 }}>
-                  {i === plotIndex ? (
+              {k === "plot" &&
+                (i === plotIndex ? (
+                  <div className="plot-host" ref={hostRef}>
                     <canvas ref={canvasRef} />
-                  ) : (
-                    <div className="mono" style={{ padding: 8, color: "var(--muted)" }}>
-                      绘图已在其他面板
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <div className="mono" style={{ padding: 8, color: "var(--muted)" }}>
+                    绘图已在其他面板
+                  </div>
+                ))}
               {k === "log" && (
                 <div className="log-view">
+                  {logs.length === 0 && <div className="L-DEBUG">(no log)</div>}
                   {logs.map((l, idx) => (
                     <div key={idx} className={`L-${l.level}`}>
                       [{l.level}] {l.msg}
@@ -187,11 +267,7 @@ export function DebugWorkbench({
                       </option>
                     ))}
                   </select>
-                  {activeImg ? (
-                    <img src={activeImg} alt="" />
-                  ) : (
-                    <span className="mono">waiting…</span>
-                  )}
+                  {activeImg ? <img src={activeImg} alt="" /> : <span className="mono">waiting…</span>}
                 </div>
               )}
             </div>

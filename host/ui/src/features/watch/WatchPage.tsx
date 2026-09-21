@@ -66,13 +66,22 @@ export function WatchPage() {
     }
   }, []);
 
+  const onBus = useCallback((b: DataBus) => {
+    busRef.current = b;
+  }, []);
+
   useSSE(
     running ? "/api/watch/events" : null,
     (msg) => {
       if (msg.type === "state") {
         const list = (msg.senders as string[]) || [];
-        setSenders(list);
-        if (msg.active_sender) setSelected(String(msg.active_sender));
+        setSenders((prev) =>
+          prev.length === list.length && prev.every((s, i) => s === list[i]) ? prev : list
+        );
+        if (msg.active_sender) {
+          const next = String(msg.active_sender);
+          setSelected((prev) => (prev === next ? prev : next));
+        }
         return;
       }
       handleEvent(busRef.current, msg, t0Ref);
@@ -122,8 +131,8 @@ export function WatchPage() {
           启动
         </button>
       </div>
-      <div className="feature-body" style={{ padding: 0, display: "flex", flexDirection: "column" }}>
-        <DebugWorkbench busOut={(b) => { busRef.current = b; }} />
+      <div className="feature-body fill">
+        <DebugWorkbench busOut={onBus} />
       </div>
     </div>
   );

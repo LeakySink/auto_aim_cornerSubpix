@@ -17,7 +17,12 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+}
+body { overflow: hidden; }
 
 a { color: var(--accent); text-decoration: none; }
 button, input, select, textarea {
@@ -43,7 +48,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .app-shell {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 .topbar {
   display: flex;
@@ -52,6 +60,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding: 0.6rem 1rem;
   border-bottom: 1px solid var(--border);
   background: #121a24;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
 }
 .topbar .brand { font-weight: 700; letter-spacing: 0.02em; }
 .topbar .spacer { flex: 1; }
@@ -65,7 +76,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .pill.on { border-color: var(--ok); color: var(--ok); }
 
-.main { flex: 1; min-height: 0; overflow: auto; }
+.main {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
 
 .home {
   max-width: 960px;
@@ -101,7 +118,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .feature-page {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
 }
 .feature-toolbar {
@@ -112,11 +131,21 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-bottom: 1px solid var(--border);
   background: #121a24;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
 }
-.feature-body { flex: 1; min-height: 0; overflow: auto; padding: 1rem; }
+.feature-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 1rem; }
+.feature-body.fill {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
 
-.keepalive-host { height: 100%; }
-.keepalive-host > .ka-pane { height: 100%; }
+.keepalive-host { height: 100%; width: 100%; min-width: 0; min-height: 0; }
+.keepalive-host > .ka-pane { height: 100%; width: 100%; min-width: 0; min-height: 0; }
 .keepalive-host > .ka-pane[hidden] { display: none !important; }
 
 .form-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
@@ -133,10 +162,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   overflow: auto;
 }
 
+.workbench-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
 .tile-root {
   display: flex;
+  flex: 1;
+  width: 100%;
   height: 100%;
-  min-height: 420px;
+  min-width: 0;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -161,10 +202,31 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 0.8rem;
 }
 .tile-head select { padding: 0.2rem 0.4rem; }
-.tile-content { flex: 1; min-height: 0; position: relative; }
-.tile-content canvas { width: 100% !important; height: 100% !important; }
+.tile-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+/* Chart.js sets the canvas pixel size. Do not force 100% !important —
+   that fights responsive resize and locks the main thread. */
+.plot-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+.plot-host canvas {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+}
 .log-view {
   height: 100%;
+  min-height: 0;
   overflow: auto;
   padding: 0.5rem;
   font-family: ui-monospace, monospace;

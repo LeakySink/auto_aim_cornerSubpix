@@ -155,7 +155,7 @@ export function ReplayPage() {
           </span>
         </div>
       )}
-      <div className="feature-body" style={{ padding: 0 }}>
+      <div className="feature-body fill">
         <DebugWorkbench busOut={(b) => { busRef.current = b; }} />
       </div>
     </div>
