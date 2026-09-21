@@ -97,13 +97,15 @@ input[type="range"] {
 input[type="number"] { font-variant-numeric: tabular-nums; }
 
 .feature-toolbar > button:not(.ghost),
-.form-row > button:not(.ghost) {
+.form-row > button:not(.ghost),
+.launcher-manual > button:not(.ghost) {
   background: var(--accent);
   border-color: var(--accent);
   color: #f4f5ff;
 }
 .feature-toolbar > button:not(.ghost):hover,
-.form-row > button:not(.ghost):hover {
+.form-row > button:not(.ghost):hover,
+.launcher-manual > button:not(.ghost):hover {
   background: #6d78e0;
   border-color: #6d78e0;
 }
@@ -249,6 +251,24 @@ p.err-text { margin: 0 0 12px; }
   color: var(--faint);
 }
 .tool:hover .tool-go { color: var(--text); }
+.launcher-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--hairline);
+}
+.launcher-manual {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+}
+.launcher-manual input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
 
 .panel, .sheet {
   background: var(--surface);

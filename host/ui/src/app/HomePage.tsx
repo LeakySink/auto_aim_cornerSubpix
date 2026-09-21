@@ -7,11 +7,12 @@ import { InstanceProvider } from "../shared/instance";
 type Row = { instance: string; feature: string; title: string; state: string; sender?: string; data_port?: number };
 type Robot = { name: string; ip: string; data_port: number; watches: number };
 
+const HOME_TOOLS = FEATURE_MODULES.filter((m) => m.id !== "watch");
+
 export function HomePage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [robots, setRobots] = useState<Robot[]>([]);
   const [err, setErr] = useState("");
-  const [picking, setPicking] = useState(false);
   const [manual, setManual] = useState("");
 
   useEffect(() => {
@@ -40,15 +41,14 @@ export function HomePage() {
       const r = await openFeature(feature, config);
       const w = window.open(r.path, "_blank");
       if (!w) setErr("浏览器拦截了新窗口，请允许弹窗后重试");
-      else setPicking(false);
     } catch (e) {
       setErr(String(e));
     }
   };
 
-  const onCard = (id: string) => {
-    if (id === "watch") setPicking(true);
-    else open(id);
+  const openManual = () => {
+    const name = manual.trim();
+    if (name) open("watch", { sender: name });
   };
 
   return (
@@ -70,8 +70,8 @@ export function HomePage() {
           <section className="block">
             <div className="sec-label">功能</div>
             <div className="launcher">
-              {FEATURE_MODULES.map((m) => (
-                <button key={m.id} type="button" className="tool" onClick={() => onCard(m.id)}>
+              {HOME_TOOLS.map((m) => (
+                <button key={m.id} type="button" className="tool" onClick={() => open(m.id)}>
                   <span className="tool-id">{m.id}</span>
                   <span className="tool-body">
                     <span className="tool-title">{m.title}</span>
@@ -82,47 +82,46 @@ export function HomePage() {
               ))}
             </div>
           </section>
-          {picking && (
-            <section className="block">
-              <div className="sec-label">Watch · 选择车辆</div>
-              <div className="panel">
-                <p className="sub">每辆车分配一个空闲 UDP 口。这个页面只看你选中的那一辆。</p>
-                {robots.length > 0 && (
-                  <div className="robot-list">
-                    {robots.map((r) => (
-                      <button
-                        key={r.name}
-                        type="button"
-                        className="robot"
-                        onClick={() => open("watch", { sender: r.name })}
-                      >
-                        <span className="robot-name">{r.name}</span>
-                        <span className="robot-meta mono">
-                          {r.ip}
-                          {r.data_port ? ` · UDP ${r.data_port}` : " · 将分配新端口"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {robots.length === 0 && <p className="empty">还没有发现车辆，可以直接填车名。</p>}
-                <div className="form-row">
-                  <input
-                    value={manual}
-                    placeholder="车名 sender_name"
-                    onChange={(e) => setManual(e.target.value)}
-                  />
+          <section className="block">
+            <div className="sec-label">车辆</div>
+            <div className="launcher">
+              {robots.map((r) => {
+                const meta = [r.ip, r.data_port ? `UDP ${r.data_port}` : ""].filter(Boolean).join(" · ");
+                return (
                   <button
+                    key={r.name}
                     type="button"
-                    disabled={!manual.trim()}
-                    onClick={() => open("watch", { sender: manual.trim() })}
+                    className="tool"
+                    onClick={() => open("watch", { sender: r.name })}
                   >
-                    打开
+                    <span className="tool-id">watch</span>
+                    <span className="tool-body">
+                      <span className="tool-title">{r.name}</span>
+                      {meta && <span className="tool-desc mono">{meta}</span>}
+                    </span>
+                    <span className="tool-go">新窗口</span>
                   </button>
-                </div>
-              </div>
-            </section>
-          )}
+                );
+              })}
+              {robots.length === 0 && <p className="empty launcher-empty">还没有发现车辆，可以直接填车名。</p>}
+              <form
+                className="launcher-manual"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  openManual();
+                }}
+              >
+                <input
+                  value={manual}
+                  placeholder="车名 sender_name"
+                  onChange={(e) => setManual(e.target.value)}
+                />
+                <button type="submit" disabled={!manual.trim()}>
+                  打开
+                </button>
+              </form>
+            </div>
+          </section>
           {rows.length > 0 && (
             <section className="block">
               <div className="sec-label">已打开</div>
