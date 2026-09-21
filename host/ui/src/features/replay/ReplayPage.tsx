@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { postJson, startFeature, stopFeature } from "../../shared/api";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
 
+type Frame = { i: number; t: number; meta: { name?: string } };
+type LogRec = { t: number; ts?: number; level: string; msg: string };
 type Meta = {
   duration: number;
+  t0_ns?: number;
   series: Record<string, [number, number][]>;
-  logs: { t: number; level: string; msg: string }[];
-  frames: { i: number; t: number; meta: { name?: string } }[];
+  logs: LogRec[];
+  frames: Frame[];
   file?: string;
 };
 
@@ -19,96 +22,147 @@ export function ReplayPage() {
   const [rate, setRate] = useState(1);
   const busRef = useRef<DataBus | null>(null);
   const metaRef = useRef<Meta | null>(null);
-  const idxRef = useRef({ series: {} as Record<string, number>, log: 0, frame: 0 });
+  const tRef = useRef(0);
+  const rateRef = useRef(1);
+  const playRef = useRef({ wall: 0, t0: 0 });
+  const lastImg = useRef<Record<string, number>>({});
   const rafRef = useRef(0);
-  const lastRef = useRef(0);
+
+  tRef.current = t;
+  rateRef.current = rate;
 
   useEffect(() => {
     startFeature("replay", {}).catch(() => {});
   }, []);
 
+  const applyImages = useCallback(async (time: number) => {
+    const m = metaRef.current;
+    const bus = busRef.current;
+    if (!m || !bus) return;
+    const latest: Record<string, Frame> = {};
+    for (const fr of m.frames || []) {
+      if (fr.t > time) break;
+      const n = fr.meta?.name || "default";
+      latest[n] = fr;
+    }
+    const names = Object.keys(latest);
+    if (names.length) bus.setStreams(names);
+    await Promise.all(
+      names.map(async (name) => {
+        const fr = latest[name];
+        if (lastImg.current[name] === fr.i) return;
+        lastImg.current[name] = fr.i;
+        try {
+          const r = await fetch(`/api/replay/frame/${fr.i}`);
+          if (!r.ok) return;
+          if (lastImg.current[name] !== fr.i) return;
+          const blob = await r.blob();
+          bus.setImage(name, URL.createObjectURL(blob));
+        } catch {
+          /* ignore */
+        }
+      })
+    );
+  }, []);
+
+  const seek = useCallback(
+    (nt: number, keepPlay = false) => {
+      const dur = metaRef.current?.duration || 0;
+      const next = Math.max(0, Math.min(dur, nt));
+      setT(next);
+      tRef.current = next;
+      if (playing || keepPlay) {
+        playRef.current = { wall: performance.now(), t0: next };
+      }
+      void applyImages(next);
+    },
+    [applyImages, playing]
+  );
+
+  const onBus = useCallback((b: DataBus) => {
+    busRef.current = b;
+  }, []);
+
   const load = async () => {
     setErr("");
+    setPlaying(false);
     try {
       await startFeature("replay", { path });
-      const res = await postJson<{ ok: boolean; meta?: Meta; error?: string }>(
-        "/api/replay/load",
-        { path }
-      );
-      if (!res.ok) throw new Error(res.error || "load failed");
-      setMeta(res.meta || null);
-      metaRef.current = res.meta || null;
-      idxRef.current = { series: {}, log: 0, frame: 0 };
+      const res = await postJson<{ ok: boolean; meta?: Meta; error?: string }>("/api/replay/load", { path });
+      if (!res.ok || !res.meta) throw new Error(res.error || "load failed");
+      setMeta(res.meta);
+      metaRef.current = res.meta;
+      lastImg.current = {};
       busRef.current?.clear();
+      busRef.current?.loadReplay(res.meta.series || {}, res.meta.logs || [], res.meta.duration || 0);
+      const names = [
+        ...new Set((res.meta.frames || []).map((f) => f.meta?.name || "default")),
+      ];
+      if (names.length) busRef.current?.setStreams(names);
       setT(0);
-      setPlaying(false);
+      tRef.current = 0;
+      void applyImages(0);
     } catch (e) {
       setErr(String(e));
     }
   };
 
-  const applyUntil = useCallback(async (time: number) => {
-    const m = metaRef.current;
-    const bus = busRef.current;
-    if (!m || !bus) return;
-    for (const [field, pts] of Object.entries(m.series || {})) {
-      let i = idxRef.current.series[field] || 0;
-      while (i < pts.length && pts[i][0] <= time) {
-        bus.addPoint(field, pts[i][0], pts[i][1]);
-        i++;
-      }
-      idxRef.current.series[field] = i;
-    }
-    let li = idxRef.current.log;
-    const logs = m.logs || [];
-    while (li < logs.length && logs[li].t <= time) {
-      bus.addLog(logs[li].level, logs[li].msg);
-      li++;
-    }
-    idxRef.current.log = li;
-    let fi = idxRef.current.frame;
-    const frames = m.frames || [];
-    while (fi < frames.length && frames[fi].t <= time) {
-      const fr = frames[fi];
-      try {
-        const r = await fetch(`/api/replay/frame/${fr.i}`);
-        if (r.ok) {
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          bus.setImage(String(fr.meta?.name || "image"), url);
-        }
-      } catch {
-        /* ignore */
-      }
-      fi++;
-    }
-    idxRef.current.frame = fi;
-  }, []);
-
   useEffect(() => {
     if (!playing || !meta) return;
-    lastRef.current = performance.now();
+    playRef.current = { wall: performance.now(), t0: tRef.current };
     const loop = (now: number) => {
-      const dt = ((now - lastRef.current) / 1000) * rate;
-      lastRef.current = now;
-      setT((prev) => {
-        const next = Math.min(meta.duration || 0, prev + dt);
-        applyUntil(next);
-        if (next >= (meta.duration || 0)) setPlaying(false);
-        return next;
-      });
+      const dur = metaRef.current?.duration || 0;
+      const elapsed = ((now - playRef.current.wall) / 1000) * rateRef.current;
+      const next = playRef.current.t0 + elapsed;
+      if (next >= dur) {
+        setT(dur);
+        tRef.current = dur;
+        setPlaying(false);
+        void applyImages(dur);
+        return;
+      }
+      setT(next);
+      tRef.current = next;
+      void applyImages(next);
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, meta, rate, applyUntil]);
+  }, [playing, meta, applyImages]);
 
-  const seek = async (nt: number) => {
-    busRef.current?.clear();
-    idxRef.current = { series: {}, log: 0, frame: 0 };
-    setT(nt);
-    await applyUntil(nt);
-  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName || "";
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (!metaRef.current) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        setPlaying((p) => {
+          if (!p && tRef.current >= (metaRef.current?.duration || 0) - 1e-4) {
+            tRef.current = 0;
+            setT(0);
+          }
+          return !p;
+        });
+      } else if (e.code === "ArrowLeft") {
+        setPlaying(false);
+        seek(tRef.current - 0.05);
+      } else if (e.code === "ArrowRight") {
+        setPlaying(false);
+        seek(tRef.current + 0.05);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [seek]);
+
+  const onSeek = useCallback(
+    (nt: number) => {
+      setPlaying(false);
+      seek(nt);
+    },
+    [seek]
+  );
 
   return (
     <div className="feature-page">
@@ -123,16 +177,39 @@ export function ReplayPage() {
         <button type="button" onClick={load}>
           加载
         </button>
-        <button type="button" className="ghost" disabled={!meta} onClick={() => setPlaying((p) => !p)}>
+        <button
+          type="button"
+          className="ghost"
+          disabled={!meta}
+          title="空格 播放/暂停"
+          onClick={() => {
+            if (!playing && t >= (meta?.duration || 0) - 1e-4) {
+              setT(0);
+              tRef.current = 0;
+            }
+            setPlaying((p) => !p);
+          }}
+        >
           {playing ? "暂停" : "播放"}
         </button>
-        <select value={rate} onChange={(e) => setRate(Number(e.target.value))}>
+        <select
+          value={rate}
+          onChange={(e) => {
+            const r = Number(e.target.value);
+            setRate(r);
+            rateRef.current = r;
+            playRef.current = { wall: performance.now(), t0: tRef.current };
+          }}
+        >
           {[0.25, 0.5, 1, 2, 4].map((r) => (
             <option key={r} value={r}>
-              {r}x
+              {r}×
             </option>
           ))}
         </select>
+        <button type="button" className="ghost" onClick={() => busRef.current?.resetView()}>
+          重置
+        </button>
         <button type="button" className="ghost" onClick={() => stopFeature("replay")}>
           停止线程
         </button>
@@ -148,15 +225,19 @@ export function ReplayPage() {
             step={0.01}
             value={t}
             style={{ flex: 1 }}
+            onPointerDown={() => setPlaying(false)}
             onChange={(e) => seek(Number(e.target.value))}
           />
           <span className="mono">
             {t.toFixed(2)} / {(meta.duration || 0).toFixed(2)} s
           </span>
+          <span className="mono" style={{ color: "var(--muted)" }}>
+            全量曲线/日志 · 拖橙线或点日志跳转 · ← → 0.05s · 空格播放
+          </span>
         </div>
       )}
       <div className="feature-body fill">
-        <DebugWorkbench busOut={(b) => { busRef.current = b; }} />
+        <DebugWorkbench replay cursorT={meta ? t : null} onSeek={onSeek} busOut={onBus} />
       </div>
     </div>
   );

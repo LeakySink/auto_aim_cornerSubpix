@@ -18,12 +18,17 @@ export type DataBus = {
   addLog: (level: string, msg: string, ts?: number) => void;
   setImage: (name: string, objectUrl: string) => void;
   setStreams: (names: string[]) => void;
+  loadReplay: (
+    series: Record<string, [number, number][]>,
+    logs: { t: number; ts?: number; level: string; msg: string }[],
+    duration: number
+  ) => void;
   clear: () => void;
   resetView: () => void;
 };
 
 type PanelKind = "plot" | "log" | "image";
-type LogLine = { level: string; msg: string; ts?: number };
+type LogLine = { level: string; msg: string; ts?: number; t?: number };
 type ViewMode = "sliding" | "centered" | "paused";
 
 const COLORS = ["#4fc3f7", "#ffb74d", "#81c784", "#e57373", "#ba68c8", "#4dd0e1", "#fff176", "#a1887f"];
@@ -46,9 +51,15 @@ function fmtTs(ts?: number) {
 export function DebugWorkbench({
   busOut,
   imageSubscribe,
+  replay = false,
+  cursorT = null,
+  onSeek,
 }: {
   busOut: (bus: DataBus) => void;
   imageSubscribe?: (names: string[]) => void;
+  replay?: boolean;
+  cursorT?: number | null;
+  onSeek?: (t: number) => void;
 }) {
   const [kinds, setKinds] = useState<PanelKind[]>(["plot", "log", "image"]);
   const [sidebar, setSidebar] = useState(true);
@@ -75,6 +86,13 @@ export function DebugWorkbench({
   const streamBuf = useRef<string[]>([]);
   const chartDirty = useRef(false);
   const rafRef = useRef(0);
+  const replayRef = useRef(replay);
+  const cursorRef = useRef<number | null>(cursorT);
+  const seekRef = useRef(onSeek);
+  const dragCursor = useRef(false);
+  replayRef.current = replay;
+  cursorRef.current = cursorT;
+  seekRef.current = onSeek;
 
   fieldsRef.current = fields;
   viewRef.current = { mode, win, history, manual };
@@ -93,15 +111,15 @@ export function DebugWorkbench({
       borderWidth: 1.6,
     }));
     const v = viewRef.current;
-    const x = lastX.current;
+    const follow = replayRef.current && cursorRef.current != null ? cursorRef.current : lastX.current;
     if (!v.manual && v.mode !== "paused") {
       const w = v.win || 10;
       if (v.mode === "centered") {
-        chart.options.scales!.x!.min = x - w / 2;
-        chart.options.scales!.x!.max = x + w / 2;
+        chart.options.scales!.x!.min = follow - w / 2;
+        chart.options.scales!.x!.max = follow + w / 2;
       } else {
-        chart.options.scales!.x!.min = Math.max(0, x - w);
-        chart.options.scales!.x!.max = Math.max(w, x);
+        chart.options.scales!.x!.min = Math.max(0, follow - w);
+        chart.options.scales!.x!.max = Math.max(w, follow);
       }
     }
     chart.update("none");
@@ -161,7 +179,7 @@ export function DebugWorkbench({
   useEffect(() => {
     chartDirty.current = true;
     schedule();
-  }, [mode, win, history, manual, fields, schedule]);
+  }, [mode, win, history, manual, fields, cursorT, schedule]);
 
   const plotIndex = kinds.indexOf("plot");
 
@@ -171,18 +189,61 @@ export function DebugWorkbench({
     if (plotIndex < 0 || !canvas || !host) return;
     const chart = new Chart(canvas, {
       type: "line",
+      plugins: [
+        {
+          id: "replayCursor",
+          afterDraw(ch) {
+            const t = cursorRef.current;
+            if (!replayRef.current || t == null || !Number.isFinite(t)) return;
+            const xScale = ch.scales.x;
+            if (!xScale) return;
+            const x = xScale.getPixelForValue(t);
+            const area = ch.chartArea;
+            if (x < area.left - 2 || x > area.right + 2) return;
+            const ctx = ch.ctx;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x, area.top);
+            ctx.lineTo(x, area.bottom);
+            ctx.lineWidth = dragCursor.current ? 2.5 : 1.5;
+            ctx.strokeStyle = "#ff7043";
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, area.top);
+            ctx.lineTo(x - 6, area.top - 7);
+            ctx.lineTo(x + 6, area.top - 7);
+            ctx.closePath();
+            ctx.fillStyle = "#ff7043";
+            ctx.fill();
+            ctx.restore();
+          },
+        },
+      ],
       data: { datasets: [] },
       options: {
         animation: false,
         responsive: false,
         maintainAspectRatio: false,
+        onClick(evt, _els, ch) {
+          if (!replayRef.current || !seekRef.current || dragCursor.current) return;
+          const xScale = ch.scales.x;
+          if (!xScale || evt.x == null) return;
+          const cur = cursorRef.current;
+          if (cur != null) {
+            const cx = xScale.getPixelForValue(cur);
+            if (Math.abs(evt.x - cx) <= 12) return;
+          }
+          const t = xScale.getValueForPixel(evt.x);
+          if (t != null && Number.isFinite(t)) seekRef.current(t);
+        },
         plugins: {
           legend: { display: false },
           zoom: {
             pan: {
               enabled: true,
-              mode: "x",
+              mode: "x" as const,
               onPanStart: () => {
+                if (dragCursor.current) return false;
                 setManual(true);
               },
             },
@@ -236,10 +297,12 @@ export function DebugWorkbench({
         const arr = seriesRef.current[field];
         arr.push({ x: t, y: v });
         lastX.current = t;
-        const hist = viewRef.current.history || 60;
-        const cut = t - hist;
-        while (arr.length > 1 && arr[0].x < cut) arr.shift();
-        if (arr.length > 8000) arr.splice(0, arr.length - 6000);
+        if (!replayRef.current) {
+          const hist = viewRef.current.history || 60;
+          const cut = t - hist;
+          while (arr.length > 1 && arr[0].x < cut) arr.shift();
+          if (arr.length > 8000) arr.splice(0, arr.length - 6000);
+        }
         if (!fieldsRef.current[field]) {
           const color = COLORS[colorN.current % COLORS.length];
           colorN.current += 1;
@@ -263,6 +326,35 @@ export function DebugWorkbench({
       },
       setStreams(names) {
         streamBuf.current.push(...names);
+        schedule();
+      },
+      loadReplay(series, logs, duration) {
+        const nextSeries: Record<string, { x: number; y: number }[]> = {};
+        const nextFields = { ...fieldsRef.current };
+        for (const [field, pts] of Object.entries(series || {})) {
+          nextSeries[field] = pts.map(([x, y]) => ({ x, y }));
+          if (!nextFields[field]) {
+            nextFields[field] = {
+              color: COLORS[colorN.current % COLORS.length],
+              on: Object.keys(nextFields).length < 6,
+            };
+            colorN.current += 1;
+          }
+        }
+        seriesRef.current = nextSeries;
+        fieldsRef.current = nextFields;
+        lastX.current = duration;
+        setFields(nextFields);
+        logBuf.current = [];
+        setLogs(
+          (logs || []).map((l) => ({
+            level: l.level,
+            msg: l.msg,
+            ts: l.ts,
+            t: l.t,
+          }))
+        );
+        chartDirty.current = true;
         schedule();
       },
       clear() {
@@ -314,7 +406,7 @@ export function DebugWorkbench({
               <div className="side-h">显示模式</div>
               {(["sliding", "centered", "paused"] as ViewMode[]).map((m) => (
                 <label key={m}>
-                  <input type="radio" name="view-mode" checked={mode === m} onChange={() => setMode(m)} />
+                  <input type="radio" name={replay ? "view-mode-replay" : "view-mode-watch"} checked={mode === m} onChange={() => setMode(m)} />
                   {m === "sliding" ? "滑动" : m === "centered" ? "居中" : "暂停"}
                 </label>
               ))}
@@ -394,7 +486,33 @@ export function DebugWorkbench({
             <div className="tile-content">
               {k === "plot" &&
                 (i === plotIndex ? (
-                  <div className="plot-host" ref={hostRef}>
+                  <div
+                    className="plot-host"
+                    ref={hostRef}
+                    onPointerDown={(e) => {
+                      if (!replayRef.current || !seekRef.current) return;
+                      const chart = chartRef.current;
+                      if (!chart || cursorRef.current == null) return;
+                      const rect = chart.canvas.getBoundingClientRect();
+                      const px = e.clientX - rect.left;
+                      const cx = chart.scales.x.getPixelForValue(cursorRef.current);
+                      if (Math.abs(px - cx) > 12) return;
+                      dragCursor.current = true;
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      e.preventDefault();
+                    }}
+                    onPointerMove={(e) => {
+                      if (!dragCursor.current || !seekRef.current) return;
+                      const chart = chartRef.current;
+                      if (!chart) return;
+                      const rect = chart.canvas.getBoundingClientRect();
+                      const t = chart.scales.x.getValueForPixel(e.clientX - rect.left);
+                      if (t != null && Number.isFinite(t)) seekRef.current(t);
+                    }}
+                    onPointerUp={() => {
+                      dragCursor.current = false;
+                    }}
+                  >
                     <canvas ref={canvasRef} />
                   </div>
                 ) : (
@@ -402,7 +520,13 @@ export function DebugWorkbench({
                     绘图已在其他面板
                   </div>
                 ))}
-              {k === "log" && <LogPane lines={logs} />}
+              {k === "log" && (
+                <LogPane
+                  lines={logs}
+                  cursorT={replay ? cursorT : null}
+                  onSeek={replay ? onSeek : undefined}
+                />
+              )}
               {k === "image" && (
                 <ImagePane
                   names={names}
@@ -419,16 +543,61 @@ export function DebugWorkbench({
   );
 }
 
-function LogPane({ lines }: { lines: LogLine[] }) {
+function LogPane({
+  lines,
+  cursorT = null,
+  onSeek,
+}: {
+  lines: LogLine[];
+  cursorT?: number | null;
+  onSeek?: (t: number) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const [lv, setLv] = useState({ DEBUG: true, INFO: true, WARN: true, ERROR: true });
+  const [mark, setMark] = useState<{ y: number; kind: "line" | "gap" } | null>(null);
   const visible = lines.filter((l) => lv[normLevel(l.level) as keyof typeof lv]);
+
+  let current = -1;
+  if (cursorT != null) {
+    for (let i = 0; i < visible.length; i++) {
+      const tt = visible[i].t;
+      if (tt == null) continue;
+      if (tt <= cursorT) current = i;
+      else break;
+    }
+  }
 
   useEffect(() => {
     const el = ref.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [visible.length, lines.length]);
+    if (!el) return;
+    if (cursorT == null) {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const row = el.querySelector(".log-current") as HTMLElement | null;
+    if (row) {
+      const top = row.offsetTop;
+      const bot = top + row.offsetHeight;
+      if (top < el.scrollTop || bot > el.scrollTop + el.clientHeight) {
+        el.scrollTop = Math.max(0, top - el.clientHeight / 3);
+      }
+      const next = visible[current + 1];
+      const cur = visible[current];
+      if (cur && next && cur.t != null && next.t != null && next.t > cur.t) {
+        const frac = (cursorT - cur.t) / (next.t - cur.t);
+        if (frac > 0.08 && frac < 0.92) {
+          const nEl = row.nextElementSibling as HTMLElement | null;
+          const y1 = nEl ? nEl.offsetTop : bot;
+          setMark({ y: top + (y1 - top) * frac - el.scrollTop, kind: "gap" });
+          return;
+        }
+      }
+      setMark({ y: top + row.offsetHeight / 2 - el.scrollTop, kind: "line" });
+    } else {
+      setMark(null);
+    }
+  }, [visible.length, lines.length, cursorT, current]);
 
   return (
     <div className="log-pane">
@@ -445,23 +614,36 @@ function LogPane({ lines }: { lines: LogLine[] }) {
         ))}
         <span className="log-count">{visible.length}</span>
       </div>
-      <div
-        className="log-stream"
-        ref={ref}
-        onScroll={() => {
-          const el = ref.current;
-          if (!el) return;
-          stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
-        }}
-      >
-        {visible.length === 0 && <div className="L-DEBUG">(no log)</div>}
-        {visible.map((l, idx) => (
-          <div key={idx} className={`log-line L-${normLevel(l.level)}`}>
-            {l.ts ? <span className="log-ts">{fmtTs(l.ts)}</span> : null}
-            <span className="log-lv">{normLevel(l.level)}</span>
-            <span className="log-msg">{l.msg}</span>
-          </div>
-        ))}
+      <div className="log-stream-wrap">
+        {mark?.kind === "gap" && <div className="log-tri" style={{ top: mark.y }} />}
+        <div
+          className="log-stream"
+          ref={ref}
+          onScroll={() => {
+            const el = ref.current;
+            if (!el) return;
+            stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+          }}
+        >
+          {visible.length === 0 && <div className="L-DEBUG">(no log)</div>}
+          {visible.map((l, idx) => (
+            <div
+              key={idx}
+              className={`log-line L-${normLevel(l.level)}${idx === current ? " log-current" : ""}${onSeek ? " log-click" : ""}`}
+              onClick={() => {
+                if (l.t != null) onSeek?.(l.t);
+              }}
+            >
+              {l.t != null ? (
+                <span className="log-ts">{l.t.toFixed(3)}</span>
+              ) : l.ts ? (
+                <span className="log-ts">{fmtTs(l.ts)}</span>
+              ) : null}
+              <span className="log-lv">{normLevel(l.level)}</span>
+              <span className="log-msg">{l.msg}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
