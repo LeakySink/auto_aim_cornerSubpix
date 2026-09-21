@@ -308,19 +308,15 @@ load_session_or_exit(path, max_bytes=...)  # 失败 SystemExit 1/2
 
 **`LiveSource(data_port=15001, peer_port=15100, discover_port=15999)`**
 
-- 页：`/` → `watch.html`
-- `GET /events` SSE，连接时 `push_state`
-- `GET /select?sender=` 按 `_from` 过滤 SSE（数据口不变）
+- 不注册 HTML 页。Hub 的 Watch Feature 自己挂 `/api/watch/events`、`/api/watch/select`。
+- `attach()` 仍提供旧路径：`GET /events`、`GET /select?sender=`、`GET /img_subscribe`（给仍直接调用 `attach` 的代码）。
 - 听 beacon；向每辆在线车 `register`；队首 `head_alive`，follower `subscribe`
 - 3s 无 beacon 的车从 `senders` 拿掉，不清车上队列
 
 **`ReplaySource(session)`**
 
-- `/`、`/index.html` → `replay.html`
-- `GET /events` 推假 `state`+`status`（避免壳显示断连）
-- `GET /select` → `{"ok":true}`
-- `GET /api/meta` 与 `/api/session`：`public_meta(session)`（frames **不含** jpeg，只含 `i,t,meta`）
-- `GET /api/frame/<int>`：JPEG，`cache public max-age=86400`
+- 不注册 HTML 页。Hub 回放走 `features/replay.py`：`/api/replay/meta`、`/api/replay/frame/<i>`、`/api/replay/load`。
+- `attach()` 仍提供：`GET /events`、`GET /select`、`GET /api/meta`、`GET /api/session`、`GET /api/frame/<int>`。
 
 ```python
 public_meta(session) -> dict
@@ -330,111 +326,18 @@ load_or_exit(rlog, max_mb=1024)  # 下限 64MiB
 ### 4.10 `rdbg.apps`
 
 ```python
-apps.watch.run(http_port, data_port=15001, peer_port=15100, discover_port=15999, no_browser=False) -> 0|1
-apps.replay.run(rlog, host="127.0.0.1", port=8765, max_mb=1024, no_browser=False) -> 0|1
+apps.hub_app.run(host="0.0.0.0", port=8080, no_browser=False, open_path="/") -> 0|1
 ```
 
-watch 绑 `0.0.0.0`，口占用即失败。replay 从 `port` 起试 20 个口。
+唯一入口进程。`python -m rdbg watch` / `replay` 也调用它，分别打开 `/watch`、`/replay`。
 
 ---
 
-## 5. 前端 API
+## 5. 前端
 
-全局对象，**不是** ES module。`replay.js` 依赖下列名字，改插件时不要改签名。
+界面在 `host/ui`（Vite + React + TS），构建产物 `rdbg/static_ui/`。旧 `static/js`、`watch.html`、`replay.html` 已删除。
 
-### 5.1 `Rdbg`（`js/registry.js`）
-
-```javascript
-Rdbg.registerPanel(spec)  // 同 id 覆盖，order 只在首次插入
-Rdbg.get(id) -> spec|null
-Rdbg.list() -> spec[]     // 注册顺序
-```
-
-`spec`：
-
-| 字段 | 必需 | 说明 |
-|---|---|---|
-| `id` | 是 | 写入 `p.type`，如下拉框 value |
-| `title` | 建议 | 下拉框文字 |
-| `setupHeader(p, hdr, typeSel)` | 否 | 类型框已在 hdr 里；在 `typeSel` 前后插控件 |
-| `setupBody(p, body)` | 否 | 清空后的 `.panel-body` |
-| `init(p)` | 否 | DOM 齐了之后 |
-| `destroy(p)` | 否 | 切走或关闭前；自己摘掉 header 上加的节点 |
-| `reset(p)` | 否 | 顶栏「重置」 |
-
-面板对象 `p`（壳创建）：
-
-| 字段 | 说明 |
-|---|---|
-| `id` | 整数，分屏用 |
-| `type` | 当前插件 id |
-| `el` | `.panel` 节点，未 mount 前可能没有 |
-
-插件可在 `p` 上挂自己的字段（`chart`、`imgSel`、`logDiv`…）。切类型时壳会把常用引用置 `null`，但仍应在 `destroy` 里拆 DOM。
-
-### 5.2 壳（`js/shell.js`）
-
-| 函数 | 说明 |
-|---|---|
-| `makePanel(type)` | 默认 `image` |
-| `forEachPanel(fn)` | 所有叶子 |
-| `splitPanel(panelId, side)` | `left/right/up/down`，嵌套 tiling |
-| `removePanel(panelId)` | 至少留一格 |
-| `switchPanelType(p, newType)` | destroy → 清 body → mount |
-| `resetAllViews()` | 各插件 `reset` |
-| `clearPlots()` | 清空曲线/日志缓冲（watch 顶栏） |
-| `onSenderChange()` | `GET /select?sender=` |
-| `setConnected(bool, sender?)` | 顶栏状态 |
-| `relayout()` | 窗口尺寸变化 |
-
-SSE：`new EventSource('/events')`。`msg.type`：
-
-| type | 动作 |
-|---|---|
-| `plot` | `addPoint(msg.ts, msg.data)` |
-| `image` | `setImage(msg.jpg_b64, msg.meta)` |
-| `log` | `addLog(msg.ts, msg.level, msg.msg)` |
-| `status` | `setConnected` |
-| `state` | 刷新 `#sender-sel` |
-
-### 5.3 plot 插件 — 全局（replay 会写这些变量）
-
-| 名字 | 含义 |
-|---|---|
-| `plotData` | `[{x, fields:{name:number}}]` |
-| `fieldMeta` | `{name: {color}}` |
-| `firstTs` | 第一个 plot 的 ns 时间戳；replay 会设成 `t0_ns` |
-| `lastX` | 当前 x（秒） |
-| `addPoint(ts_ns, data)` | 数字字段入曲线；`ts/_from` 等非数字跳过 |
-| `ensureField(name)` | 分配颜色 |
-| `rebuildAllCharts()` | 全量按 `plotData` 重建 |
-| `trimData()` / `onSettingsChange()` | 历史窗口 / 滑动模式 |
-
-侧栏字段勾选只作用于 **当前激活的 plot 面板**。
-
-### 5.4 image 插件
-
-| 名字 | 含义 |
-|---|---|
-| `imgSources` | `{name: {b64, ts, kb}}`，`b64` 已带 `data:image/jpeg;base64,` |
-| `setImage(b64_raw, meta)` | `meta.name` 缺省 `"default"` |
-
-### 5.5 log 插件
-
-| 名字 | 含义 |
-|---|---|
-| `LOG_CAP` | 500 |
-| `logBuffer` | `[{ts, level, msg}]` |
-| `addLog(ts, level, msg)` | FATAL/CRITICAL 显示为 ERROR |
-| `refreshAllLogPanels()` | 按筛选重画 |
-
-### 5.6 replay.js 额外 HTTP
-
-- `GET /api/meta` → duration、`t0_ns`、`series`、`frames[{i,t,meta}]`、`logs`
-- `GET /api/frame/{i}` → JPEG 字节  
-按时间找每路 `meta.name` 的最新帧，再 `setImage`。
-
-快捷键：空格播放，←/→ 步进 0.05s。
+加页面：`ui/src/features/<id>/` + `ui/src/features/registry.ts`。Watch/Replay 的曲线、日志、图像在 `ui/src/shared/DebugWorkbench.tsx`。SSE 事件形状仍是 §6。
 
 ---
 
@@ -457,6 +360,5 @@ SSE：`new EventSource('/events')`。`msg.type`：
 ## 7. 改代码时别动的契约
 
 - `.rlog` RLG2 布局、UDP `0xFE` 分片图像（及旧 `0xFF`）：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。控制平面（beacon / 队列 / 转发 / `img_subscribe`）见 `PROTOCOL.md`。
-- `replay.js` 用的全局函数名。
-- 静态 URL 前缀 `/static/`。
-- 标准库 only，不要为 host 加 pip 依赖。
+- Hub SSE 事件形状（§6）与 Feature id（`watch` / `replay` / `dump` / `netcheck`）。
+- 标准库 only，不要为 host Hub 加 pip 依赖（dump 视频的 OpenCV 在 `requirements.txt` / `.venv`）。
