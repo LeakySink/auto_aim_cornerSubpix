@@ -43,6 +43,7 @@ void RemoteLogger::init(const std::string & config_path)
   cfg.img_quality = tools::read<int>(node, "img_quality");
   cfg.heartbeat_interval_ms = tools::read<uint32_t>(node, "heartbeat_interval_ms");
   cfg.sender_name = tools::read<std::string>(node, "sender_name");
+  if (node["app"]) cfg.app = node["app"].as<std::string>();
   if (node["beacon_interval_ms"])
     cfg.beacon_interval_ms = node["beacon_interval_ms"].as<uint32_t>();
   if (node["head_timeout_ms"])

@@ -9,6 +9,7 @@ import uuid
 from ..net.control import BEACON_STALE_S, Discovery, RobotClient
 from ..net.peer import PeerHub
 from ..net.udp import UdpBackend, packet_sender
+from ..util import parse_stream_list, sse_state
 
 
 class LiveSource:
@@ -101,12 +102,7 @@ class LiveSource:
         senders = self.live_senders()
         active = self._selected if self._selected in senders else (
             senders[0] if senders else "")
-        state = {
-            "type": "state",
-            "active_sender": active,
-            "senders": senders,
-        }
-        self.shell.sse.put(json.dumps(state))
+        self.shell.sse.put(sse_state(active, senders))
 
     def note_beacon(self, name, ip, control):
         self._on_beacon(name, ip, control, None)
@@ -125,14 +121,7 @@ class LiveSource:
 
     def _handle_img_subscribe(self, handler):
         raw = handler.query.get("streams", [""])[0]
-        streams = [s.strip() for s in raw.split(",") if s.strip()]
-        # dedupe preserve order
-        seen = set()
-        ordered = []
-        for s in streams:
-            if s not in seen:
-                seen.add(s)
-                ordered.append(s)
+        ordered = parse_stream_list(raw)
         self.set_img_streams("query", ordered)
         handler.send(
             200,
@@ -182,7 +171,7 @@ class LiveSource:
         with self._lock:
             return self.roles.get(robot) == "head"
 
-    def _on_beacon(self, name, ip, control, _addr):
+    def _on_beacon(self, name, ip, control, _addr, app="normal"):
         if self._target and name != self._target:
             return
         now = time.monotonic()
@@ -191,11 +180,13 @@ class LiveSource:
             prev = self.robots.get(name)
             if prev is None or prev["ip"] != ip or prev["control"] != control:
                 changed = True
-            self.robots[name] = {"ip": ip, "control": control, "last": now}
+            self.robots[name] = {
+                "ip": ip, "control": control, "last": now, "app": app or "normal",
+            }
         if changed:
             self.client.register(ip, control)
             self._last_register[name] = now
-            print("[watch] beacon %s at %s:%s" % (name, ip, control))
+            print("[watch] beacon %s at %s:%s app=%s" % (name, ip, control, app or "normal"))
             self.push_state()
 
     def _on_raw(self, data):

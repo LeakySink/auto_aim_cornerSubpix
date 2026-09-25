@@ -4,6 +4,13 @@
   var lastPkt = 0;
   var status = {};
   var doneSent = false;
+  var iid = new URLSearchParams(location.search).get("i") || "";
+
+  function api(path) {
+    if (!iid) return path;
+    if (path.indexOf("/api/") === 0) return "/api/i/" + iid + path.slice(4);
+    return "/api/i/" + iid + path;
+  }
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -19,18 +26,18 @@
     var c = $("map");
     var ctx = c.getContext("2d");
     var w = c.width, h = c.height;
-    ctx.fillStyle = "#16161e";
+    ctx.fillStyle = "#111217";
     ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = "#303040";
+    ctx.strokeStyle = "#2c3038";
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-    ctx.fillStyle = "#606070";
-    ctx.font = "11px monospace";
+    ctx.fillStyle = "rgba(204, 204, 220, 0.4)";
+    ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
     ctx.fillText("coverage XY", 8, 14);
     (samples || []).forEach(function (s) {
       var x = 4 + Math.max(0, Math.min(1, s.x || 0)) * (w - 8);
       var y = 4 + Math.max(0, Math.min(1, s.y || 0)) * (h - 8);
       var r = Math.max(3, (s.size || 0.1) * 28);
-      ctx.strokeStyle = "#50b4e6";
+      ctx.strokeStyle = "#5e6ad2";
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -67,7 +74,7 @@
       detail.push(fmtVec(s.distort_coeffs, 5));
     }
     $("result-detail").textContent = detail.join("\n");
-    $("hint").textContent = s.hint || "done — quitting robot & host";
+    $("hint").textContent = s.hint || (iid ? "done — quitting robot" : "done — quitting robot & host");
     $("btn-c").disabled = true;
     $("btn-d").disabled = true;
     $("btn-r").disabled = true;
@@ -75,7 +82,7 @@
 
     if (doneSent) return;
     doneSent = true;
-    fetch("/api/done", { method: "POST" }).catch(function () {});
+    fetch(api("/api/done"), { method: "POST" }).catch(function () {});
   }
 
   function applyStatus(s) {
@@ -108,13 +115,13 @@
     var cov = $("cov");
     if (status.goodenough) {
       cov.textContent = "coverage READY";
-      cov.style.color = "#4ee06a";
+      cov.className = "ready";
     } else if ((status.n || 0) >= (status.min_n || 20)) {
       cov.textContent = "coverage low, still ok";
-      cov.style.color = "#50b4e6";
+      cov.className = "okish";
     } else {
       cov.textContent = "need more poses (min " + (status.min_n || 20) + ")";
-      cov.style.color = "#707080";
+      cov.className = "muted";
     }
 
     var res = [];
@@ -170,7 +177,7 @@
 
   function connect() {
     if (es) es.close();
-    es = new EventSource("/events");
+    es = new EventSource(api("/events"));
     es.onmessage = onEvent;
     es.onerror = function () {
       $("dot").className = "dot dead";
@@ -179,7 +186,7 @@
   }
 
   function sendCmd(cmd) {
-    fetch("/api/calib?cmd=" + encodeURIComponent(cmd)).catch(function () {});
+    fetch(api("/api/calib") + "?cmd=" + encodeURIComponent(cmd)).catch(function () {});
   }
 
   document.querySelectorAll(".btns button").forEach(function (btn) {
@@ -189,7 +196,7 @@
   });
 
   $("sender-sel").addEventListener("change", function () {
-    fetch("/select?sender=" + encodeURIComponent($("sender-sel").value));
+    fetch(api("/select") + "?sender=" + encodeURIComponent($("sender-sel").value));
   });
 
   window.addEventListener("keydown", function (e) {
@@ -206,10 +213,77 @@
     }
   });
 
+  if (iid) {
+    window.addEventListener("pagehide", function () {
+      var url = "/api/instances/" + iid + "/stop?forget=1";
+      if (navigator.sendBeacon) navigator.sendBeacon(url, "");
+    });
+  }
+
   setInterval(function () {
     $("stats").textContent = (pkt - lastPkt) + " pkt/s";
     lastPkt = pkt;
   }, 1000);
+
+  (function setupSplitter() {
+    var KEY = "rdbg.calibrate.panelW";
+    var panel = $("panel");
+    var split = $("splitter");
+    var main = document.querySelector("main");
+    if (!panel || !split || !main) return;
+
+    function clamp(w) {
+      var max = Math.floor(main.clientWidth * 0.7);
+      return Math.max(200, Math.min(max, Math.floor(w)));
+    }
+
+    function apply(w) {
+      panel.style.width = clamp(w) + "px";
+    }
+
+    try {
+      var saved = parseInt(localStorage.getItem(KEY) || "", 10);
+      if (saved) apply(saved);
+      else apply(280);
+    } catch (e) {
+      apply(280);
+    }
+
+    var drag = null;
+    split.addEventListener("pointerdown", function (e) {
+      drag = {
+        startX: e.clientX,
+        startW: panel.getBoundingClientRect().width,
+        id: e.pointerId,
+      };
+      split.classList.add("active");
+      document.body.classList.add("resizing");
+      try { split.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      split.classList.remove("active");
+      document.body.classList.remove("resizing");
+      try {
+        localStorage.setItem(KEY, String(Math.round(panel.getBoundingClientRect().width)));
+      } catch (err) {}
+    }
+
+    split.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      // panel is on the right: dragging left grows panel
+      apply(drag.startW - (e.clientX - drag.startX));
+    });
+    split.addEventListener("pointerup", endDrag);
+    split.addEventListener("pointercancel", endDrag);
+
+    window.addEventListener("resize", function () {
+      apply(panel.getBoundingClientRect().width);
+    });
+  })();
 
   connect();
 })();

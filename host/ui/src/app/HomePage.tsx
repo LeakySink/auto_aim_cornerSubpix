@@ -3,11 +3,19 @@ import { useParams } from "react-router-dom";
 import { FEATURE_MODULES } from "../features/registry";
 import { featureStatus, getJson, listInstances, openFeature } from "../shared/api";
 import { InstanceProvider } from "../shared/instance";
+import { featureFromApp } from "../shared/robotFeature";
 
-type Row = { instance: string; feature: string; title: string; state: string; sender?: string; data_port?: number };
-type Robot = { name: string; ip: string; data_port: number; watches: number };
+type Row = { instance: string; feature: string; title: string; state: string; sender?: string; data_port?: number; path?: string };
+type Robot = {
+  name: string;
+  ip: string;
+  data_port: number;
+  watches: number;
+  app?: string;
+  feature?: string;
+};
 
-const HOME_TOOLS = FEATURE_MODULES.filter((m) => m.id !== "watch");
+const HOME_TOOLS = FEATURE_MODULES.filter((m) => m.id !== "watch" && m.id !== "calibrate");
 
 export function HomePage() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -46,9 +54,20 @@ export function HomePage() {
     }
   };
 
+  const openRobot = (r: Robot) => {
+    const feat =
+      r.feature === "calibrate" || r.feature === "watch"
+        ? r.feature
+        : featureFromApp(r.app);
+    open(feat, { sender: r.name });
+  };
+
   const openManual = () => {
     const name = manual.trim();
-    if (name) open("watch", { sender: name });
+    if (!name) return;
+    const known = robots.find((r) => r.name === name);
+    if (known) openRobot(known);
+    else open("watch", { sender: name });
   };
 
   return (
@@ -86,15 +105,25 @@ export function HomePage() {
             <div className="sec-label">车辆</div>
             <div className="launcher">
               {robots.map((r) => {
-                const meta = [r.ip, r.data_port ? `UDP ${r.data_port}` : ""].filter(Boolean).join(" · ");
+                const feat =
+                  r.feature === "calibrate" || r.feature === "watch"
+                    ? r.feature
+                    : featureFromApp(r.app);
+                const meta = [
+                  r.app && r.app !== "normal" ? `app=${r.app}` : "",
+                  r.ip,
+                  r.data_port ? `UDP ${r.data_port}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
                   <button
                     key={r.name}
                     type="button"
                     className="tool"
-                    onClick={() => open("watch", { sender: r.name })}
+                    onClick={() => openRobot(r)}
                   >
-                    <span className="tool-id">watch</span>
+                    <span className="tool-id">{feat}</span>
                     <span className="tool-body">
                       <span className="tool-title">{r.name}</span>
                       {meta && <span className="tool-desc mono">{meta}</span>}
@@ -103,7 +132,11 @@ export function HomePage() {
                   </button>
                 );
               })}
-              {robots.length === 0 && <p className="empty launcher-empty">还没有发现车辆，可以直接填车名。</p>}
+              {robots.length === 0 && (
+                <p className="empty launcher-empty">
+                  还没有发现车辆，可以直接填车名。标定程序 beacon 带 app=calibrate。
+                </p>
+              )}
               <form
                 className="launcher-manual"
                 onSubmit={(e) => {
@@ -128,7 +161,7 @@ export function HomePage() {
               <ul className="inst-list">
                 {rows.map((r) => (
                   <li key={r.instance}>
-                    <a href={`/i/${r.instance}`} target="_blank" rel="noreferrer">
+                    <a href={r.path || `/i/${r.instance}`} target="_blank" rel="noreferrer">
                       <span className="inst-title">
                         {r.title}
                         {r.sender ? ` · ${r.sender}` : ""}
@@ -168,6 +201,16 @@ export function InstancePage() {
     window.location.href = "/";
   };
 
+  useEffect(() => {
+    if (feature === "calibrate" && iid) {
+      window.location.replace(`/calibrate.html?i=${iid}`);
+    }
+  }, [feature, iid]);
+
+  if (feature === "calibrate") {
+    return <p className="page-pad muted">正在打开标定页…</p>;
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -184,7 +227,7 @@ export function InstancePage() {
       </header>
       <div className="main">
         {err && <p className="err-text page-pad">{err}</p>}
-        {mod && iid && (
+        {mod && iid && mod.Component && (
           <InstanceProvider value={{ id: iid, feature: mod.id, base: `/api/i/${iid}` }}>
             <mod.Component />
           </InstanceProvider>

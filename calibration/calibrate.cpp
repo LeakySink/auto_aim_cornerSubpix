@@ -64,6 +64,7 @@ void init_remote_logger(bool test_feed)
 {
   tools::RemoteLogger::Config cfg;
   cfg.sender_name = test_feed ? "calibrate-test" : "calibrate";
+  cfg.app = "calibrate";
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
   cfg.enable_local = true;
@@ -208,7 +209,7 @@ int main(int argc, char * argv[])
     "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
     calib.pattern_size().height, calib.result_path());
   tools::RemoteLogger::instance().log(
-    "INFO", "run: ./host/calibrate.sh   then press buttons in the browser");
+    "INFO", "run: ./host/start.sh  then Calibrate in the portal");
 
   auto do_calibrate = [&](const std::string & host_time) {
     if (finished) return;

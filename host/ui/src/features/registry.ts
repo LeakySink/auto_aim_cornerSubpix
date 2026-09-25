@@ -14,6 +14,12 @@ export const FEATURE_MODULES: FeatureModule[] = [
     Component: WatchPage,
   },
   {
+    id: "calibrate",
+    title: "Calibrate",
+    description: "棋盘格相机内参标定：覆盖度、采样、一键标定",
+    route: "/calibrate",
+  },
+  {
     id: "replay",
     title: "Replay",
     description: "本地回放 .rlog：时间轴、曲线、图像、日志",

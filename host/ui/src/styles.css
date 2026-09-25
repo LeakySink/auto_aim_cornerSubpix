@@ -438,6 +438,11 @@ p.err-text { margin: 0 0 12px; }
   border-bottom: 1px solid var(--border);
   background: var(--canvas);
 }
+.feature-body.fill > .pick-pane:only-child {
+  flex: 1;
+  max-height: none;
+  border-bottom: none;
+}
 .feature-body.fill > .workbench-root {
   flex: 1 1 auto;
   height: auto;

@@ -38,7 +38,7 @@
 |---|---|
 | 传输 | UDP IPv4，局域网 |
 | 控制 JSON | 必带 `"v": 1`、`"type"` |
-| 车身份 | yaml `sender_name` |
+| 车身份 | yaml `sender_name`（多车唯一）+ beacon `app`（程序类型） |
 | host 身份 | 启动时生成 `host_id`（UUID 字符串）。**不以 IP 当主键**（双方都可能 DHCP） |
 | 队列 | FIFO，下标 0 为队首。同 `host_id` 再 `register` 只更新地址，不换位置 |
 | 字节序 | 图像头与现在相同：`ts` / 长度字段小端 |
@@ -63,6 +63,7 @@ remote_logger:
   heartbeat_interval_ms: 500
   head_timeout_ms: 2000
   sender_name: "sentry"
+  app: "normal"              # normal=调试；calibrate=标定（缺省 normal）
 ```
 
 ---
@@ -79,10 +80,17 @@ remote_logger:
 - 队首已连上也不能停：停了第二台调试机就看不见这辆车
 
 ```json
-{"v":1,"type":"beacon","name":"sentry","ip":"<车当前IPv4>","control":15000,"ts":...}
+{"v":1,"type":"beacon","name":"sentry","app":"normal","ip":"<车当前IPv4>","control":15000,"ts":...}
 ```
 
-`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。
+| 字段 | 含义 |
+|---|---|
+| `name` | `sender_name`，多车唯一，显示用 |
+| `app` | 程序身份。`normal`=正常调试程序（host 开 Watch）；`calibrate`=标定程序（host 开标定页）。**缺省 / 旧固件无此字段时按 `normal`** |
+| `ip` | 车此刻收控制包的地址 |
+| `control` | 控制口，默认 15000 |
+
+`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。门户车辆列表按 `app` 打开对应功能，**不要**用 `name` 猜身份。
 
 host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 bind 15999 则回；否则等下一次周期 beacon）：
 

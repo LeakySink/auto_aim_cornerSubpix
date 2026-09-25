@@ -27,11 +27,11 @@ def _parser():
     watch.add_argument("--download-assets", action="store_true", help="ignored")
     watch.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
-    cal = sub.add_parser("calibrate", help="web UI for chessboard / hand-eye calibration")
-    cal.add_argument("--port", type=int, default=8090, help="HTTP port")
-    cal.add_argument("--data-port", type=int, default=15001, help="UDP data port")
-    cal.add_argument("--peer-port", type=int, default=15100, help="host-to-host peer port")
-    cal.add_argument("--discover-port", type=int, default=15999, help="LAN beacon port")
+    cal = sub.add_parser("calibrate", help="open portal home (Calibrate is a hub feature)")
+    cal.add_argument("--port", type=int, default=8080, help="HTTP port")
+    cal.add_argument("--data-port", type=int, default=15001, help="ignored (feature starts from UI)")
+    cal.add_argument("--peer-port", type=int, default=15100, help="ignored")
+    cal.add_argument("--discover-port", type=int, default=15999, help="ignored")
     cal.add_argument("--no-browser", action="store_true", help="do not open a browser")
 
     rpl = sub.add_parser("replay", help="open portal home")
@@ -68,9 +68,8 @@ def main(argv=None):
         return run("0.0.0.0", args.port, args.no_browser, "/")
 
     if args.cmd == "calibrate":
-        from .apps.calibrate import run
-        return run(args.port, args.data_port, args.peer_port, args.discover_port,
-                   args.no_browser)
+        from .apps.hub_app import run
+        return run("0.0.0.0", args.port, args.no_browser, "/")
 
     if args.cmd == "replay":
         print(f"[replay] open home, then Replay, and load: {args.rlog}", file=sys.stderr)

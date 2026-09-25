@@ -3,16 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Camera Calibrator</title>
-<link rel="stylesheet" href="/static/css/calibrate.css?v=2">
+<title>Calibrate · rdbg</title>
+<link rel="stylesheet" href="/static/css/calibrate.css?v=5">
 </head>
 <body>
 <header id="top">
+  <a class="brand" href="/" target="_blank" rel="noreferrer">rdbg</a>
+  <span class="sep"></span>
+  <span class="title">Calibrate</span>
   <div class="dot" id="dot"></div>
   <span id="status">connecting…</span>
   <span id="stats"></span>
-  <span style="flex:1"></span>
-  <select id="sender-sel"></select>
+  <span class="spacer"></span>
+  <select id="sender-sel" title="sender"></select>
 </header>
 
 <main>
@@ -21,11 +24,15 @@
     <div id="placeholder">waiting for ./build/calibrate …</div>
   </section>
 
+  <div class="splitter" id="splitter" title="拖动调整宽度"></div>
+
   <aside id="panel">
     <h1>Calibrator</h1>
+    <div class="sec-label">Status</div>
     <div id="board" class="pill dead">BOARD --</div>
     <div id="counts">samples 0</div>
 
+    <div class="sec-label">Coverage</div>
     <div class="bar-row"><span>X</span><div class="track"><div class="fill" id="bx"></div></div><em id="vx">0%</em></div>
     <div class="bar-row"><span>Y</span><div class="track"><div class="fill" id="by"></div></div><em id="vy">0%</em></div>
     <div class="bar-row"><span>Size</span><div class="track"><div class="fill" id="bs"></div></div><em id="vs">0%</em></div>
@@ -34,19 +41,19 @@
     <canvas id="map" width="288" height="140"></canvas>
     <p id="cov" class="muted">need more poses</p>
     <p id="result"></p>
-    <pre id="result-detail" class="muted" style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto"></pre>
+    <pre id="result-detail"></pre>
     <p id="hint">wave chessboard through the view</p>
 
     <div class="btns">
       <button data-cmd="add">ADD</button>
-      <button data-cmd="calibrate" id="btn-c" disabled>CALIBRATE</button>
+      <button data-cmd="calibrate" class="primary" id="btn-c" disabled>CALIBRATE</button>
       <button data-cmd="drop" id="btn-d" disabled>DROP</button>
       <button data-cmd="reset" id="btn-r" disabled>RESET</button>
     </div>
-    <p class="keys muted">SPACE add · C calibrate · D drop · R reset</p>
+    <p class="keys">SPACE add · C calibrate · D drop · R reset</p>
   </aside>
 </main>
 
-<script src="/static/js/calibrate.js?v=2"></script>
+<script src="/static/js/calibrate.js?v=5"></script>
 </body>
 </html>

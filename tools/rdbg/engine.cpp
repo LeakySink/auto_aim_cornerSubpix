@@ -52,6 +52,7 @@ void Engine::init(const RemoteLogger::Config & cfg)
   control_.beacon_interval_ms = cfg_.beacon_interval_ms;
   control_.head_timeout_ms = cfg_.head_timeout_ms;
   control_.sender_name = cfg_.sender_name;
+  control_.app = cfg_.app.empty() ? "normal" : cfg_.app;
   data_.set_sender(cfg_.sender_name);
 
   remote_ok_ = false;

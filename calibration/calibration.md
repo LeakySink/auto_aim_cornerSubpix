@@ -50,12 +50,12 @@ cmake --build build --target calibrate -j$(nproc)
 **调试 PC：**
 
 ```bash
-./host/calibrate.sh
-# Windows: host\calibrate.bat
+./host/start.sh
+# 兼容入口：./host/calibrate.sh   Windows: host\calibrate.bat
 ```
 
-浏览器打开 `http://localhost:8090`（一般会自动打开）。  
-顶部出现 `linked · calibrate` 表示已连上车。
+浏览器打开 `http://127.0.0.1:8080`，首页「车辆」里出现标定进程（beacon `app=calibrate`）后点进去。  
+顶栏出现 `linked · …` 表示已连上车。
 
 无相机联调 host / 网页时（车上）：
 
@@ -80,7 +80,7 @@ host 下发 calibrate + 本机时间
     → 写入 calibration/result.yaml
     → 把结果推回网页显示
     → host 通知车 quit
-    → 车退出；host 进程随后退出
+    → 车退出（门户保持运行）
 ```
 
 | 按钮 / 键 | 作用 |
