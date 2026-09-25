@@ -1,11 +1,9 @@
 // 海康相机 → ROS2 /image_raw
-// 用于对比本仓库标定与 ROS camera_calibration。
+// 默认直接开海康，无需配置文件；可选 -c / -i 覆盖参数或发布内参。
 //
-// 编译后：
 //   source /opt/ros/humble/setup.bash
-//   ./build/tests/ros2_image_pub_test -c configs/sentry.yaml
+//   ./build/tests/ros2_image_pub_test
 //
-// 另开终端跑 ROS 标定：
 //   ros2 run camera_calibration cameracalibrator --size 11x8 --square 0.04 \
 //     image:=/image_raw camera:=/
 
@@ -32,13 +30,16 @@
 using namespace std::chrono_literals;
 
 const std::string keys =
-  "{help h usage ? |                       | 输出命令行参数说明}"
-  "{config-path c  | configs/sentry.yaml   | 海康 yaml（须 camera_name: hikrobot）}"
-  "{topic t        | image_raw             | 图像话题}"
-  "{info-topic     | camera_info           | CameraInfo 话题}"
-  "{frame f        | camera                | frame_id}"
-  "{info i         |                       | 可选：带 camera_matrix 的内参 yaml，一并发布 CameraInfo}"
-  "{rate r         | 30                    | 发布上限 Hz}";
+  "{help h usage ? |              | 输出命令行参数说明}"
+  "{config-path c  |              | 可选 yaml，覆盖曝光/增益/vid_pid（须 hikrobot）}"
+  "{exposure e     | 4            | 曝光 ms}"
+  "{gain g         | 10           | 增益}"
+  "{vid-pid v      | 2bdf:0001    | USB vid:pid}"
+  "{topic t        | image_raw    | 图像话题}"
+  "{info-topic     | camera_info  | CameraInfo 话题}"
+  "{frame f        | camera       | frame_id}"
+  "{info i         |              | 可选：带 camera_matrix 的内参 yaml}"
+  "{rate r         | 30           | 发布上限 Hz}";
 
 namespace
 {
@@ -78,24 +79,6 @@ bool fill_camera_info(
   return true;
 }
 
-std::unique_ptr<io::HikRobot> open_hikrobot(const std::string & config_path)
-{
-  auto yaml = tools::load(config_path);
-  const auto name = tools::read<std::string>(yaml, "camera_name");
-  if (name != "hikrobot") {
-    throw std::runtime_error(
-      fmt::format("{} 的 camera_name='{}'，本节点只支持 hikrobot", config_path, name));
-  }
-
-  const double exposure_ms = tools::read<double>(yaml, "exposure_ms");
-  const double gain = tools::read<double>(yaml, "gain");
-  const auto vid_pid = tools::read<std::string>(yaml, "vid_pid");
-
-  tools::RemoteLogger::instance().log(
-    "INFO", "HikRobot open  exposure_ms={:.2f} gain={:.1f} vid_pid={}", exposure_ms, gain, vid_pid);
-  return std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid);
-}
-
 }  // namespace
 
 int main(int argc, char ** argv)
@@ -104,14 +87,19 @@ int main(int argc, char ** argv)
   if (cli.has("help")) {
     cli.printMessage();
     fmt::print(
-      "\n海康 → /image_raw，对比本仓库标定 vs ROS camera_calibration。\n"
-      "  ./build/tests/ros2_image_pub_test -c configs/sentry.yaml\n"
-      "  ./build/tests/ros2_image_pub_test -c configs/sentry.yaml -i configs/sentry.yaml\n"
+      "\n海康 → /image_raw（默认无配置文件）。\n"
+      "  ./build/tests/ros2_image_pub_test\n"
+      "  ./build/tests/ros2_image_pub_test -e 3 -g 16\n"
+      "  ./build/tests/ros2_image_pub_test -c configs/sentry.yaml   # 可选覆盖开相机参数\n"
+      "  ./build/tests/ros2_image_pub_test -i configs/sentry.yaml   # 可选发 CameraInfo\n"
       "  ros2 run camera_calibration cameracalibrator --size 11x8 --square 0.04 \\\n"
       "      image:=/image_raw camera:=/\n");
     return 0;
   }
 
+  double exposure_ms = cli.get<double>("exposure");
+  double gain = cli.get<double>("gain");
+  auto vid_pid = cli.get<std::string>("vid-pid");
   const auto config_path = cli.get<std::string>("config-path");
   const auto topic = cli.get<std::string>("topic");
   const auto info_topic = cli.get<std::string>("info-topic");
@@ -120,9 +108,27 @@ int main(int argc, char ** argv)
   const double rate_hz = std::max(1.0, cli.get<double>("rate"));
   const auto period = std::chrono::duration<double>(1.0 / rate_hz);
 
+  if (!config_path.empty()) {
+    try {
+      auto yaml = tools::load(config_path);
+      const auto name = tools::read<std::string>(yaml, "camera_name");
+      if (name != "hikrobot") {
+        tools::RemoteLogger::instance().log(
+          "ERROR", "{} camera_name='{}'，本节点只支持 hikrobot", config_path, name);
+        return 1;
+      }
+      exposure_ms = tools::read<double>(yaml, "exposure_ms");
+      gain = tools::read<double>(yaml, "gain");
+      vid_pid = tools::read<std::string>(yaml, "vid_pid");
+      tools::RemoteLogger::instance().log("INFO", "开相机参数来自 {}", config_path);
+    } catch (const std::exception & e) {
+      tools::RemoteLogger::instance().log("ERROR", "读配置失败: {}", e.what());
+      return 1;
+    }
+  }
+
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("ros2_image_pub_test");
-  // 相对话题名 → 绝对 /image_raw（与 camera_calibration 默认一致）
   auto img_pub = node->create_publisher<sensor_msgs::msg::Image>(topic, rclcpp::SensorDataQoS());
   auto info_pub =
     node->create_publisher<sensor_msgs::msg::CameraInfo>(info_topic, rclcpp::SensorDataQoS());
@@ -141,11 +147,14 @@ int main(int argc, char ** argv)
   else if (have_info)
     tools::RemoteLogger::instance().log("INFO", "同时发布 CameraInfo ← {}", info_path);
 
+  tools::RemoteLogger::instance().log(
+    "INFO", "HikRobot open  exposure_ms={:.2f} gain={:.1f} vid_pid={}", exposure_ms, gain, vid_pid);
+
   std::unique_ptr<io::HikRobot> cam;
   try {
-    cam = open_hikrobot(config_path);
+    cam = std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid);
   } catch (const std::exception & e) {
-    tools::RemoteLogger::instance().log("ERROR", "{}", e.what());
+    tools::RemoteLogger::instance().log("ERROR", "打开海康失败: {}", e.what());
     rclcpp::shutdown();
     return 1;
   }
