@@ -13,6 +13,9 @@ class CameraBase
 public:
   virtual ~CameraBase() = default;
   virtual void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp) = 0;
+  /// 运行时改曝光（毫秒）；默认空实现
+  virtual void set_exposure_ms(double /*ms*/) {}
+  virtual double exposure_ms() const { return -1.0; }
 };
 
 class Camera

@@ -31,11 +31,12 @@ constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
 constexpr auto kUiGap = std::chrono::milliseconds(66);  // ~15fps 推流
 constexpr int kPreviewW = 480;
 
-std::unique_ptr<io::CameraBase> open_camera(const std::string & result_path)
+std::unique_ptr<io::CameraBase> open_camera(
+  const std::string & result_path, double & exposure_ms)
 {
   // 标定默认稍长曝光，便于棋盘格识别；可在 result.yaml 覆盖
   std::string camera_name = "hikrobot";
-  double exposure_ms = 10.0;
+  exposure_ms = 10.0;
   double gain = 16.0;
   double gamma = 1.0;
   std::string vid_pid = "2bdf:0001";
@@ -122,7 +123,7 @@ cv::Mat annotate_preview(
 
 nlohmann::json status_json(
   const calibration::Progress & prog, const calibration::Calibrator & calib, bool board,
-  bool undistort, const std::string & hint)
+  bool undistort, const std::string & hint, double exposure_ms)
 {
   nlohmann::json j;
   j["calib"] = true;
@@ -138,6 +139,7 @@ nlohmann::json status_json(
   j["undistort"] = undistort ? 1 : 0;
   j["has_cam"] = calib.has_camera() ? 1 : 0;
   j["reproj"] = calib.has_camera() ? calib.camera().reproj_error : -1.0;
+  j["exposure_ms"] = exposure_ms;
   if (!calib.calibrated_at().empty()) j["calibrated_at"] = calib.calibrated_at();
   nlohmann::json samples = nlohmann::json::array();
   for (const auto & s : calib.sample_views()) {
@@ -186,8 +188,14 @@ int main(int argc, char * argv[])
   init_remote_logger(test_feed);
   tools::Exiter exiter;
   calibration::Calibrator calib;
+  double exposure_ms = 10.0;
   std::unique_ptr<io::CameraBase> camera =
-    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera(calib.result_path());
+    test_feed ? calib_test_feed::make(calib.pattern_size())
+              : open_camera(calib.result_path(), exposure_ms);
+  if (!test_feed && camera) {
+    const double cur = camera->exposure_ms();
+    if (cur > 0) exposure_ms = cur;
+  }
   // CALIB_TEST_FEED ↑
 
   std::string hint = test_feed ? "TEST FEED on — no real camera"
@@ -219,11 +227,11 @@ int main(int argc, char * argv[])
       return;
     }
     hint = "calibrating...";
-    tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint));
+    tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint, exposure_ms));
     if (!calib.calibrate_camera()) {
       hint = "camera calib failed";
       tools::RemoteLogger::instance().log("ERROR", "{}", hint);
-      tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint));
+      tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint, exposure_ms));
       return;
     }
     if (!host_time.empty()) calib.set_calibrated_at(host_time);
@@ -268,6 +276,14 @@ int main(int argc, char * argv[])
         undistort = false;
         hint = "reset";
       }
+    } else if (cmd == "set_exposure") {
+      if (finished || !camera) return;
+      double ms = msg.value("exposure_ms", exposure_ms);
+      if (ms < 0.1) ms = 0.1;
+      if (ms > 100.0) ms = 100.0;
+      camera->set_exposure_ms(ms);
+      exposure_ms = camera->exposure_ms() > 0 ? camera->exposure_ms() : ms;
+      hint = fmt::format("exposure {:.1f} ms", exposure_ms);
     } else if (cmd == "quit" || cmd == "done") {
       quit_cmd = true;
       hint = "host done, exiting";
@@ -321,7 +337,7 @@ int main(int argc, char * argv[])
       const bool flash = now < flash_until;
       cv::Mat view =
         annotate_preview(img, corners, found, calib, undistort, flash, kPreviewW);
-      tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint));
+      tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint, exposure_ms));
       tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
     }
   }

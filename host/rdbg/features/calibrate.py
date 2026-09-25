@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 
-from ..calib_cmds import ALLOWED_CMDS, calib_payload, parse_calib_cmd, quit_robot_burst
+from ..calib_cmds import ALLOWED_CMDS, calib_payload, quit_robot_burst
 from ..sources.fleet import fleet
 from .base import json_body, send_json
 from .fleet_bound import FleetBoundFeature
@@ -56,20 +56,28 @@ class CalibrateFeature(FleetBoundFeature):
                 pass
         self.push_page_state(names)
 
-    def _send_cmd(self, cmd):
+    def _send_cmd(self, cmd, body=None):
         name, info = self._robot_info()
         if not name or not info or not self._source:
             return False
         self._source.client.send_json(
-            info["ip"], info["control"], calib_payload(cmd))
+            info["ip"], info["control"], calib_payload(cmd, body))
         return True
 
     def _handle_calib(self, handler):
-        cmd = parse_calib_cmd(handler, json_body)
+        from ..calib_cmds import parse_calib_request
+        cmd, body = parse_calib_request(handler, json_body)
         if cmd not in ALLOWED_CMDS:
             send_json(handler, {"ok": False, "error": "bad cmd"}, code=400)
             return
-        if not self._send_cmd(cmd):
+        if cmd == "set_exposure":
+            # also allow ?exposure_ms=
+            if "exposure_ms" not in body:
+                q = (handler.query.get("exposure_ms") or [""])[0]
+                if q:
+                    body = dict(body)
+                    body["exposure_ms"] = q
+        if not self._send_cmd(cmd, body):
             send_json(handler, {"ok": False, "error": "no robot"}, code=404)
             return
         send_json(handler, {"ok": True, "cmd": cmd, "robot": self._sender})

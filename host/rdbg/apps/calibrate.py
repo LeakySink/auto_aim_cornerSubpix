@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-from ..calib_cmds import ALLOWED_CMDS, calib_payload, parse_calib_cmd, quit_robot_burst
+from ..calib_cmds import ALLOWED_CMDS, calib_payload, quit_robot_burst
 from ..features.base import json_body, send_json
 from ..http.httputil import open_browser
 from ..http.shell import Shell
@@ -42,7 +42,8 @@ class CalibrateSource(LiveSource):
         return name, info
 
     def _handle_calib(self, handler):
-        cmd = parse_calib_cmd(handler, json_body)
+        from ..calib_cmds import parse_calib_request
+        cmd, body = parse_calib_request(handler, json_body)
         if cmd not in ALLOWED_CMDS:
             send_json(handler, {"ok": False, "error": "bad cmd"}, code=400)
             return
@@ -50,7 +51,12 @@ class CalibrateSource(LiveSource):
         if not name or not info:
             send_json(handler, {"ok": False, "error": "no robot"}, code=404)
             return
-        self.client.send_json(info["ip"], info["control"], calib_payload(cmd))
+        if cmd == "set_exposure" and "exposure_ms" not in body:
+            q = (handler.query.get("exposure_ms") or [""])[0]
+            if q:
+                body = dict(body)
+                body["exposure_ms"] = q
+        self.client.send_json(info["ip"], info["control"], calib_payload(cmd, body))
         send_json(handler, {"ok": True, "cmd": cmd, "robot": name})
 
     def _handle_done(self, handler):

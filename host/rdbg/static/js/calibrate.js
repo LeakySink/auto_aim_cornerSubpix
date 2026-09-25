@@ -5,6 +5,8 @@
   var status = {};
   var doneSent = false;
   var iid = new URLSearchParams(location.search).get("i") || "";
+  var expTimer = null;
+  var expSynced = false;
 
   function api(path) {
     if (!iid) return path;
@@ -13,6 +15,18 @@
   }
 
   var $ = function (id) { return document.getElementById(id); };
+
+  function setExpLabel(ms) {
+    $("exp-val").textContent = Number(ms).toFixed(1) + " ms";
+  }
+
+  function sendExposure(ms) {
+    fetch(api("/api/calib"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd: "set_exposure", exposure_ms: Number(ms) }),
+    }).catch(function () {});
+  }
 
   function setBar(idFill, idVal, v) {
     var pct = Math.max(0, Math.min(1, Number(v) || 0));
@@ -79,6 +93,8 @@
     $("btn-d").disabled = true;
     $("btn-r").disabled = true;
     document.querySelectorAll(".btns button").forEach(function (b) { b.disabled = true; });
+    var exp = $("exp");
+    if (exp) exp.disabled = true;
 
     if (doneSent) return;
     doneSent = true;
@@ -133,6 +149,16 @@
     $("btn-c").disabled = (status.n || 0) < (status.min_n || 20);
     $("btn-d").disabled = !(status.n > 0);
     $("btn-r").disabled = !(status.n > 0 || status.has_cam);
+
+    var exp = $("exp");
+    if (exp) {
+      exp.disabled = !!status.calib_done;
+      if (status.exposure_ms != null && !expSynced) {
+        expSynced = true;
+        exp.value = String(status.exposure_ms);
+        setExpLabel(status.exposure_ms);
+      }
+    }
   }
 
   function showImage(b64, meta) {
@@ -194,6 +220,19 @@
       sendCmd(btn.getAttribute("data-cmd"));
     });
   });
+
+  (function setupExposure() {
+    var exp = $("exp");
+    if (!exp) return;
+    setExpLabel(exp.value);
+    exp.addEventListener("input", function () {
+      setExpLabel(exp.value);
+      if (expTimer) clearTimeout(expTimer);
+      expTimer = setTimeout(function () {
+        sendExposure(exp.value);
+      }, 120);
+    });
+  })();
 
   $("sender-sel").addEventListener("change", function () {
     fetch(api("/select") + "?sender=" + encodeURIComponent($("sender-sel").value));

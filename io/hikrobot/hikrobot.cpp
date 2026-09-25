@@ -204,6 +204,16 @@ void HikRobot::capture_stop()
   }
 }
 
+void HikRobot::set_exposure_ms(double ms)
+{
+  if (ms <= 0) return;
+  exposure_us_ = ms * 1e3;
+  if (!handle_ || !capturing_) return;
+  set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
+  set_float_value("ExposureTime", exposure_us_);
+  tools::RemoteLogger::instance().log("INFO", "HikRobot ExposureTime={:.0f}us ({:.2f}ms)", exposure_us_, ms);
+}
+
 void HikRobot::set_float_value(const std::string & name, double value)
 {
   unsigned int ret;
