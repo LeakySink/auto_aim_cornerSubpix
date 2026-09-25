@@ -77,7 +77,7 @@ void MindVision::open()
   height_ = camera_capbility.sResolutionRange.iHeightMax;
 
   CameraSetAeState(handle_, FALSE);                        // 关闭自动曝光
-  CameraSetExposureTime(handle_, exposure_ms_ * 1e3);      // 设置曝光（SDK 单位 us）
+  CameraSetExposureTime(handle_, exposure_ms_ * 1e3);      // 设置曝光
   CameraSetGamma(handle_, gamma_ * 1e2);                   // 设置伽马
   CameraSetIspOutFormat(handle_, CAMERA_MEDIA_TYPE_BGR8);  // 设置输出格式为BGR
   CameraSetTriggerMode(handle_, 0);                        // 设置为连续采集模式
@@ -128,15 +128,6 @@ void MindVision::close()
 {
   if (handle_ == -1) return;
   CameraUnInit(handle_);
-}
-
-void MindVision::set_exposure_ms(double ms)
-{
-  if (ms <= 0 || handle_ == -1 || !ok_) return;
-  exposure_ms_ = ms;
-  CameraSetAeState(handle_, FALSE);
-  CameraSetExposureTime(handle_, exposure_ms_ * 1e3);
-  tools::RemoteLogger::instance().log("INFO", "MindVision ExposureTime={:.2f}ms", exposure_ms_);
 }
 
 void MindVision::set_vid_pid(const std::string & vid_pid)

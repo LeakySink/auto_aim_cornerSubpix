@@ -31,34 +31,41 @@ constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
 constexpr auto kUiGap = std::chrono::milliseconds(66);  // ~15fps 推流
 constexpr int kPreviewW = 480;
 
-std::unique_ptr<io::CameraBase> open_camera(
-  const std::string & result_path, double & exposure_ms)
+struct CamParams
 {
-  // 标定默认稍长曝光，便于棋盘格识别；可在 result.yaml 覆盖
   std::string camera_name = "hikrobot";
-  exposure_ms = 10.0;
+  double exposure_ms = 10.0;
   double gain = 16.0;
   double gamma = 1.0;
   std::string vid_pid = "2bdf:0001";
+};
+
+CamParams load_cam_params(const std::string & result_path)
+{
+  CamParams p;
   try {
     const auto y = YAML::LoadFile(result_path);
-    if (y["camera_name"]) camera_name = y["camera_name"].as<std::string>();
-    if (y["exposure_ms"]) exposure_ms = y["exposure_ms"].as<double>();
-    if (y["gain"]) gain = y["gain"].as<double>();
-    if (y["gamma"]) gamma = y["gamma"].as<double>();
-    if (y["vid_pid"]) vid_pid = y["vid_pid"].as<std::string>();
+    if (y["camera_name"]) p.camera_name = y["camera_name"].as<std::string>();
+    if (y["exposure_ms"]) p.exposure_ms = y["exposure_ms"].as<double>();
+    if (y["gain"]) p.gain = y["gain"].as<double>();
+    if (y["gamma"]) p.gamma = y["gamma"].as<double>();
+    if (y["vid_pid"]) p.vid_pid = y["vid_pid"].as<std::string>();
   } catch (const std::exception &) {
   }
+  return p;
+}
 
+std::unique_ptr<io::CameraBase> open_camera(const CamParams & p)
+{
   tools::RemoteLogger::instance().log(
-    "INFO", "open camera '{}' exposure_ms={:.1f} gain={:.1f} auto_gain={}", camera_name,
-    exposure_ms, gain, camera_name == "hikrobot");
+    "INFO", "open camera '{}' exposure_ms={:.1f} gain={:.1f} auto_gain={}", p.camera_name,
+    p.exposure_ms, p.gain, p.camera_name == "hikrobot");
 
-  if (camera_name == "mindvision")
-    return std::make_unique<io::MindVision>(exposure_ms, gamma, vid_pid);
-  if (camera_name == "hikrobot")
-    return std::make_unique<io::HikRobot>(exposure_ms, gain, vid_pid, /*auto_gain=*/true);
-  throw std::runtime_error("unknown camera_name: " + camera_name);
+  if (p.camera_name == "mindvision")
+    return std::make_unique<io::MindVision>(p.exposure_ms, p.gamma, p.vid_pid);
+  if (p.camera_name == "hikrobot")
+    return std::make_unique<io::HikRobot>(p.exposure_ms, p.gain, p.vid_pid, /*auto_gain=*/true);
+  throw std::runtime_error("unknown camera_name: " + p.camera_name);
 }
 
 void init_remote_logger(bool test_feed)
@@ -188,14 +195,9 @@ int main(int argc, char * argv[])
   init_remote_logger(test_feed);
   tools::Exiter exiter;
   calibration::Calibrator calib;
-  double exposure_ms = 10.0;
+  CamParams cam_params = load_cam_params(calib.result_path());
   std::unique_ptr<io::CameraBase> camera =
-    test_feed ? calib_test_feed::make(calib.pattern_size())
-              : open_camera(calib.result_path(), exposure_ms);
-  if (!test_feed && camera) {
-    const double cur = camera->exposure_ms();
-    if (cur > 0) exposure_ms = cur;
-  }
+    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera(cam_params);
   // CALIB_TEST_FEED ↑
 
   std::string hint = test_feed ? "TEST FEED on — no real camera"
@@ -227,11 +229,13 @@ int main(int argc, char * argv[])
       return;
     }
     hint = "calibrating...";
-    tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint, exposure_ms));
+    tools::RemoteLogger::instance().plot(
+      status_json(prog, calib, false, false, hint, cam_params.exposure_ms));
     if (!calib.calibrate_camera()) {
       hint = "camera calib failed";
       tools::RemoteLogger::instance().log("ERROR", "{}", hint);
-      tools::RemoteLogger::instance().plot(status_json(prog, calib, false, false, hint, exposure_ms));
+      tools::RemoteLogger::instance().plot(
+        status_json(prog, calib, false, false, hint, cam_params.exposure_ms));
       return;
     }
     if (!host_time.empty()) calib.set_calibrated_at(host_time);
@@ -277,13 +281,21 @@ int main(int argc, char * argv[])
         hint = "reset";
       }
     } else if (cmd == "set_exposure") {
-      if (finished || !camera) return;
-      double ms = msg.value("exposure_ms", exposure_ms);
+      if (finished || test_feed) return;
+      double ms = msg.value("exposure_ms", cam_params.exposure_ms);
       if (ms < 0.1) ms = 0.1;
       if (ms > 100.0) ms = 100.0;
-      camera->set_exposure_ms(ms);
-      exposure_ms = camera->exposure_ms() > 0 ? camera->exposure_ms() : ms;
-      hint = fmt::format("exposure {:.1f} ms", exposure_ms);
+      // 不改 io：关相机 → 用新曝光重开
+      camera.reset();
+      cam_params.exposure_ms = ms;
+      try {
+        camera = open_camera(cam_params);
+        hint = fmt::format("exposure {:.1f} ms (reopened)", cam_params.exposure_ms);
+        tools::RemoteLogger::instance().log("INFO", "{}", hint);
+      } catch (const std::exception & e) {
+        hint = fmt::format("reopen failed: {}", e.what());
+        tools::RemoteLogger::instance().log("ERROR", "{}", hint);
+      }
     } else if (cmd == "quit" || cmd == "done") {
       quit_cmd = true;
       hint = "host done, exiting";
@@ -304,6 +316,11 @@ int main(int argc, char * argv[])
 
     if (finished) {
       std::this_thread::sleep_for(20ms);
+      continue;
+    }
+
+    if (!camera) {
+      std::this_thread::sleep_for(50ms);
       continue;
     }
 
@@ -337,7 +354,8 @@ int main(int argc, char * argv[])
       const bool flash = now < flash_until;
       cv::Mat view =
         annotate_preview(img, corners, found, calib, undistort, flash, kPreviewW);
-      tools::RemoteLogger::instance().plot(status_json(prog, calib, found, undistort, hint, exposure_ms));
+      tools::RemoteLogger::instance().plot(
+        status_json(prog, calib, found, undistort, hint, cam_params.exposure_ms));
       tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
     }
   }
