@@ -68,3 +68,22 @@ if(USE_ROS2)
   ros2_use(subscribe_test)
   ros2_use(topic_loop_test)
 endif()
+
+# 海康 → /image_raw（对比 ROS 标定；只需 rclcpp + sensor_msgs，不依赖 sp_msgs）
+if(DEFINED ENV{ROS_DISTRO} AND EXISTS "/opt/ros/$ENV{ROS_DISTRO}")
+  list(PREPEND CMAKE_PREFIX_PATH "/opt/ros/$ENV{ROS_DISTRO}")
+elseif(EXISTS "/opt/ros/humble")
+  list(PREPEND CMAKE_PREFIX_PATH "/opt/ros/humble")
+endif()
+find_package(rclcpp QUIET)
+find_package(sensor_msgs QUIET)
+if(rclcpp_FOUND AND sensor_msgs_FOUND)
+  add_executable(ros2_image_pub_test ros2_image_pub_test.cpp)
+  target_link_libraries(ros2_image_pub_test
+    ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io
+    rclcpp::rclcpp
+    sensor_msgs::sensor_msgs)
+  message(STATUS "tests: ros2_image_pub_test enabled (HikRobot → /image_raw)")
+else()
+  message(STATUS "tests: ros2_image_pub_test skipped (need rclcpp + sensor_msgs)")
+endif()
