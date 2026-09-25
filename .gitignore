@@ -21,4 +21,10 @@ __pycache__/
 host/.venv/
 host/ui/node_modules/
 host/ui/.tools/
+# 带 ROS2 的构建目录（与不带 ROS2 的 build/ 分开，互不污染）
+build_ros2/
+# 旧版源码树旁的 colcon 工作区（已迁到 ${CMAKE_BINARY_DIR}/ros2_ws）
+.ros2_ws/
+# 本地 ROS2 深度测试包（不入库；由开发者本地生成）
+io/ros2/msg/test_*/
 
