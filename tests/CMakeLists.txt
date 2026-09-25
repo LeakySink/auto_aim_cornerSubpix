@@ -80,7 +80,7 @@ find_package(sensor_msgs QUIET)
 if(rclcpp_FOUND AND sensor_msgs_FOUND)
   add_executable(ros2_image_pub_test ros2_image_pub_test.cpp)
   target_link_libraries(ros2_image_pub_test
-    ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io
+    ${OpenCV_LIBS} fmt::fmt tools io
     rclcpp::rclcpp
     sensor_msgs::sensor_msgs)
   message(STATUS "tests: ros2_image_pub_test enabled (HikRobot → /image_raw)")
