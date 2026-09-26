@@ -121,6 +121,24 @@ function(auto_add_executables)
       ros2_use(${_name})
     endif()
 
+    # CLion / 未 source setup.bash 时也能找到 ROS .so
+    # 必须用 DT_RPATH（--disable-new-dtags）：RUNPATH 不会传给 rclcpp 的传递依赖
+    if(_ros2_image OR _ros2_full)
+      set(_ros_lib "")
+      if(ROS2_ROOT)
+        set(_ros_lib "${ROS2_ROOT}/lib")
+      elseif(DEFINED ENV{ROS_DISTRO} AND EXISTS "/opt/ros/$ENV{ROS_DISTRO}/lib")
+        set(_ros_lib "/opt/ros/$ENV{ROS_DISTRO}/lib")
+      elseif(EXISTS "/opt/ros/humble/lib")
+        set(_ros_lib "/opt/ros/humble/lib")
+      endif()
+      if(_ros_lib)
+        set_property(TARGET ${_name} APPEND PROPERTY BUILD_RPATH "${_ros_lib}")
+        set_property(TARGET ${_name} APPEND PROPERTY INSTALL_RPATH "${_ros_lib}")
+        target_link_options(${_name} PRIVATE "-Wl,--disable-new-dtags")
+      endif()
+    endif()
+
     list(APPEND _created ${_name})
   endforeach()
 
