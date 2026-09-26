@@ -7,6 +7,7 @@
   var iid = new URLSearchParams(location.search).get("i") || "";
   var expTimer = null;
   var expSynced = false;
+  var lastImgTs = 0;  // 丢弃乱序/迟到旧帧，避免预览前后抖
 
   function api(path) {
     if (!iid) return path;
@@ -161,9 +162,15 @@
     }
   }
 
-  function showImage(b64, meta) {
+  function showImage(b64, meta, ts) {
     if (!b64) return;
     if (meta && meta.name && meta.name !== "calibrate") return;
+    // UDP 分片重组可能让旧帧晚到；只显示更新的时间戳
+    var t = Number(ts) || 0;
+    if (t > 0) {
+      if (t < lastImgTs) return;
+      lastImgTs = t;
+    }
     var img = $("frame");
     img.src = "data:image/jpeg;base64," + b64;
     img.style.display = "block";
@@ -191,7 +198,7 @@
       return;
     }
     if (msg.type === "image") {
-      showImage(msg.jpg_b64, msg.meta);
+      showImage(msg.jpg_b64, msg.meta, msg.ts);
       return;
     }
     if (msg.type === "plot" && msg.data && msg.data.calib) {
