@@ -1,6 +1,6 @@
 #include "mt_detector.hpp"
 
-#include <yaml-cpp/yaml.h>
+#include "tools/yaml.hpp"
 
 namespace auto_aim
 {
@@ -10,9 +10,9 @@ namespace multithread
 MultiThreadDetector::MultiThreadDetector(const std::string & config_path, bool debug)
 : yolo_(config_path, debug)
 {
-  auto yaml = YAML::LoadFile(config_path);
+  auto yaml = tools::load(config_path);
   auto yolo_name = yaml["yolo_name"].as<std::string>();
-  auto model_path = yaml[yolo_name + "_model_path"].as<std::string>();
+  auto model_path = tools::project_path(yaml[yolo_name + "_model_path"].as<std::string>());
   device_ = yaml["device"].as<std::string>();
 
   auto model = core_.read_model(model_path);

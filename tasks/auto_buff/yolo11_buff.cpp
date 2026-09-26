@@ -1,13 +1,15 @@
 #include "yolo11_buff.hpp"
 
+#include "tools/yaml.hpp"
+
 const double ConfidenceThreshold = 0.7f;
 const double IouThreshold = 0.4f;
 namespace auto_buff
 {
 YOLO11_BUFF::YOLO11_BUFF(const std::string & config)
 {
-  auto yaml = YAML::LoadFile(config);
-  std::string model_path = yaml["model"].as<std::string>();
+  auto yaml = tools::load(config);
+  std::string model_path = tools::read_path(yaml, "model");
   model = core.read_model(model_path);
   // printInputAndOutputsInfo(*model);  // 打印模型信息
   /// 载入并编译模型
