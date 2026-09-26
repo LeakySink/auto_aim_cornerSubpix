@@ -1,5 +1,6 @@
 #include "hikrobot.hpp"
 
+#include <algorithm>
 #include <libusb-1.0/libusb.h>
 
 #include "tools/remote_logger.hpp"
@@ -16,6 +17,9 @@ HikRobot::HikRobot(
   frame_rate_(frame_rate > 0 ? frame_rate : 60.0),
   queue_(1),
   daemon_quit_(false),
+  handle_(nullptr),
+  capturing_(false),
+  capture_quit_(false),
   vid_(-1),
   pid_(-1)
 {
@@ -27,13 +31,26 @@ HikRobot::HikRobot(
 
     capture_start();
 
+    int fail_streak = 0;
     while (!daemon_quit_) {
-      std::this_thread::sleep_for(100ms);
+      std::this_thread::sleep_for(200ms);
 
-      if (capturing_) continue;
+      if (capturing_) {
+        fail_streak = 0;
+        continue;
+      }
+
+      // 打开失败时不要 100ms 狂 reset USB，否则 EnumDevices 会一直 MV_E_RESOURCE
+      fail_streak++;
+      const auto backoff = std::chrono::milliseconds(std::min(2000, 300 * fail_streak));
+      tools::RemoteLogger::instance().log(
+        "WARN", "HikRobot not capturing, retry in {}ms (streak={})", backoff.count(), fail_streak);
+      std::this_thread::sleep_for(backoff);
+      if (daemon_quit_) break;
 
       capture_stop();
-      reset_usb();
+      if (fail_streak >= 2) reset_usb();
+      std::this_thread::sleep_for(500ms);
       capture_start();
     }
 
@@ -81,12 +98,15 @@ void HikRobot::capture_start()
   ret = MV_CC_CreateHandle(&handle_, device_list.pDeviceInfo[0]);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_CreateHandle failed: {:#x}", ret);
+    handle_ = nullptr;
     return;
   }
 
   ret = MV_CC_OpenDevice(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_OpenDevice failed: {:#x}", ret);
+    MV_CC_DestroyHandle(handle_);
+    handle_ = nullptr;
     return;
   }
 
@@ -118,6 +138,9 @@ void HikRobot::capture_start()
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_StartGrabbing failed: {:#x}", ret);
+    MV_CC_CloseDevice(handle_);
+    MV_CC_DestroyHandle(handle_);
+    handle_ = nullptr;
     return;
   }
 
@@ -186,25 +209,30 @@ void HikRobot::capture_stop()
   capture_quit_ = true;
   if (capture_thread_.joinable()) capture_thread_.join();
 
+  if (!handle_) {
+    capturing_ = false;
+    return;
+  }
+
   unsigned int ret;
 
   ret = MV_CC_StopGrabbing(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_StopGrabbing failed: {:#x}", ret);
-    return;
   }
 
   ret = MV_CC_CloseDevice(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_CloseDevice failed: {:#x}", ret);
-    return;
   }
 
   ret = MV_CC_DestroyHandle(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_DestroyHandle failed: {:#x}", ret);
-    return;
   }
+
+  handle_ = nullptr;
+  capturing_ = false;
 }
 
 void HikRobot::set_float_value(const std::string & name, double value)
