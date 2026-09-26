@@ -16,15 +16,15 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
-  function setExpLabel(ms) {
-    $("exp-val").textContent = Number(ms).toFixed(1) + " ms";
+  function setExpLabel(us) {
+    $("exp-val").textContent = Math.round(Number(us)) + " us";
   }
 
-  function sendExposure(ms) {
+  function sendExposure(us) {
     fetch(api("/api/calib"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cmd: "set_exposure", exposure_ms: Number(ms) }),
+      body: JSON.stringify({ cmd: "set_exposure", exposure_us: Number(us) }),
     }).catch(function () {});
   }
 
@@ -153,10 +153,10 @@
     var exp = $("exp");
     if (exp) {
       exp.disabled = !!status.calib_done;
-      if (status.exposure_ms != null && !expSynced) {
+      if (status.exposure_us != null && !expSynced) {
         expSynced = true;
-        exp.value = String(status.exposure_ms);
-        setExpLabel(status.exposure_ms);
+        exp.value = String(status.exposure_us);
+        setExpLabel(status.exposure_us);
       }
     }
   }

@@ -71,12 +71,12 @@ class CalibrateFeature(FleetBoundFeature):
             send_json(handler, {"ok": False, "error": "bad cmd"}, code=400)
             return
         if cmd == "set_exposure":
-            # also allow ?exposure_ms=
-            if "exposure_ms" not in body:
-                q = (handler.query.get("exposure_ms") or [""])[0]
+            # also allow ?exposure_us= / ?exposure_ms=（数值均为微秒）
+            if "exposure_us" not in body and "exposure_ms" not in body:
+                q = (handler.query.get("exposure_us") or handler.query.get("exposure_ms") or [""])[0]
                 if q:
                     body = dict(body)
-                    body["exposure_ms"] = q
+                    body["exposure_us"] = q
         if not self._send_cmd(cmd, body):
             send_json(handler, {"ok": False, "error": "no robot"}, code=404)
             return

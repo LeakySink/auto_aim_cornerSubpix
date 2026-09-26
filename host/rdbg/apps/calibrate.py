@@ -51,11 +51,11 @@ class CalibrateSource(LiveSource):
         if not name or not info:
             send_json(handler, {"ok": False, "error": "no robot"}, code=404)
             return
-        if cmd == "set_exposure" and "exposure_ms" not in body:
-            q = (handler.query.get("exposure_ms") or [""])[0]
+        if cmd == "set_exposure" and "exposure_us" not in body and "exposure_ms" not in body:
+            q = (handler.query.get("exposure_us") or handler.query.get("exposure_ms") or [""])[0]
             if q:
                 body = dict(body)
-                body["exposure_ms"] = q
+                body["exposure_us"] = q
         self.client.send_json(info["ip"], info["control"], calib_payload(cmd, body))
         send_json(handler, {"ok": True, "cmd": cmd, "robot": name})
 

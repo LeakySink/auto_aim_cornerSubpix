@@ -34,12 +34,14 @@ def calib_payload(cmd, body=None):
     if cmd == "calibrate":
         payload["host_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
     if cmd == "set_exposure":
-        ms = body.get("exposure_ms")
-        if ms is None:
-            ms = body.get("exposure")
+        us = body.get("exposure_us")
+        if us is None:
+            us = body.get("exposure_ms")  # 标定约定：数值为微秒
         try:
-            payload["exposure_ms"] = float(ms)
+            payload["exposure_us"] = float(us)
+            payload["exposure_ms"] = float(us)  # 兼容车上旧解析，同为微秒
         except (TypeError, ValueError):
+            payload["exposure_us"] = 10.0
             payload["exposure_ms"] = 10.0
     return payload
 

@@ -10,7 +10,7 @@
 | 项目 | 说明 |
 |------|------|
 | 棋盘格 | 默认 **11×8 内角点**，方格 **40 mm**（在 `calibration/result.yaml` 改） |
-| 相机 | 默认海康 `hikrobot`，曝光约 10 ms，连续自动增益 |
+| 相机 | 默认海康 `hikrobot`；`exposure_ms` 字段数值为**微秒**（如 `10000`≈10ms） |
 | 网络 | 车与 PC 同一局域网；车发 beacon，host 自动发现 |
 | 目录 | 建议在**仓库根目录**运行（也可从子目录启动，会向上找 `result.yaml`） |
 
@@ -18,7 +18,7 @@
 
 ```yaml
 camera_name: "hikrobot"   # 或 mindvision
-exposure_ms: 10           # 偏暗认不出棋盘格时调大
+exposure_ms: 10000        # 微秒；偏暗认不出棋盘格时调大
 gain: 16.0                # 自动增益失败时的回退增益
 vid_pid: "2bdf:0001"
 ```
