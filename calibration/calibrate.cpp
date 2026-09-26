@@ -28,10 +28,10 @@ const std::string keys =
 namespace
 {
 constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
-constexpr auto kUiGap = std::chrono::milliseconds(66);     // ~15fps 推流
-constexpr auto kLoopGap = std::chrono::milliseconds(66);   // 主循环上限 ~15Hz，避免狂跑棋盘检测
-constexpr int kPreviewW = 480;
-constexpr double kCalibFrameRate = 15.0;  // 海康取流帧率（标定够用）
+constexpr auto kUiGap = std::chrono::milliseconds(80);    // ~12fps 预览
+constexpr auto kLoopGap = std::chrono::milliseconds(15);  // 取流紧一些，检测可慢
+constexpr int kPreviewW = 400;
+constexpr double kCalibFrameRate = 20.0;  // 略高于预览，保证有最新帧可取
 
 struct CamParams
 {
@@ -85,9 +85,9 @@ void init_remote_logger(bool test_feed)
   cfg.app = "calibrate";
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
-  cfg.enable_local = true;
-  cfg.img_width = 0;  // 预览已缩到 480，JPEG 不再二次缩放
-  cfg.img_quality = 28;
+  cfg.enable_local = false;  // 标定预览优先，避免 img worker 被落盘拖住
+  cfg.img_width = 0;  // 预览已缩到 kPreviewW，JPEG 不再二次缩放
+  cfg.img_quality = 45;
   tools::RemoteLogger::instance().init(cfg);
 }
 
@@ -321,6 +321,8 @@ int main(int argc, char * argv[])
 
   cv::Mat img;
   std::chrono::steady_clock::time_point stamp;
+  std::vector<cv::Point2f> last_corners;
+  bool last_found = false;
 
   while (!exiter.exit() && !quit_cmd) {
     const auto loop_start = std::chrono::steady_clock::now();
@@ -343,9 +345,24 @@ int main(int argc, char * argv[])
     camera->read(img, stamp);
     if (img.empty()) break;
 
+    // 先推预览（刚读到的最新帧），再做棋盘检测，避免检测耗时造成“旧帧晚到/画面回跳”
+    const auto now_ui = std::chrono::steady_clock::now();
+    if (now_ui - last_ui >= kUiGap) {
+      last_ui = now_ui;
+      const auto prog = calib.progress();
+      const bool flash = now_ui < flash_until;
+      cv::Mat view =
+        annotate_preview(img, last_corners, last_found, calib, undistort, flash, kPreviewW);
+      tools::RemoteLogger::instance().plot(
+        status_json(prog, calib, last_found, undistort, hint, cam_params.exposure_us));
+      tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
+    }
+
     std::vector<cv::Point2f> corners;
     calibration::SampleParams params;
     const bool found = calib.detect(img, corners, params, /*refine=*/false);
+    last_found = found;
+    last_corners = found ? corners : std::vector<cv::Point2f>{};
 
     const auto now = std::chrono::steady_clock::now();
     const bool cooled = now - last_add >= kAutoAddGap;
@@ -364,18 +381,7 @@ int main(int argc, char * argv[])
     }
     want_add = false;
 
-    if (now - last_ui >= kUiGap) {
-      last_ui = now;
-      const auto prog = calib.progress();
-      const bool flash = now < flash_until;
-      cv::Mat view =
-        annotate_preview(img, corners, found, calib, undistort, flash, kPreviewW);
-      tools::RemoteLogger::instance().plot(
-        status_json(prog, calib, found, undistort, hint, cam_params.exposure_us));
-      tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
-    }
-
-    // 限速：棋盘检测是 CPU 大户，不要跟相机硬件帧率硬扛
+    // 检测是 CPU 大户：按实际耗时让出时间，但不要人为卡成和预览同频
     const auto elapsed = std::chrono::steady_clock::now() - loop_start;
     if (elapsed < kLoopGap) std::this_thread::sleep_for(kLoopGap - elapsed);
   }
