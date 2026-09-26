@@ -168,7 +168,6 @@ class UdpBackend:
         self._was_connected = False
         self._filter = ""
         self._frags = _FragAssembler()
-        self._last_img_ts = 0  # drop late/out-of-order reassembled frames
 
     @property
     def active_sender(self):
@@ -308,15 +307,6 @@ class UdpBackend:
                 self._last_from = frm
         if self._drop_filtered():
             return
-        # 分片重组完成顺序 ≠ 拍摄顺序：旧帧晚到会看起来“前后抖”
-        try:
-            ts_i = int(ts)
-        except (TypeError, ValueError):
-            ts_i = 0
-        if ts_i > 0:
-            if ts_i < self._last_img_ts:
-                return
-            self._last_img_ts = ts_i
         self._emit({
             "type": "image",
             "ts": ts,
