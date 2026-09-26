@@ -1,21 +1,21 @@
 #include "yolo11.hpp"
 
 #include <fmt/chrono.h>
-#include <yaml-cpp/yaml.h>
 
 #include <filesystem>
 
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
+#include "tools/yaml.hpp"
 
 namespace auto_aim
 {
 YOLO11::YOLO11(const std::string & config_path, bool debug)
 : debug_(debug), detector_(config_path, false)
 {
-  auto yaml = YAML::LoadFile(config_path);
+  auto yaml = tools::load(config_path);
 
-  model_path_ = yaml["yolo11_model_path"].as<std::string>();
+  model_path_ = tools::read_path(yaml, "yolo11_model_path");
   device_ = yaml["device"].as<std::string>();
   binary_threshold_ = yaml["threshold"].as<double>();
   min_confidence_ = yaml["min_confidence"].as<double>();

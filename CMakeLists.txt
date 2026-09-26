@@ -18,6 +18,8 @@ find_package(OpenVINO REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})
+# YAML 等相对路径相对工程根解析（见 tools/yaml.hpp）
+add_compile_definitions(SP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 ################## ROS2 ##################
 # ① init → ② find messages → ③ setup interfaces → (子目录 attach) → ④ finalize
