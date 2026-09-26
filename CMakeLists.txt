@@ -40,11 +40,14 @@ add_subdirectory(calibration)
 
 add_executable(diagnose_hik_camera io/hikrobot/diagnose_camera.cpp)
 target_include_directories(diagnose_hik_camera PRIVATE io/hikrobot/include)
-# HIKROBOT_LIB_DIR 由 io/CMakeLists.txt 选出（优先 /opt/MVS）
-target_link_directories(diagnose_hik_camera PRIVATE "${HIKROBOT_LIB_DIR}")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(_diag_hik_lib "${CMAKE_SOURCE_DIR}/io/hikrobot/lib/amd64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(_diag_hik_lib "${CMAKE_SOURCE_DIR}/io/hikrobot/lib/arm64")
+endif()
+# 与 io 一致：只 -L/-rpath-link，运行时靠 bashrc LD_LIBRARY_PATH
+target_link_options(diagnose_hik_camera PRIVATE
+  "LINKER:-L${_diag_hik_lib}"
+  "LINKER:-rpath-link,${_diag_hik_lib}")
 target_link_libraries(diagnose_hik_camera ${OpenCV_LIBS} MvCameraControl usb-1.0)
-set_property(TARGET diagnose_hik_camera APPEND PROPERTY BUILD_RPATH "${HIKROBOT_LIB_DIR}")
-set_property(TARGET diagnose_hik_camera APPEND PROPERTY INSTALL_RPATH "${HIKROBOT_LIB_DIR}")
-target_link_options(diagnose_hik_camera PRIVATE "LINKER:--disable-new-dtags")
-
 ros2_finalize()
