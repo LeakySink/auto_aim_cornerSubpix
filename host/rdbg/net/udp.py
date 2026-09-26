@@ -185,6 +185,7 @@ class UdpBackend:
 
     def set_filter(self, sender_name):
         self._filter = sender_name or ""
+        self._last_img_ts = 0
 
     def start(self, port, sender_name="default"):
         with self._lock:
