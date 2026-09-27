@@ -8,12 +8,10 @@ using namespace std::chrono_literals;
 
 namespace io
 {
-HikRobot::HikRobot(
-  double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain, double frame_rate)
+HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain)
 : exposure_us_(exposure_ms * 1e3),
   gain_(gain),
   auto_gain_(auto_gain),
-  frame_rate_(frame_rate > 0 ? frame_rate : 60.0),
   queue_(1),
   daemon_quit_(false),
   vid_(-1),
@@ -111,9 +109,8 @@ void HikRobot::capture_start()
     set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
     set_float_value("Gain", gain_);
   }
-  // 标定不需要极限帧率；过高会导致 Bayer 转换 + 棋盘检测把 CPU 打满
-  MV_CC_SetFrameRate(handle_, frame_rate_);
-  tools::RemoteLogger::instance().log("INFO", "HikRobot FrameRate={:.0f}", frame_rate_);
+  // 标定不需要极限帧率；过高可能导致曝光/增益来不及稳定
+  MV_CC_SetFrameRate(handle_, 60);
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {

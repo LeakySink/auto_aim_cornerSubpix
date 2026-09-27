@@ -28,10 +28,8 @@ const std::string keys =
 namespace
 {
 constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
-constexpr auto kUiGap = std::chrono::milliseconds(66);     // ~15fps 推流
-constexpr auto kLoopGap = std::chrono::milliseconds(66);   // 主循环上限 ~15Hz，避免狂跑棋盘检测
+constexpr auto kUiGap = std::chrono::milliseconds(66);  // ~15fps 推流
 constexpr int kPreviewW = 480;
-constexpr double kCalibFrameRate = 15.0;  // 海康取流帧率（标定够用）
 
 struct CamParams
 {
@@ -39,7 +37,7 @@ struct CamParams
   // 注意：标定侧按「微秒」存（历史 yaml 键名仍叫 exposure_ms）
   double exposure_us = 10.0;
   double gain = 16.0;
-  double gamma = 12.0;
+  double gamma = 1.0;
   std::string vid_pid = "2bdf:0001";
 };
 
@@ -73,8 +71,7 @@ std::unique_ptr<io::CameraBase> open_camera(const CamParams & p)
   if (p.camera_name == "mindvision")
     return std::make_unique<io::MindVision>(exposure_ms, p.gamma, p.vid_pid);
   if (p.camera_name == "hikrobot")
-    return std::make_unique<io::HikRobot>(
-      exposure_ms, p.gain, p.vid_pid, /*auto_gain=*/true, kCalibFrameRate);
+    return std::make_unique<io::HikRobot>(exposure_ms, p.gain, p.vid_pid, /*auto_gain=*/true);
   throw std::runtime_error("unknown camera_name: " + p.camera_name);
 }
 
@@ -323,8 +320,6 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point stamp;
 
   while (!exiter.exit() && !quit_cmd) {
-    const auto loop_start = std::chrono::steady_clock::now();
-
     nlohmann::json remote;
     while (tools::RemoteLogger::instance().poll_json(remote)) apply_remote(remote);
     std::string legacy;
@@ -374,10 +369,6 @@ int main(int argc, char * argv[])
         status_json(prog, calib, found, undistort, hint, cam_params.exposure_us));
       tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
     }
-
-    // 限速：棋盘检测是 CPU 大户，不要跟相机硬件帧率硬扛
-    const auto elapsed = std::chrono::steady_clock::now() - loop_start;
-    if (elapsed < kLoopGap) std::this_thread::sleep_for(kLoopGap - elapsed);
   }
 
   tools::RemoteLogger::instance().shutdown();

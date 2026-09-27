@@ -16,9 +16,7 @@ namespace io
 class HikRobot : public CameraBase
 {
 public:
-  HikRobot(
-    double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain = false,
-    double frame_rate = 60.0);
+  HikRobot(double exposure_ms, double gain, const std::string & vid_pid, bool auto_gain = false);
   ~HikRobot() override;
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp) override;
 
@@ -32,7 +30,6 @@ private:
   double exposure_us_;
   double gain_;
   bool auto_gain_;
-  double frame_rate_;
 
   std::thread daemon_thread_;
   std::atomic<bool> daemon_quit_;
