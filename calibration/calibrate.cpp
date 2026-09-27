@@ -1,15 +1,13 @@
 #include <fmt/core.h>
 
-#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <nlohmann/json.hpp>
+#include <opencv2/opencv.hpp>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <nlohmann/json.hpp>
-#include <opencv2/opencv.hpp>
 #include <yaml-cpp/yaml.h>
 
 #include "calibration/calibrator.hpp"
@@ -29,21 +27,16 @@ const std::string keys =
 
 namespace
 {
-
-// ---- timing / preview ----
 constexpr auto kAutoAddGap = std::chrono::milliseconds(250);
 constexpr auto kUiGap = std::chrono::milliseconds(80);    // ~12fps 预览
-constexpr auto kLoopGap = std::chrono::milliseconds(15);  // 主循环下限，检测可更慢
+constexpr auto kLoopGap = std::chrono::milliseconds(15);  // 取流紧一些，检测可慢
 constexpr int kPreviewW = 400;
-constexpr double kCalibFrameRate = 20.0;
+constexpr double kCalibFrameRate = 20.0;  // 略高于预览，保证有最新帧可取
 
-using Clock = std::chrono::steady_clock;
-using TimePoint = Clock::time_point;
-
-// ---- camera params (yaml 里 exposure_ms 键名历史兼容，数值按微秒) ----
 struct CamParams
 {
   std::string camera_name = "hikrobot";
+  // 注意：标定侧按「微秒」存（历史 yaml 键名仍叫 exposure_ms）
   double exposure_us = 10.0;
   double gain = 16.0;
   double gamma = 12.0;
@@ -56,6 +49,7 @@ CamParams load_cam_params(const std::string & result_path)
   try {
     const auto y = YAML::LoadFile(result_path);
     if (y["camera_name"]) p.camera_name = y["camera_name"].as<std::string>();
+    // yaml 键名 exposure_ms，标定里数值按微秒理解
     if (y["exposure_us"])
       p.exposure_us = y["exposure_us"].as<double>();
     else if (y["exposure_ms"])
@@ -70,6 +64,7 @@ CamParams load_cam_params(const std::string & result_path)
 
 std::unique_ptr<io::CameraBase> open_camera(const CamParams & p)
 {
+  // io::HikRobot / MindVision 构造参数是毫秒
   const double exposure_ms = p.exposure_us / 1e3;
   tools::RemoteLogger::instance().log(
     "INFO", "open camera '{}' exposure={:.1f}us ({:.4f}ms) gain={:.1f} auto_gain={}",
@@ -90,25 +85,26 @@ void init_remote_logger(bool test_feed)
   cfg.app = "calibrate";
   cfg.heartbeat_interval_ms = 500;
   cfg.enable_remote = true;
-  cfg.enable_local = false;  // 预览优先，避免 img worker 被落盘拖住
-  cfg.img_width = 0;
+  cfg.enable_local = false;  // 标定预览优先，避免 img worker 被落盘拖住
+  cfg.img_width = 0;  // 预览已缩到 kPreviewW，JPEG 不再二次缩放
   cfg.img_quality = 45;
   tools::RemoteLogger::instance().init(cfg);
 }
 
-// ---- host JSON / preview ----
-cv::Mat make_preview(
-  const cv::Mat & img, const std::vector<cv::Point2f> & corners, bool found,
-  const calibration::Calibrator & calib, bool undistort, bool flash)
+cv::Mat annotate_preview(
+  const cv::Mat & img, const std::vector<cv::Point2f> & live_corners, bool found,
+  const calibration::Calibrator & calib, bool undistort, bool flash, int preview_w)
 {
   cv::Mat small;
   const double scale =
-    (kPreviewW > 0 && img.cols > kPreviewW) ? static_cast<double>(kPreviewW) / img.cols : 1.0;
+    (preview_w > 0 && img.cols > preview_w) ? static_cast<double>(preview_w) / img.cols : 1.0;
   if (scale != 1.0)
     cv::resize(img, small, cv::Size(), scale, scale, cv::INTER_AREA);
   else
     small = img.clone();
 
+  const auto pattern = calib.pattern_size();
+  // 历史样本只画覆盖点，不画全分辨率外框（网页 map 已有覆盖）
   for (const auto & s : calib.sample_views()) {
     cv::circle(
       small,
@@ -116,15 +112,15 @@ cv::Mat make_preview(
       {40, 160, 220}, -1, cv::LINE_AA);
   }
 
-  if (found && !corners.empty()) {
-    auto scaled = corners;
+  if (found && !live_corners.empty()) {
+    std::vector<cv::Point2f> scaled = live_corners;
     if (scale != 1.0) {
       for (auto & c : scaled) {
         c.x = static_cast<float>(c.x * scale);
         c.y = static_cast<float>(c.y * scale);
       }
     }
-    cv::drawChessboardCorners(small, calib.pattern_size(), scaled, true);
+    cv::drawChessboardCorners(small, pattern, scaled, true);
   }
 
   if (undistort && calib.has_camera()) {
@@ -142,178 +138,114 @@ cv::Mat make_preview(
   return small;
 }
 
-nlohmann::json make_status(
+nlohmann::json status_json(
   const calibration::Progress & prog, const calibration::Calibrator & calib, bool board,
   bool undistort, const std::string & hint, double exposure_us)
 {
-  nlohmann::json j{
-    {"calib", true},
-    {"board", board ? 1 : 0},
-    {"n", prog.n},
-    {"min_n", calibration::Calibrator::kMinSamples},
-    {"x", prog.x},
-    {"y", prog.y},
-    {"size", prog.size},
-    {"skew", prog.skew},
-    {"goodenough", prog.goodenough ? 1 : 0},
-    {"hint", hint},
-    {"undistort", undistort ? 1 : 0},
-    {"has_cam", calib.has_camera() ? 1 : 0},
-    {"reproj", calib.has_camera() ? calib.camera().reproj_error : -1.0},
-    {"exposure_us", exposure_us},
-  };
+  nlohmann::json j;
+  j["calib"] = true;
+  j["board"] = board ? 1 : 0;
+  j["n"] = prog.n;
+  j["min_n"] = calibration::Calibrator::kMinSamples;
+  j["x"] = prog.x;
+  j["y"] = prog.y;
+  j["size"] = prog.size;
+  j["skew"] = prog.skew;
+  j["goodenough"] = prog.goodenough ? 1 : 0;
+  j["hint"] = hint;
+  j["undistort"] = undistort ? 1 : 0;
+  j["has_cam"] = calib.has_camera() ? 1 : 0;
+  j["reproj"] = calib.has_camera() ? calib.camera().reproj_error : -1.0;
+  j["exposure_us"] = exposure_us;
   if (!calib.calibrated_at().empty()) j["calibrated_at"] = calib.calibrated_at();
-
   nlohmann::json samples = nlohmann::json::array();
   for (const auto & s : calib.sample_views()) {
     samples.push_back(
-      {{"x", s.params.x}, {"y", s.params.y}, {"size", s.params.size}, {"skew", s.params.skew}});
+      {{"x", s.params.x},
+       {"y", s.params.y},
+       {"size", s.params.size},
+       {"skew", s.params.skew}});
   }
-  j["samples"] = std::move(samples);
+  j["samples"] = samples;
   return j;
 }
 
-nlohmann::json make_result(
-  const calibration::Calibrator & calib, bool saved, const std::string & hint)
+nlohmann::json result_json(const calibration::Calibrator & calib, bool saved, const std::string & hint)
 {
-  return {
-    {"calib", true},
-    {"calib_done", 1},
-    {"saved", saved ? 1 : 0},
-    {"hint", hint},
-    {"has_cam", 1},
-    {"n", calib.size()},
-    {"min_n", calibration::Calibrator::kMinSamples},
-    {"reproj", calib.camera().reproj_error},
-    {"calibrated_at", calib.calibrated_at()},
-    {"result_path", calib.result_path()},
-    {"camera_matrix",
-     std::vector<double>(
-       calib.camera().camera_matrix.begin<double>(), calib.camera().camera_matrix.end<double>())},
-    {"distort_coeffs",
-     std::vector<double>(
-       calib.camera().distort_coeffs.begin<double>(), calib.camera().distort_coeffs.end<double>())},
-  };
+  nlohmann::json j;
+  j["calib"] = true;
+  j["calib_done"] = 1;
+  j["saved"] = saved ? 1 : 0;
+  j["hint"] = hint;
+  j["has_cam"] = 1;
+  j["n"] = calib.size();
+  j["min_n"] = calibration::Calibrator::kMinSamples;
+  j["reproj"] = calib.camera().reproj_error;
+  j["calibrated_at"] = calib.calibrated_at();
+  j["result_path"] = calib.result_path();
+  j["camera_matrix"] = std::vector<double>(
+    calib.camera().camera_matrix.begin<double>(), calib.camera().camera_matrix.end<double>());
+  j["distort_coeffs"] = std::vector<double>(
+    calib.camera().distort_coeffs.begin<double>(), calib.camera().distort_coeffs.end<double>());
+  return j;
 }
 
-void publish(const nlohmann::json & j) { tools::RemoteLogger::instance().plot(j); }
+}  // namespace
 
-void publish_image(const cv::Mat & view)
+int main(int argc, char * argv[])
 {
-  tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
-}
+  cv::CommandLineParser cli(argc, argv, keys);
+  if (cli.has("help")) {
+    cli.printMessage();
+    return 0;
+  }
 
-// ---- session: 状态 + 命令 + 主循环步骤 ----
-struct Session
-{
+  // CALIB_TEST_FEED ↓ 调试结束后删除本块，并改回 init_remote_logger() / open_camera()
+  const bool test_feed = cli.has("test");
+  init_remote_logger(test_feed);
+  tools::Exiter exiter;
   calibration::Calibrator calib;
-  CamParams cam;
-  std::unique_ptr<io::CameraBase> camera;
-  bool test_feed = false;
+  CamParams cam_params = load_cam_params(calib.result_path());
+  std::unique_ptr<io::CameraBase> camera =
+    test_feed ? calib_test_feed::make(calib.pattern_size()) : open_camera(cam_params);
+  // CALIB_TEST_FEED ↑
 
-  std::string hint;
+  std::string hint = test_feed ? "TEST FEED on — no real camera"
+                               : "open host calibrate page, wave the board";
   bool undistort = false;
   bool want_add = false;
-  bool quit = false;
+  bool quit_cmd = false;
   bool finished = false;
+  auto last_add = std::chrono::steady_clock::now() - kAutoAddGap;
+  auto flash_until = std::chrono::steady_clock::now();
+  auto last_ui = std::chrono::steady_clock::now() - kUiGap;
 
-  TimePoint last_add = Clock::now() - kAutoAddGap;
-  TimePoint flash_until{};
-  TimePoint last_ui = Clock::now() - kUiGap;
-
-  // 上一帧检测结果，供预览叠加（预览先于本次 detect）
-  std::vector<cv::Point2f> overlay_corners;
-  bool overlay_found = false;
-
-  void log_banner() const
-  {
-    if (test_feed) {
-      tools::RemoteLogger::instance().log(
-        "WARN", "CALIB_TEST_FEED active (--test); sender=calibrate-test; remove after debug");
-    }
+  if (test_feed) {
+    // CALIB_TEST_FEED
     tools::RemoteLogger::instance().log(
-      "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
-      calib.pattern_size().height, calib.result_path());
-    tools::RemoteLogger::instance().log(
-      "INFO", "run: ./host/start.sh  then Calibrate in the portal");
+      "WARN", "CALIB_TEST_FEED active (--test); sender=calibrate-test; remove after debug");
   }
+  tools::RemoteLogger::instance().log(
+    "INFO", "intrinsics-only calibrate, board {}x{}, save -> {}", calib.pattern_size().width,
+    calib.pattern_size().height, calib.result_path());
+  tools::RemoteLogger::instance().log(
+    "INFO", "run: ./host/start.sh  then Calibrate in the portal");
 
-  void poll_host()
-  {
-    nlohmann::json msg;
-    while (tools::RemoteLogger::instance().poll_json(msg)) handle_msg(msg);
-    std::string legacy;
-    while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) handle_msg({{"cmd", legacy}});
-  }
-
-  void handle_msg(const nlohmann::json & msg)
-  {
-    const auto cmd = msg.value("cmd", "");
-    if (cmd.empty()) return;
-
-    if (cmd == "add") {
-      want_add = true;
-    } else if (cmd == "calibrate") {
-      run_calibrate(msg.value("host_time", ""));
-    } else if (cmd == "drop") {
-      if (!finished) {
-        calib.drop_last();
-        hint = "dropped last sample";
-      }
-    } else if (cmd == "reset") {
-      if (!finished) {
-        calib.reset();
-        undistort = false;
-        hint = "reset";
-      }
-    } else if (cmd == "set_exposure") {
-      set_exposure(msg);
-    } else if (cmd == "quit" || cmd == "done") {
-      quit = true;
-      hint = "host done, exiting";
-      tools::RemoteLogger::instance().log("INFO", "quit by host");
-    }
-  }
-
-  void set_exposure(const nlohmann::json & msg)
-  {
-    if (finished || test_feed) return;
-
-    double us = cam.exposure_us;
-    if (msg.contains("exposure_us"))
-      us = msg.value("exposure_us", us);
-    else if (msg.contains("exposure_ms"))
-      us = msg.value("exposure_ms", us);
-    us = std::clamp(us, 1.0, 1e6);
-
-    camera.reset();
-    cam.exposure_us = us;
-    try {
-      camera = open_camera(cam);
-      hint = fmt::format("exposure {:.0f} us (reopened)", cam.exposure_us);
-      tools::RemoteLogger::instance().log("INFO", "{}", hint);
-    } catch (const std::exception & e) {
-      hint = fmt::format("reopen failed: {}", e.what());
-      tools::RemoteLogger::instance().log("ERROR", "{}", hint);
-    }
-  }
-
-  void run_calibrate(const std::string & host_time)
-  {
+  auto do_calibrate = [&](const std::string & host_time) {
     if (finished) return;
     const auto prog = calib.progress();
     if (prog.n < calibration::Calibrator::kMinSamples) {
       hint = fmt::format("need >= {} samples", calibration::Calibrator::kMinSamples);
       return;
     }
-
     hint = "calibrating...";
-    publish(make_status(prog, calib, false, false, hint, cam.exposure_us));
-
+    tools::RemoteLogger::instance().plot(
+      status_json(prog, calib, false, false, hint, cam_params.exposure_us));
     if (!calib.calibrate_camera()) {
       hint = "camera calib failed";
       tools::RemoteLogger::instance().log("ERROR", "{}", hint);
-      publish(make_status(prog, calib, false, false, hint, cam.exposure_us));
+      tools::RemoteLogger::instance().plot(
+        status_json(prog, calib, false, false, hint, cam_params.exposure_us));
       return;
     }
     if (!host_time.empty()) calib.set_calibrated_at(host_time);
@@ -329,114 +261,129 @@ struct Session
     }
     fmt::print("\n{}\n", calib.yaml_snippet());
 
+    // 回传结果给 host；等待 host 下发 quit
     finished = true;
-    const auto payload = make_result(calib, saved, hint);
-    for (int i = 0; i < 5; ++i) {  // UDP 多发几次防丢包
-      publish(payload);
+    auto payload = result_json(calib, saved, hint);
+    tools::RemoteLogger::instance().plot(payload);
+    // 多发几次，避免 UDP 丢包
+    for (int i = 0; i < 5; i++) {
+      tools::RemoteLogger::instance().plot(payload);
       std::this_thread::sleep_for(20ms);
     }
-  }
+  };
 
-  /// 用上一帧角点叠加当前图，先推流再 detect，避免检测阻塞造成画面发旧
-  void maybe_push_preview(const cv::Mat & img)
-  {
-    const auto now = Clock::now();
-    if (now - last_ui < kUiGap) return;
-    last_ui = now;
-
-    const bool flash = now < flash_until;
-    publish(make_status(
-      calib.progress(), calib, overlay_found, undistort, hint, cam.exposure_us));
-    publish_image(make_preview(img, overlay_corners, overlay_found, calib, undistort, flash));
-  }
-
-  void detect_and_maybe_add(const cv::Mat & img)
-  {
-    std::vector<cv::Point2f> corners;
-    calibration::SampleParams params;
-    const bool found = calib.detect(img, corners, params, /*refine=*/false);
-
-    overlay_found = found;
-    overlay_corners = found ? corners : std::vector<cv::Point2f>{};
-
-    const auto now = Clock::now();
-    const bool cooled = now - last_add >= kAutoAddGap;
-    if (!found || !cooled || !(want_add || calib.is_good_sample(params))) {
-      want_add = false;
-      return;
+  auto apply_remote = [&](const nlohmann::json & msg) {
+    const auto cmd = msg.value("cmd", "");
+    if (cmd.empty()) return;
+    if (cmd == "add")
+      want_add = true;
+    else if (cmd == "calibrate")
+      do_calibrate(msg.value("host_time", ""));
+    else if (cmd == "drop") {
+      if (!finished) {
+        calib.drop_last();
+        hint = "dropped last sample";
+      }
+    } else if (cmd == "reset") {
+      if (!finished) {
+        calib.reset();
+        undistort = false;
+        hint = "reset";
+      }
+    } else if (cmd == "set_exposure") {
+      if (finished || test_feed) return;
+      // host 下发 exposure_us；兼容旧字段 exposure_ms（亦按微秒）
+      double us = cam_params.exposure_us;
+      if (msg.contains("exposure_us"))
+        us = msg.value("exposure_us", us);
+      else if (msg.contains("exposure_ms"))
+        us = msg.value("exposure_ms", us);
+      if (us < 1.0) us = 1.0;
+      if (us > 1e6) us = 1e6;
+      camera.reset();
+      cam_params.exposure_us = us;
+      try {
+        camera = open_camera(cam_params);
+        hint = fmt::format("exposure {:.0f} us (reopened)", cam_params.exposure_us);
+        tools::RemoteLogger::instance().log("INFO", "{}", hint);
+      } catch (const std::exception & e) {
+        hint = fmt::format("reopen failed: {}", e.what());
+        tools::RemoteLogger::instance().log("ERROR", "{}", hint);
+      }
+    } else if (cmd == "quit" || cmd == "done") {
+      quit_cmd = true;
+      hint = "host done, exiting";
+      tools::RemoteLogger::instance().log("INFO", "quit by host");
     }
+  };
 
-    auto refined = corners;
-    calib.refine_corners(img, refined);
-    const auto refined_params = calib.sample_params(refined, img.size());
-    if (calib.add_sample(refined, refined_params, img.size(), nullptr)) {
-      last_add = now;
-      flash_until = now + 180ms;
-      hint = fmt::format("added #{}", calib.size());
-      tools::RemoteLogger::instance().log("INFO", "sample {} added", calib.size());
-    } else if (want_add) {
-      hint = "sample too similar, move the board";
-    }
-    want_add = false;
-  }
+  auto apply_cmd = [&](const std::string & cmd) { apply_remote({{"cmd", cmd}}); };
 
-  /// 一轮：收命令 → 取流 → 预览 → 检测/采样
-  /// @return false 表示应退出主循环（空帧）
-  bool step()
-  {
-    poll_host();
+  cv::Mat img;
+  std::chrono::steady_clock::time_point stamp;
+  std::vector<cv::Point2f> last_corners;
+  bool last_found = false;
+
+  while (!exiter.exit() && !quit_cmd) {
+    const auto loop_start = std::chrono::steady_clock::now();
+
+    nlohmann::json remote;
+    while (tools::RemoteLogger::instance().poll_json(remote)) apply_remote(remote);
+    std::string legacy;
+    while (tools::RemoteLogger::instance().poll_calib_cmd(legacy)) apply_cmd(legacy);
 
     if (finished) {
       std::this_thread::sleep_for(20ms);
-      return true;
+      continue;
     }
+
     if (!camera) {
       std::this_thread::sleep_for(50ms);
-      return true;
+      continue;
     }
 
-    cv::Mat img;
-    TimePoint stamp;
     camera->read(img, stamp);
-    if (img.empty()) return false;
+    if (img.empty()) break;
 
-    maybe_push_preview(img);
-    detect_and_maybe_add(img);
-    return true;
-  }
-};
+    // 先推预览（刚读到的最新帧），再做棋盘检测，避免检测耗时造成“旧帧晚到/画面回跳”
+    const auto now_ui = std::chrono::steady_clock::now();
+    if (now_ui - last_ui >= kUiGap) {
+      last_ui = now_ui;
+      const auto prog = calib.progress();
+      const bool flash = now_ui < flash_until;
+      cv::Mat view =
+        annotate_preview(img, last_corners, last_found, calib, undistort, flash, kPreviewW);
+      tools::RemoteLogger::instance().plot(
+        status_json(prog, calib, last_found, undistort, hint, cam_params.exposure_us));
+      tools::RemoteLogger::instance().plot_image(view, {{"name", "calibrate"}});
+    }
 
-}  // namespace
+    std::vector<cv::Point2f> corners;
+    calibration::SampleParams params;
+    const bool found = calib.detect(img, corners, params, /*refine=*/false);
+    last_found = found;
+    last_corners = found ? corners : std::vector<cv::Point2f>{};
 
-int main(int argc, char * argv[])
-{
-  cv::CommandLineParser cli(argc, argv, keys);
-  if (cli.has("help")) {
-    cli.printMessage();
-    return 0;
-  }
+    const auto now = std::chrono::steady_clock::now();
+    const bool cooled = now - last_add >= kAutoAddGap;
+    if (found && cooled && (want_add || calib.is_good_sample(params))) {
+      auto refined = corners;
+      calib.refine_corners(img, refined);
+      const auto refined_params = calib.sample_params(refined, img.size());
+      if (calib.add_sample(refined, refined_params, img.size(), nullptr)) {
+        last_add = now;
+        flash_until = now + std::chrono::milliseconds(180);
+        hint = fmt::format("added #{}", calib.size());
+        tools::RemoteLogger::instance().log("INFO", "sample {} added", calib.size());
+      } else if (want_add) {
+        hint = "sample too similar, move the board";
+      }
+    }
+    want_add = false;
 
-  // CALIB_TEST_FEED ↓ 调试结束后删除本块
-  const bool test_feed = cli.has("test");
-  init_remote_logger(test_feed);
-
-  tools::Exiter exiter;
-  Session app;
-  app.test_feed = test_feed;
-  app.cam = load_cam_params(app.calib.result_path());
-  app.camera =
-    test_feed ? calib_test_feed::make(app.calib.pattern_size()) : open_camera(app.cam);
-  app.hint = test_feed ? "TEST FEED on — no real camera"
-                       : "open host calibrate page, wave the board";
-  // CALIB_TEST_FEED ↑
-
-  app.log_banner();
-
-  while (!exiter.exit() && !app.quit) {
-    const auto t0 = Clock::now();
-    if (!app.step()) break;
-    const auto dt = Clock::now() - t0;
-    if (dt < kLoopGap) std::this_thread::sleep_for(kLoopGap - dt);
+    // 检测是 CPU 大户：按实际耗时让出时间，但不要人为卡成和预览同频
+    const auto elapsed = std::chrono::steady_clock::now() - loop_start;
+    if (elapsed < kLoopGap) std::this_thread::sleep_for(kLoopGap - elapsed);
   }
 
   tools::RemoteLogger::instance().shutdown();
