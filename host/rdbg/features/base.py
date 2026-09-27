@@ -35,6 +35,11 @@ class Feature(ABC):
         self._error = ""
         self._config = {}
 
+    @property
+    def ui_path(self):
+        iid = getattr(self, "instance_id", "")
+        return f"/i/{iid}" if iid else "/"
+
     def meta(self):
         return {
             "id": self.id,

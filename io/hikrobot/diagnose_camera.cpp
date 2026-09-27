@@ -167,7 +167,7 @@ int test_hik_sdk()
   print_header("海康SDK连接测试");
 
   unsigned int ret;
-  MV_CC_DEVICE_INFO_LIST device_list;
+  MV_CC_DEVICE_INFO_LIST device_list{};
 
   ret = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
   if (ret != MV_OK) {

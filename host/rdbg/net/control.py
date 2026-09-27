@@ -8,6 +8,21 @@ import time
 DISCOVER_PORT = 15999
 BEACON_STALE_S = 3.0
 
+# Beacon `app` → portal feature. Unknown / missing → watch (normal).
+APP_FEATURES = {
+    "calibrate": "calibrate",
+    "normal": "watch",
+}
+
+
+def normalize_app(raw):
+    app = (raw or "normal").strip().lower() or "normal"
+    return app
+
+
+def app_feature(app):
+    return APP_FEATURES.get(normalize_app(app), "watch")
+
 
 def _udp(broadcast=False, reuse_port=False):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -90,9 +105,10 @@ class Discovery:
             if not name or not ip:
                 continue
             control = int(msg.get("control") or 15000)
+            app = normalize_app(msg.get("app"))
             cb = self.on_beacon
             if cb:
-                cb(name, ip, control, addr)
+                cb(name, ip, control, addr, app)
 
 
 class RobotClient:

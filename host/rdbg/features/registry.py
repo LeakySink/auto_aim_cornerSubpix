@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from .base import Feature, json_body, send_json
+from .calibrate import CalibrateFeature
 from .dump import DumpFeature
 from .netcheck import NetcheckFeature
 from .replay import ReplayFeature
@@ -12,6 +13,7 @@ from .watch import WatchFeature
 
 KINDS = {
     "watch": WatchFeature,
+    "calibrate": CalibrateFeature,
     "replay": ReplayFeature,
     "dump": DumpFeature,
     "netcheck": NetcheckFeature,
@@ -57,6 +59,7 @@ class FeatureRegistry:
         st["feature"] = feat.id
         st["instance"] = getattr(feat, "instance_id", "")
         st["title"] = feat.title
+        st["path"] = feat.ui_path
         return st
 
     def _handle_kinds(self, handler):
@@ -82,7 +85,7 @@ class FeatureRegistry:
             "ok": True,
             "id": iid,
             "feature": feat.id,
-            "path": f"/i/{iid}",
+            "path": feat.ui_path,
             "status": self._public(feat),
         })
 

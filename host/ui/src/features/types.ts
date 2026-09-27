@@ -12,7 +12,7 @@ export type FeatureModule = {
   title: string;
   description: string;
   route: string;
-  Component: FC;
+  Component?: FC;
 };
 
 export type FeatureStatus = {

@@ -34,6 +34,8 @@ public:
     int img_quality = 50;
     uint32_t heartbeat_interval_ms = 0;
     std::string sender_name;
+    /// beacon 身份：normal=调试程序，calibrate=标定程序（host 据此开页）
+    std::string app = "normal";
     uint32_t beacon_interval_ms = 1000;
     uint32_t head_timeout_ms = 2000;
   };

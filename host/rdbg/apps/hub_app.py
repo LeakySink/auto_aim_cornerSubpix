@@ -17,6 +17,7 @@ def run(host="0.0.0.0", port=8080, no_browser=False, open_path="/"):
     registry.attach(shell)
     fleet.attach(shell)
     fleet.start()
+    shell.page("/calibrate.html", "calibrate.html")
 
     if not (STATIC_UI_DIR / "index.html").is_file():
         print(

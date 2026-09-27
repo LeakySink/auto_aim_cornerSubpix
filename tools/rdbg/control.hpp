@@ -38,6 +38,7 @@ public:
   uint32_t beacon_interval_ms{1000};
   uint32_t head_timeout_ms{2000};
   std::string sender_name;
+  std::string app{"normal"};  // normal | calibrate
 
   bool start();
   void stop();

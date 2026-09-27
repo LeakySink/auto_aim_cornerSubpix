@@ -10,7 +10,7 @@
 | 项目 | 说明 |
 |------|------|
 | 棋盘格 | 默认 **11×8 内角点**，方格 **40 mm**（在 `calibration/result.yaml` 改） |
-| 相机 | 默认海康 `hikrobot`，曝光约 10 ms，连续自动增益 |
+| 相机 | 默认海康 `hikrobot`；`exposure_ms` 字段数值为**微秒**（如 `10000`≈10ms） |
 | 网络 | 车与 PC 同一局域网；车发 beacon，host 自动发现 |
 | 目录 | 建议在**仓库根目录**运行（也可从子目录启动，会向上找 `result.yaml`） |
 
@@ -18,7 +18,7 @@
 
 ```yaml
 camera_name: "hikrobot"   # 或 mindvision
-exposure_ms: 10           # 偏暗认不出棋盘格时调大
+exposure_ms: 10000        # 微秒；偏暗认不出棋盘格时调大
 gain: 16.0                # 自动增益失败时的回退增益
 vid_pid: "2bdf:0001"
 ```
@@ -50,12 +50,12 @@ cmake --build build --target calibrate -j$(nproc)
 **调试 PC：**
 
 ```bash
-./host/calibrate.sh
-# Windows: host\calibrate.bat
+./host/start.sh
+# 兼容入口：./host/calibrate.sh   Windows: host\calibrate.bat
 ```
 
-浏览器打开 `http://localhost:8090`（一般会自动打开）。  
-顶部出现 `linked · calibrate` 表示已连上车。
+浏览器打开 `http://127.0.0.1:8080`，首页「车辆」里出现标定进程（beacon `app=calibrate`）后点进去。  
+顶栏出现 `linked · …` 表示已连上车。
 
 无相机联调 host / 网页时（车上）：
 
@@ -80,7 +80,7 @@ host 下发 calibrate + 本机时间
     → 写入 calibration/result.yaml
     → 把结果推回网页显示
     → host 通知车 quit
-    → 车退出；host 进程随后退出
+    → 车退出（门户保持运行）
 ```
 
 | 按钮 / 键 | 作用 |

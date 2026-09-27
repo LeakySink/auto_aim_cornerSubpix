@@ -117,6 +117,7 @@ nlohmann::json ControlPlane::make_beacon() const
   j["v"] = 1;
   j["type"] = "beacon";
   j["name"] = sender_name;
+  j["app"] = app.empty() ? "normal" : app;
   j["ip"] = local_ipv4();
   j["control"] = control_port;
   j["ts"] = now_ns();

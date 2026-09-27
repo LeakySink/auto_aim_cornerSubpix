@@ -1,10 +1,11 @@
-"""Calibrate app — live UDP + web UI for board coverage / buttons."""
+"""Calibrate app — legacy standalone process (prefer hub portal Calibrate)."""
 
-import json
 import sys
 import threading
 import time
 
+from ..calib_cmds import ALLOWED_CMDS, calib_payload, quit_robot_burst
+from ..features.base import json_body, send_json
 from ..http.httputil import open_browser
 from ..http.shell import Shell
 from ..sources.live import LiveSource
@@ -41,33 +42,22 @@ class CalibrateSource(LiveSource):
         return name, info
 
     def _handle_calib(self, handler):
-        cmd = ""
-        if handler.command == "POST" and handler.body:
-            try:
-                body = json.loads(handler.body.decode())
-                cmd = (body.get("cmd") or "").strip()
-            except Exception:
-                cmd = ""
-        if not cmd:
-            cmd = (handler.query.get("cmd") or [""])[0].strip()
-        allowed = {"add", "calibrate", "drop", "reset", "quit", "done"}
-        if cmd not in allowed:
-            handler.send(400, b'{"ok":false,"error":"bad cmd"}', "application/json")
+        from ..calib_cmds import parse_calib_request
+        cmd, body = parse_calib_request(handler, json_body)
+        if cmd not in ALLOWED_CMDS:
+            send_json(handler, {"ok": False, "error": "bad cmd"}, code=400)
             return
-
         name, info = self._robot_info()
         if not name or not info:
-            handler.send(404, b'{"ok":false,"error":"no robot"}', "application/json")
+            send_json(handler, {"ok": False, "error": "no robot"}, code=404)
             return
-        payload = {"cmd": cmd}
-        if cmd == "calibrate":
-            payload["host_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.client.send_json(info["ip"], info["control"], payload)
-        handler.send(
-            200,
-            json.dumps({"ok": True, "cmd": cmd, "robot": name}).encode(),
-            "application/json",
-        )
+        if cmd == "set_exposure" and "exposure_us" not in body and "exposure_ms" not in body:
+            q = (handler.query.get("exposure_us") or handler.query.get("exposure_ms") or [""])[0]
+            if q:
+                body = dict(body)
+                body["exposure_us"] = q
+        self.client.send_json(info["ip"], info["control"], calib_payload(cmd, body))
+        send_json(handler, {"ok": True, "cmd": cmd, "robot": name})
 
     def _handle_done(self, handler):
         """Browser saw calib_done: tell car to quit, then stop host HTTP."""
@@ -75,17 +65,13 @@ class CalibrateSource(LiveSource):
             already = self._done_sent
             self._done_sent = True
         name, info = self._robot_info()
-        if info:
-            self.client.send_json(info["ip"], info["control"], {"cmd": "quit"})
-            # 多发几次，避免 UDP 丢包
-            for _ in range(3):
-                time.sleep(0.03)
-                self.client.send_json(info["ip"], info["control"], {"cmd": "quit"})
-        handler.send(
-            200,
-            json.dumps({"ok": True, "quit_robot": bool(info), "already": already}).encode(),
-            "application/json",
-        )
+        if info and not already:
+            quit_robot_burst(self.client, info["ip"], info["control"], times=4)
+        send_json(handler, {
+            "ok": True,
+            "quit_robot": bool(info),
+            "already": already,
+        })
         if self._httpd is not None and not already:
             def _stop():
                 time.sleep(0.4)

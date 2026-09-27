@@ -15,8 +15,10 @@ host/
   rdbg/
     apps/hub_app.py        单进程 HTTP + FeatureRegistry
     features/              Feature 插件（独立线程生命周期）
-      base.py / registry.py
-      watch.py / replay.py / dump.py / netcheck.py
+      base.py / fleet_bound.py / registry.py
+      watch.py / calibrate.py / replay.py / dump.py / netcheck.py
+    calib_cmds.py          标定命令共用（feature + legacy app）
+    util.py                parse_stream_list / sse_state
     static_ui/             ui 构建产物（SPA）
     sources/ live|replay   仍被 Feature 薄封装复用
 ```
@@ -31,12 +33,14 @@ flowchart LR
 
 ### 扩展新功能
 
-1. **后端**：`features/foo.py` 继承 `Feature`，`attach` 里用 `self.api_prefix` 注册路由；把类加进 `features/registry.py` 的 `KINDS`。
-2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。页面里用 `useInstance().base` 调本实例 API。
+1. **后端**：`features/foo.py` 继承 `Feature`（或需要绑车时继承 `FleetBoundFeature`），`attach` 里用 `self.api_prefix` 注册路由；把类加进 `features/registry.py` 的 `KINDS`。
+2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。页面里用 `useInstance().base` 调本实例 API。标定例外：沿用 `static/calibrate.html`，由 `Feature.ui_path` 指向。
 3. `./host/ui/build.sh`，再 `./host/start.sh`。
 
+`FleetBoundFeature`：Watch / Calibrate 共用 fleet 绑定、`/events` SSE、`/bind`、`/select`、`/state`。子类用 `allow_rebind` / `default_img_streams` / `use_source_push_state` 区分行为。
+
 控制面：`GET /api/features`（种类），`POST /api/open` 新建实例并启动线程，`GET /api/instances`，`POST /api/instances/<id>/stop?forget=1`（关页时）。  
-业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。发现口 `15999` 全局一个。每辆车单独分配数据口（自 15001）和对等口（自 15100）；打开 Watch 时选定车辆。同一辆车的多个 Watch 共用这一对口。`GET /api/robots` 列出当前 beacon。
+业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。发现口 `15999` 全局一个。每辆车单独分配数据口（自 15001）和对等口（自 15100）；打开 Watch 时选定车辆。同一辆车的多个 Watch 共用这一对口。`GET /api/robots` 列出当前 beacon，带 `app`（`normal` / `calibrate`）与 `feature`（门户要开的页）。首页车辆列表按 `app` 打开对应页。
 
 ### CLI
 
@@ -45,8 +49,9 @@ flowchart LR
 | cmd | 含义 |
 |---|---|
 | `serve` / `hub` | 统一门户（默认） |
-| `watch` | legacy 独立 watch 进程 |
-| `replay <file>` | legacy 独立 replay 进程 |
+| `watch` | 打开门户首页 |
+| `calibrate` | 打开门户首页（再点 Calibrate） |
+| `replay <file>` | 打开门户首页 |
 | `dump <file>` | 命令行导出 |
 
 ---
@@ -55,7 +60,7 @@ flowchart LR
 
 ```
 host/
-  start.sh / watch.sh / replay.sh / dump.sh
+  start.sh / watch.sh / calibrate.sh / replay.sh / dump.sh
   ui/                      新门户源码
   rdbg/
     cli.py
@@ -87,19 +92,21 @@ host/
   plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片
 
 Hub:
-  Feature watch → LiveSource → /api/watch/events (SSE)
-  Feature replay → session → /api/replay/meta|/frame
+  Feature watch → LiveSource → /api/i/<id>/events (SSE)
+  Feature calibrate → LiveSource + calib_cmd → /api/i/<id>/events|/calib
+  Feature replay → session → /api/i/<id>/meta|/frame
   Feature dump → dump_rlog 后台 job
   Feature netcheck → discover/echo/ping workers
 ```
 
-`python -m rdbg watch|replay` 也进入同一 Hub（分别打开 `/watch`、`/replay`）。
+`python -m rdbg watch|calibrate|replay` 也进入同一 Hub（打开门户首页）。
 
 ---
 
 ## 3. 怎么加能力
 
-新界面加在 `ui/src/features/`，并在 `registry.ts` 注册。不要再加独立 HTML。
+新界面加在 `ui/src/features/`，并在 `registry.ts` 注册。不要再加独立 HTML。  
+例外：标定沿用已有 `static/calibrate.html` + `static/css/calibrate.css`，门户只负责开线程；首页点 Calibrate 打开 `/calibrate.html?i=<id>`。
 
 ### 3.1 新数据源（仍可用于 Feature 内部）
 
@@ -131,8 +138,9 @@ class FooSource:
 
 | cmd | 含义 |
 |---|---|
-| `watch` | 实时。别名 `debugger`（旧脚本） |
-| `replay <file.rlog>` | 本地回放 |
+| `watch` | 打开门户。别名 `debugger`（旧脚本） |
+| `calibrate` | 打开门户（首页点 Calibrate） |
+| `replay <file.rlog>` | 打开门户 |
 | `dump <file.rlog>` | 导出到目录：`log.txt` / `plot.txt` / `images.mp4` |
 
 无参数或参数以 `-` 开头（且不是 `-h`）时，默认 `watch`。
@@ -198,7 +206,7 @@ write_sse(handler, q, on_connect=None)  # 阻塞直到客户端断开
 
 ```python
 Discovery(port=15999, host_id="")
-d.on_beacon = lambda name, ip, control, addr: ...
+d.on_beacon = lambda name, ip, control, addr, app: ...
 d.start() / d.stop() / d.probe()   # probe 发 who
 
 RobotClient(host_id, host_name, data_port, peer_port)
@@ -326,7 +334,7 @@ load_or_exit(rlog, max_mb=1024)  # 下限 64MiB
 apps.hub_app.run(host="0.0.0.0", port=8080, no_browser=False, open_path="/") -> 0|1
 ```
 
-唯一入口进程。`python -m rdbg watch` / `replay` 也调用它，分别打开 `/watch`、`/replay`。
+唯一入口进程。`python -m rdbg watch` / `calibrate` / `replay` 也调用它，打开门户首页。
 
 ---
 
@@ -357,5 +365,5 @@ apps.hub_app.run(host="0.0.0.0", port=8080, no_browser=False, open_path="/") -> 
 ## 7. 改代码时别动的契约
 
 - `.rlog` RLG2 布局、UDP `0xFE` 分片图像（及旧 `0xFF`）：车上 `RemoteLogger` 与 host `net/`+`log/` 必须一起改。控制平面（beacon / 队列 / 转发 / `img_subscribe`）见 `PROTOCOL.md`。
-- Hub SSE 事件形状（§6）与 Feature id（`watch` / `replay` / `dump` / `netcheck`）。
+- Hub SSE 事件形状（§6）与 Feature id（`watch` / `calibrate` / `replay` / `dump` / `netcheck`）。
 - 标准库 only，不要为 host Hub 加 pip 依赖（dump 视频的 OpenCV 在 `requirements.txt` / `.venv`）。
