@@ -18,7 +18,7 @@ using namespace std::chrono_literals;
 
 int main(int argc, char ** argv)
 {
-  constexpr double kExposureMs = 4.0;
+  constexpr double kExposureMs = 32.0;
   constexpr double kGain = 10.0;
   const std::string kVidPid = "2bdf:0001";
 
