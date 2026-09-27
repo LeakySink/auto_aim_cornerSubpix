@@ -161,71 +161,13 @@
     }
   }
 
-  var pendingB64 = null;
-  var paintScheduled = false;
-  var decoding = false;
-  var objectUrl = null;
-
-  function b64ToBlob(b64, mime) {
-    var bin = atob(b64);
-    var len = bin.length;
-    var bytes = new Uint8Array(len);
-    for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-    return new Blob([bytes], { type: mime || "image/jpeg" });
-  }
-
-  function paintPending() {
-    paintScheduled = false;
-    if (decoding) return;
-    var b64 = pendingB64;
-    pendingB64 = null;
-    if (!b64) return;
-
-    decoding = true;
-    var url;
-    try {
-      url = URL.createObjectURL(b64ToBlob(b64, "image/jpeg"));
-    } catch (e) {
-      decoding = false;
-      return;
-    }
-
-    var img = $("frame");
-    var prev = objectUrl;
-    var settled = false;
-    function done() {
-      if (settled) return;
-      settled = true;
-      decoding = false;
-      img.onload = null;
-      img.onerror = null;
-      if (prev) {
-        try { URL.revokeObjectURL(prev); } catch (e) {}
-      }
-      // 解码期间又来了新帧：下一帧再画，丢掉中间积压
-      if (pendingB64) schedulePaint();
-    }
-
-    img.onload = done;
-    img.onerror = done;
-    objectUrl = url;
-    img.src = url;
-    img.style.display = "block";
-    $("placeholder").style.display = "none";
-  }
-
-  function schedulePaint() {
-    if (paintScheduled) return;
-    paintScheduled = true;
-    requestAnimationFrame(paintPending);
-  }
-
   function showImage(b64, meta) {
     if (!b64) return;
     if (meta && meta.name && meta.name !== "calibrate") return;
-    // 只保留最新一帧；data: URL 每帧改 src 会打断解码，Wayland 上像抽搐
-    pendingB64 = b64;
-    schedulePaint();
+    var img = $("frame");
+    img.src = "data:image/jpeg;base64," + b64;
+    img.style.display = "block";
+    $("placeholder").style.display = "none";
   }
 
   function onEvent(ev) {
