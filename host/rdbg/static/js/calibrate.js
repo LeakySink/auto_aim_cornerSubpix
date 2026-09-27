@@ -36,6 +36,32 @@
     $(idVal).textContent = (pct * 100).toFixed(0) + "%";
   }
 
+  function drawMap(samples) {
+    var c = $("map");
+    var ctx = c.getContext("2d");
+    var w = c.width, h = c.height;
+    ctx.fillStyle = "#111217";
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "#2c3038";
+    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    ctx.fillStyle = "rgba(204, 204, 220, 0.4)";
+    ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.fillText("coverage XY", 8, 14);
+    (samples || []).forEach(function (s) {
+      var x = 4 + Math.max(0, Math.min(1, s.x || 0)) * (w - 8);
+      var y = 4 + Math.max(0, Math.min(1, s.y || 0)) * (h - 8);
+      var r = Math.max(3, (s.size || 0.1) * 28);
+      ctx.strokeStyle = "#5e6ad2";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
   function fmtVec(v, cols) {
     if (!v || !v.length) return "";
     var lines = [];
@@ -100,6 +126,7 @@
     setBar("by", "vy", status.y);
     setBar("bs", "vs", status.size);
     setBar("bk", "vk", status.skew);
+    drawMap(status.samples);
 
     var cov = $("cov");
     if (status.goodenough) {

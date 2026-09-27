@@ -109,6 +109,13 @@ cv::Mat make_preview(
   else
     small = img.clone();
 
+  for (const auto & s : calib.sample_views()) {
+    cv::circle(
+      small,
+      {static_cast<int>(s.params.x * small.cols), static_cast<int>(s.params.y * small.rows)}, 3,
+      {40, 160, 220}, -1, cv::LINE_AA);
+  }
+
   if (found && !corners.empty()) {
     auto scaled = corners;
     if (scale != 1.0) {
@@ -156,6 +163,13 @@ nlohmann::json make_status(
     {"exposure_us", exposure_us},
   };
   if (!calib.calibrated_at().empty()) j["calibrated_at"] = calib.calibrated_at();
+
+  nlohmann::json samples = nlohmann::json::array();
+  for (const auto & s : calib.sample_views()) {
+    samples.push_back(
+      {{"x", s.params.x}, {"y", s.params.y}, {"size", s.params.size}, {"skew", s.params.skew}});
+  }
+  j["samples"] = std::move(samples);
   return j;
 }
 
