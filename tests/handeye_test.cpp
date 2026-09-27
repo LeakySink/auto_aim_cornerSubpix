@@ -14,6 +14,7 @@
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
+#include "tools/yaml.hpp"
 
 const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"
@@ -34,7 +35,7 @@ int main(int argc, char * argv[])
 
   auto config_path = cli.get<std::string>("config-path");
   auto display = cli.has("display");
-  auto yaml = YAML::LoadFile(config_path);
+  auto yaml = tools::load(config_path);
   auto height = yaml["height"].as<double>();
   auto grid_num = yaml["grid_num"].as<int>();
   auto grid_size = yaml["grid_size"].as<double>();

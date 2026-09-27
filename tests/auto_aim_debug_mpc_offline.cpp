@@ -19,6 +19,7 @@
 #include "tools/math_tools.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/thread_safe_queue.hpp"
+#include "tools/yaml.hpp"
 
 using namespace std::chrono_literals;
 
@@ -92,7 +93,8 @@ int main(int argc, char * argv[])
   target.armor_type = auto_aim::ArmorType::small;
 
   // 画布与相机主点对齐：宽=2*cx、高=2*cy，否则重投影会偏出 640x480
-  const auto camera_matrix = YAML::LoadFile(config_path)["camera_matrix"].as<std::vector<double>>();
+  const auto camera_matrix =
+    tools::load(config_path)["camera_matrix"].as<std::vector<double>>();
   const int img_w = std::max(640, static_cast<int>(std::lround(2.0 * camera_matrix[2])));
   const int img_h = std::max(480, static_cast<int>(std::lround(2.0 * camera_matrix[5])));
 

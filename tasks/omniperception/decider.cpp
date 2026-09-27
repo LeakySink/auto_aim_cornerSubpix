@@ -7,12 +7,13 @@
 
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
+#include "tools/yaml.hpp"
 
 namespace omniperception
 {
 Decider::Decider(const std::string & config_path) : detector_(config_path), count_(0)
 {
-  auto yaml = YAML::LoadFile(config_path);
+  auto yaml = tools::load(config_path);
   img_width_ = yaml["image_width"].as<double>();
   img_height_ = yaml["image_height"].as<double>();
   fov_h_ = yaml["fov_h"].as<double>();
