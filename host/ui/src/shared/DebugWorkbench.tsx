@@ -28,10 +28,22 @@ export type DataBus = {
 };
 
 type PanelKind = "plot" | "log" | "image";
+type PanelState = { kind: PanelKind; imgSel: string };
 type LogLine = { level: string; msg: string; ts?: number; t?: number };
 type ViewMode = "sliding" | "centered" | "paused";
 
 const COLORS = ["#4fc3f7", "#ffb74d", "#81c784", "#e57373", "#ba68c8", "#4dd0e1", "#fff176", "#a1887f"];
+
+function fillEmptyImgSels(panels: PanelState[], fallback: string): PanelState[] {
+  if (!fallback) return panels;
+  let changed = false;
+  const next = panels.map((p) => {
+    if (p.kind !== "image" || p.imgSel) return p;
+    changed = true;
+    return { ...p, imgSel: fallback };
+  });
+  return changed ? next : panels;
+}
 
 function normLevel(lv: string) {
   const u = (lv || "INFO").toUpperCase();
@@ -61,7 +73,11 @@ export function DebugWorkbench({
   cursorT?: number | null;
   onSeek?: (t: number) => void;
 }) {
-  const [kinds, setKinds] = useState<PanelKind[]>(["plot", "log", "image"]);
+  const [panels, setPanels] = useState<PanelState[]>([
+    { kind: "plot", imgSel: "" },
+    { kind: "log", imgSel: "" },
+    { kind: "image", imgSel: "" },
+  ]);
   const [sidebar, setSidebar] = useState(true);
   const [mode, setMode] = useState<ViewMode>("sliding");
   const [win, setWin] = useState(10);
@@ -70,8 +86,8 @@ export function DebugWorkbench({
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [images, setImages] = useState<Record<string, string>>({});
   const [streams, setStreams] = useState<string[]>([]);
-  const [imgSel, setImgSel] = useState("");
   const [manual, setManual] = useState(false);
+  const kinds = panels.map((p) => p.kind);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -142,12 +158,12 @@ export function DebugWorkbench({
       });
     }
     const pending = imgBuf.current;
-    const names = Object.keys(pending);
-    if (names.length) {
+    const pendingNames = Object.keys(pending);
+    if (pendingNames.length) {
       imgBuf.current = {};
       setImages((prev) => {
         const next = { ...prev };
-        for (const name of names) {
+        for (const name of pendingNames) {
           const url = pending[name];
           const old = next[name];
           if (old && old.startsWith("blob:") && old !== url) URL.revokeObjectURL(old);
@@ -155,7 +171,7 @@ export function DebugWorkbench({
         }
         return next;
       });
-      setImgSel((cur) => cur || names[names.length - 1]);
+      setPanels((prev) => fillEmptyImgSels(prev, pendingNames[pendingNames.length - 1]));
     }
     if (streamBuf.current.length) {
       const list = streamBuf.current;
@@ -165,7 +181,7 @@ export function DebugWorkbench({
         list.forEach((n) => s.add(n));
         return [...s].sort();
       });
-      setImgSel((cur) => cur || list[0] || "");
+      setPanels((prev) => fillEmptyImgSels(prev, list[0] || ""));
     }
   }, [syncChart]);
 
@@ -312,9 +328,21 @@ export function DebugWorkbench({
     };
   }, [plotIndex, syncChart]);
 
+  const names = [...new Set([...streams, ...Object.keys(images)])].sort();
+  const wantedImgs = [
+    ...new Set(
+      panels
+        .filter((p) => p.kind === "image")
+        .map((p) => p.imgSel || names[0] || "")
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  const wantedKey = wantedImgs.join("\0");
   useEffect(() => {
-    if (imgSel) imageSubscribe?.([imgSel]);
-  }, [imgSel, imageSubscribe]);
+    if (!imageSubscribe) return;
+    imageSubscribe(wantedKey ? wantedKey.split("\0") : []);
+  }, [wantedKey, imageSubscribe]);
 
   const bus = useMemo<DataBus>(() => {
     return {
@@ -419,9 +447,6 @@ export function DebugWorkbench({
     busOut(bus);
   }, [bus, busOut]);
 
-  const names = [...new Set([...streams, ...Object.keys(images)])].sort();
-  const activeImg = images[imgSel];
-
   return (
     <div className="workbench-root">
       <aside className={sidebar ? "dbg-side" : "dbg-side collapsed"}>
@@ -474,99 +499,120 @@ export function DebugWorkbench({
         )}
       </aside>
       <div className="tile-root">
-        {kinds.map((k, i) => (
-          <div className="tile-pane" key={i}>
-            <div className="tile-head">
-              <select
-                value={k}
-                onChange={(e) => {
-                  const n = [...kinds];
-                  n[i] = e.target.value as PanelKind;
-                  setKinds(n);
-                }}
-              >
-                <option value="plot">绘图</option>
-                <option value="log">日志</option>
-                <option value="image">图像</option>
-              </select>
-              <button
-                type="button"
-                className="ghost"
-                title="向右拆分"
-                onClick={() => {
-                  const n = [...kinds];
-                  n.splice(i + 1, 0, "plot");
-                  setKinds(n.slice(0, 6));
-                }}
-              >
-                拆分
-              </button>
-              {kinds.length > 1 && (
+        {panels.map((panel, i) => {
+          const k = panel.kind;
+          const imgSel = panel.imgSel || names[0] || "";
+          return (
+            <div className="tile-pane" key={i}>
+              <div className="tile-head">
+                <select
+                  value={k}
+                  onChange={(e) => {
+                    const kind = e.target.value as PanelKind;
+                    setPanels((prev) => {
+                      const n = [...prev];
+                      const cur = n[i];
+                      n[i] = {
+                        ...cur,
+                        kind,
+                        imgSel:
+                          kind === "image" && !cur.imgSel ? names[0] || "" : cur.imgSel,
+                      };
+                      return n;
+                    });
+                  }}
+                >
+                  <option value="plot">绘图</option>
+                  <option value="log">日志</option>
+                  <option value="image">图像</option>
+                </select>
                 <button
                   type="button"
                   className="ghost"
-                  title="关闭"
-                  onClick={() => setKinds(kinds.filter((_, j) => j !== i))}
+                  title="向右拆分"
+                  onClick={() => {
+                    setPanels((prev) => {
+                      const n = [...prev];
+                      n.splice(i + 1, 0, { kind: "plot", imgSel: "" });
+                      return n.slice(0, 6);
+                    });
+                  }}
                 >
-                  ×
+                  拆分
                 </button>
-              )}
-            </div>
-            <div className="tile-content">
-              {k === "plot" &&
-                (i === plotIndex ? (
-                  <div
-                    className="plot-host"
-                    ref={hostRef}
-                    onPointerDown={(e) => {
-                      if (!replayRef.current || !seekRef.current) return;
-                      const chart = chartRef.current;
-                      if (!chart || cursorRef.current == null) return;
-                      const rect = chart.canvas.getBoundingClientRect();
-                      const px = e.clientX - rect.left;
-                      const cx = chart.scales.x.getPixelForValue(cursorRef.current);
-                      if (Math.abs(px - cx) > 12) return;
-                      dragCursor.current = true;
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                      e.preventDefault();
-                    }}
-                    onPointerMove={(e) => {
-                      if (!dragCursor.current || !seekRef.current) return;
-                      const chart = chartRef.current;
-                      if (!chart) return;
-                      const rect = chart.canvas.getBoundingClientRect();
-                      const t = chart.scales.x.getValueForPixel(e.clientX - rect.left);
-                      if (t != null && Number.isFinite(t)) seekRef.current(t);
-                    }}
-                    onPointerUp={() => {
-                      dragCursor.current = false;
-                    }}
+                {panels.length > 1 && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    title="关闭"
+                    onClick={() => setPanels((prev) => prev.filter((_, j) => j !== i))}
                   >
-                    <canvas ref={canvasRef} />
-                  </div>
-                ) : (
-                  <div className="mono muted" style={{ padding: 8 }}>
-                    绘图已在其他面板
-                  </div>
-                ))}
-              {k === "log" && (
-                <LogPane
-                  lines={logs}
-                  cursorT={replay ? cursorT : null}
-                  onSeek={replay ? onSeek : undefined}
-                />
-              )}
-              {k === "image" && (
-                <ImagePane
-                  names={names}
-                  sel={imgSel || names[0] || ""}
-                  url={activeImg}
-                  onSel={setImgSel}
-                />
-              )}
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="tile-content">
+                {k === "plot" &&
+                  (i === plotIndex ? (
+                    <div
+                      className="plot-host"
+                      ref={hostRef}
+                      onPointerDown={(e) => {
+                        if (!replayRef.current || !seekRef.current) return;
+                        const chart = chartRef.current;
+                        if (!chart || cursorRef.current == null) return;
+                        const rect = chart.canvas.getBoundingClientRect();
+                        const px = e.clientX - rect.left;
+                        const cx = chart.scales.x.getPixelForValue(cursorRef.current);
+                        if (Math.abs(px - cx) > 12) return;
+                        dragCursor.current = true;
+                        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                        e.preventDefault();
+                      }}
+                      onPointerMove={(e) => {
+                        if (!dragCursor.current || !seekRef.current) return;
+                        const chart = chartRef.current;
+                        if (!chart) return;
+                        const rect = chart.canvas.getBoundingClientRect();
+                        const t = chart.scales.x.getValueForPixel(e.clientX - rect.left);
+                        if (t != null && Number.isFinite(t)) seekRef.current(t);
+                      }}
+                      onPointerUp={() => {
+                        dragCursor.current = false;
+                      }}
+                    >
+                      <canvas ref={canvasRef} />
+                    </div>
+                  ) : (
+                    <div className="mono muted" style={{ padding: 8 }}>
+                      绘图已在其他面板
+                    </div>
+                  ))}
+                {k === "log" && (
+                  <LogPane
+                    lines={logs}
+                    cursorT={replay ? cursorT : null}
+                    onSeek={replay ? onSeek : undefined}
+                  />
+                )}
+                {k === "image" && (
+                  <ImagePane
+                    names={names}
+                    sel={imgSel}
+                    url={images[imgSel]}
+                    onSel={(n) =>
+                      setPanels((prev) => {
+                        const next = [...prev];
+                        next[i] = { ...next[i], imgSel: n };
+                        return next;
+                      })
+                    }
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
