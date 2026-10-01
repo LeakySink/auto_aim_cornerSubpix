@@ -28,6 +28,8 @@ struct Plan
   float pitch;
   float pitch_vel;
   float pitch_acc;
+  double yaw0;        // 新增：MPC 解算前的理想瞄准 yaw
+  double pitch0;      // 新增：MPC 解算前的理想发射 pitch
 };
 
 class Planner
@@ -38,6 +40,8 @@ public:
 
   Plan plan(Target target, double bullet_speed);
   Plan plan(std::optional<Target> target, double bullet_speed);
+
+  double fire_thresh() const { return fire_thresh_; }
 
 private:
   double yaw_offset_;

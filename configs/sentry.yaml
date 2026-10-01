@@ -3,11 +3,12 @@
 enemy_color: "blue"
 
 #####-----神经网络参数-----#####
-yolo_name: yolov5
+yolo_name: tup
 classify_model: assets/tiny_resnet.onnx
 yolo11_model_path: assets/yolo11.xml
 yolov8_model_path: assets/yolov8.xml
 yolov5_model_path: assets/yolov5.xml
+tup_model_path: assets/opt-1208-001.xml
 device: CPU
 min_confidence: 0.8
 use_traditional: true
@@ -20,30 +21,6 @@ roi:
   height: 600
 
 use_roi: false
-
-#####-----USB 相机参数-----#####
-usb_cam_devices: ["video4", "video0"]    # 按 id 索引
-install_yaw: [0.0, -120.0]
-# 以下参数所有 USB 相机共用
-image_width: 1280
-image_height: 1024
-usb_frame_rate: 60
-usb_exposure: 80 #快门速度不要长于帧数上限
-usb_gamma: 150
-usb_gain: 50
-
-#####-----全向感知参数-----#####
-fov_h: 108
-fov_v: 68
-# 换算用的投影模型（三者都满足"画面中心=0、画面边缘=±半视场角"，差别在大偏角处）：
-#   linear       视场角线性摊到像素（不考虑畸变，最简单）
-#   cylindrical  圆柱透视：水平按针孔投影 θ=atan(2p·tan(fov_h/2))，垂直仍为等距
-#   spherical    球状透视：按等距鱼眼 θ=asin(2p·sin(fov_h/2))，水平垂直同型
-camera_projection: spherical
-
-#####-----检测结果帧龄阈值-----#####
-omni_detection_warn_ms: 50
-omni_detection_drop_ms: 100
 
 #####-----传统方法参数-----#####
 threshold: 150
@@ -99,22 +76,10 @@ second_tolerance: 2 # 远距离射击容差，degree
 judge_distance: 2 #距离判断阈值
 auto_fire: true # 是否由自瞄控制射击
 
-#####-----是否听导航指定锁敌-----#####
-# true （推荐）: 跟踪前先按导航下发的 vision/autoaim_target 筛掉别的车，
-#                主相机自瞄会主动锁定并打导航指定的那辆车；导航没指定时按原逻辑自选。
-# false        : 不筛选，tracker 自己按"离画面中心最近"选。此时若导航指定的车与它选的
-#                不一致，视觉不下发云台指令（让位给导航）。
-follow_nav_target: true
-
 camera_name: "hikrobot"
 exposure_ms: 4
 gain: 10
 vid_pid: "2bdf:0001"
-
-#####-----主相机画面尺寸-----#####
-# tracker 里"优先选择靠近画面中心的装甲板"要用画面中心，这里给主相机（工业相机）的分辨率。
-main_image_width: 1440
-main_image_height: 1080
 
 #  1  0  0
 #  0  1  0
@@ -123,8 +88,9 @@ main_image_height: 1080
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
 # 重投影误差: 0.1833px
-camera_matrix: [1775.758754976158, 0.0, 698.7307642000943, 0.0, 1773.7855690293836, 566.7863299887235, 0.0, 0.0, 1.0]
-distort_coeffs: [-0.05388206574493657, 0.10169179654151696, -0.0015206288854537012, -0.001483511189109488, 0.0]
+camera_matrix: [1818.2616078589235, 0.0, 703.8607727723271, 0.0, 1816.5751262244844, 570.2397898080102, 0.0, 0.0, 1.0]
+
+distort_coeffs: [-0.08283172203391537, 0.1751866754713143, -0.0003758661939308277, 3.2330374061035256e-05, 0.0]
 # 相机同理想情况的偏角: yaw-1.11 pitch0.01 roll-0.06 degree
 # 标定板到世界坐标系原点的水平距离: 1.20 m
 # 标定板同竖直摆放时的偏角: yaw123.89 pitch14.05 roll-0.86 degree
@@ -143,15 +109,6 @@ yaw_kp: 0
 yaw_kd: 0
 pitch_kp: 0
 pitch_kd: 0
-
-#####-----虚拟串口（桌面调试）-----#####
-# true : 不打开 com_port、不起读线程、不下发指令，姿态固定为下面两项。
-#        用于没有下位机时跑主程序（主相机 + 全向发布）；上车/比赛必须 false。
-# false: 与以前完全一致（打不开串口直接 exit(1)，启动时等第一条下位机帧）。
-virtual_serial: true
-virtual_gimbal_yaw: 0.0        # degree，虚拟模式下的固定云台 yaw
-virtual_gimbal_pitch: 0.0      # degree，虚拟模式下的固定云台 pitch
-virtual_bullet_speed: 15.0     # m/s，虚拟模式下给 planner 用的名义弹速（避免弹道解算除零）
 
 #####-----planner-----#####
 fire_thresh: 0.0035

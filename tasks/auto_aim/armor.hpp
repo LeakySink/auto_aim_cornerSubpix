@@ -118,6 +118,13 @@ struct Armor
   Armor(
     int color_id, int num_id, float confidence, const cv::Rect & box,
     std::vector<cv::Point2f> armor_keypoints, cv::Point2f offset);
+  // TUP模型构造函数: 直接给定颜色与类别, 类型默认为small
+  Armor(
+    Color color, ArmorName name, float confidence, const cv::Rect & box,
+    std::vector<cv::Point2f> armor_keypoints);
+  Armor(
+    Color color, ArmorName name, float confidence, const cv::Rect & box,
+    std::vector<cv::Point2f> armor_keypoints, cv::Point2f offset);
 };
 
 }  // namespace auto_aim

@@ -45,10 +45,12 @@ Plan Planner::plan(Target target, double bullet_speed)
   target.predict(bullet_traj.fly_time);
 
   // 2. Get trajectory
-  double yaw0;
+  double yaw0,pitch0;
   Trajectory traj;
   try {
-    yaw0 = aim(target, bullet_speed)(0);
+    auto aim_ref = aim(target, bullet_speed);
+    yaw0 = aim_ref(0);
+    pitch0 = aim_ref(1);
     traj = get_trajectory(target, yaw0, bullet_speed);
   } catch (const std::exception & e) {
     tools::RemoteLogger::instance().log("WARN", "Unsolvable target {:.2f}", bullet_speed);
@@ -72,6 +74,8 @@ Plan Planner::plan(Target target, double bullet_speed)
 
   Plan plan;
   plan.control = true;
+  plan.yaw0 = yaw0;
+  plan.pitch0 = pitch0;
 
   plan.target_yaw = tools::limit_rad(traj(0, HALF_HORIZON) + yaw0);
   plan.target_pitch = traj(2, HALF_HORIZON);

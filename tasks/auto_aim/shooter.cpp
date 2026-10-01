@@ -4,13 +4,12 @@
 
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/yaml.hpp"
 
 namespace auto_aim
 {
 Shooter::Shooter(const std::string & config_path) : last_command_{false, false, 0, 0}
 {
-  auto yaml = tools::load(config_path);
+  auto yaml = YAML::LoadFile(config_path);
   first_tolerance_ = yaml["first_tolerance"].as<double>() / 57.3;    // degree to rad
   second_tolerance_ = yaml["second_tolerance"].as<double>() / 57.3;  // degree to rad
   judge_distance_ = yaml["judge_distance"].as<double>();

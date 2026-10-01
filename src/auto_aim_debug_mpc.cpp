@@ -40,7 +40,7 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
-  auto_aim::YOLO yolo(config_path, true);
+  auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
@@ -57,9 +57,13 @@ int main(int argc, char * argv[])
       auto target = target_queue.front();
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
+      const auto yaw_err = tools::limit_rad(plan.yaw0 - gs.yaw);
+      const auto pitch_err = plan.pitch0 - gs.pitch;
+      const auto yp_error=std::hypot(yaw_err, pitch_err);
+      const bool fire =std::hypot(yaw_err, pitch_err)< planner.fire_thresh();
       if (plan.control) {
         gimbal.send(
-       plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
+       plan.control, fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
        plan.pitch_acc);
       }
       auto fired = gs.bullet_count > last_bullet_count;
@@ -84,7 +88,11 @@ int main(int argc, char * argv[])
       data["plan_pitch_vel"] = plan.pitch_vel;
       data["plan_pitch_acc"] = plan.pitch_acc;
 
-      data["fire"] = plan.fire ? 1 : 0;
+      data["plan_pitch0"] = plan.pitch0;
+      data["plan_yaw0"] = plan.yaw0;
+      data["111111111111111"]=yp_error;
+
+      data["fire"] = fire ? 1 : 0;
       data["fired"] = fired ? 1 : 0;
 
       if (target.has_value()) {
@@ -97,7 +105,17 @@ int main(int argc, char * argv[])
         data["target_yaw"] = target->ekf_x()[6];
         data["target_yaw_vel"] = target->ekf_x()[7];
       }
-
+      if (target.has_value() && !armors.empty()) {
+        for (const auto & a : armors) {
+          if (a.name == target->name && a.type == target->armor_type) {
+            data["obs_yaw"] = a.ypd_in_world[0];       // z[0]
+            data["obs_pitch"] = a.ypd_in_world[1];     // z[1]
+            data["obs_dist"] = a.ypd_in_world[2];      // z[2]
+            data["obs_armor_yaw"] = a.ypr_in_world[0]; // z[3]
+            break;
+          }
+        }
+      }
       if (target.has_value()) {
         data["w"] = target->ekf_x()[7];
       } else {
