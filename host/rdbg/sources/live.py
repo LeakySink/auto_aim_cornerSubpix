@@ -75,8 +75,10 @@ class LiveSource:
         self._poller = threading.Thread(target=self.poller, daemon=True)
         self._poller.start()
         self.push_state()
-        print("[watch] host_id %s data:%s peer:%s" % (
-            self.host_id[:8], self.data_port, self.peer_port))
+        print(
+            "[fleet] 本机 host_id=%s 数据口 UDP:%s 对等口:%s（绑车后收 plot）"
+            % (self.host_id[:8], self.data_port, self.peer_port)
+        )
 
     def stop(self):
         self._running = False
@@ -187,8 +189,10 @@ class LiveSource:
         if changed:
             self.client.register(ip, control)
             self._last_register[name] = now
-            print("[watch] beacon %s at %s:%s app=%s feature=%s" % (
-                name, ip, control, app or "normal", feature or ""))
+            print(
+                "[fleet] 发现车 '%s' %s:控制口%s app=%s feature=%s → 正在 register"
+                % (name, ip, control, app or "normal", feature or "-")
+            )
             self.push_state()
 
     def _on_raw(self, data):
@@ -237,7 +241,10 @@ class LiveSource:
                 "data_port": self.data_port,
             }
         self.peer.unfollow(robot)
-        print("[watch] head of %s" % robot)
+        print(
+            "[fleet] 本机成为车 '%s' 的队首(head)：车只向本机 UDP %s 发 plot/图像；"
+            "其他调试机会从本机转发" % (robot, self.data_port)
+        )
         info = self.robots.get(robot)
         if info:
             self.client.head_alive(info["ip"], info["control"])
@@ -256,8 +263,10 @@ class LiveSource:
             self.heads[robot] = dict(head)
             self.queues[robot] = list(queue)
         self.peer.subscribe(robot, head["ip"], head["peer_port"])
-        print("[watch] follow %s via %s:%s" % (
-            robot, head.get("ip"), head.get("peer_port")))
+        print(
+            "[fleet] 本机是车 '%s' 的后入者(follower)：不直接收车数据，"
+            "改为订阅队首 %s:%s 的转发" % (robot, head.get("ip"), head.get("peer_port"))
+        )
         self.push_state()
 
     def poller(self):
