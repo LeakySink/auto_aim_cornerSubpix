@@ -227,8 +227,8 @@ export function TfVizPage() {
                         <span className="sw r" />X 红 · <span className="sw g" />Y 绿 ·{" "}
                         <span className="sw b" />Z 蓝
                       </li>
-                      <li>灰圆锥 = 枪管（原点，云台 +X，电控姿态）</li>
-                      <li>黄长方体 + 橙圆锥 = 相机（光轴 +Z）</li>
+                      <li>灰圆柱 = 枪管（原点，云台 +X，电控姿态）</li>
+                      <li>黄长方体 + 橙圆锥 = 相机（尖端贴机身，底朝光轴 +Z）</li>
                     </ul>
                   </>
                 )}

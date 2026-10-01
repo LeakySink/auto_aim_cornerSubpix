@@ -41,23 +41,49 @@ function makeAxes(length: number): THREE.Group {
   return g;
 }
 
-/** ConeGeometry 默认沿 +Y；转到沿 localAxis，底在原点附近、尖端朝向。 */
+/** ConeGeometry 默认尖端 +Y；转到沿 localAxis。tipAtOrigin=true 时尖端靠近局部原点一侧。 */
 function makeAimCone(
   radius: number,
   height: number,
   localAxis: "x" | "z",
   color: number,
-  opts?: { wireframe?: boolean; opacity?: number }
+  opts?: { tipAtOrigin?: boolean; opacity?: number }
 ): THREE.Mesh {
+  const tipAtOrigin = opts?.tipAtOrigin ?? false;
   const geo = new THREE.ConeGeometry(radius, height, 24);
   const mat = new THREE.MeshBasicMaterial({
     color,
-    wireframe: !!opts?.wireframe,
     transparent: (opts?.opacity ?? 1) < 1,
     opacity: opts?.opacity ?? 1,
   });
   const mesh = new THREE.Mesh(geo, mat);
-  // default tip at +Y → rotate onto +X or +Z
+  if (localAxis === "x") {
+    // tip +Y → ±X
+    mesh.rotation.z = tipAtOrigin ? Math.PI / 2 : -Math.PI / 2;
+    mesh.position.x = height / 2;
+  } else {
+    // tip +Y → ±Z；tipAtOrigin：尖端朝 -Z（贴机身），底朝 +Z（视线方向）
+    mesh.rotation.x = tipAtOrigin ? -Math.PI / 2 : Math.PI / 2;
+    mesh.position.z = height / 2;
+  }
+  return mesh;
+}
+
+/** 圆柱沿 localAxis，一端贴局部原点。 */
+function makeAimCylinder(
+  radius: number,
+  height: number,
+  localAxis: "x" | "z",
+  color: number,
+  opts?: { opacity?: number }
+): THREE.Mesh {
+  const geo = new THREE.CylinderGeometry(radius, radius, height, 24);
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: (opts?.opacity ?? 1) < 1,
+    opacity: opts?.opacity ?? 1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
   if (localAxis === "x") {
     mesh.rotation.z = -Math.PI / 2;
     mesh.position.x = height / 2;
@@ -68,10 +94,10 @@ function makeAimCone(
   return mesh;
 }
 
-/** 相机：长方体机身（局部 +Z 向前）+ 圆锥光轴提示。 */
+/** 相机：长方体机身（局部 +Z 向前）+ 圆锥（尖端贴机身，底朝光轴前方）。 */
 function makeCameraModel(): THREE.Group {
   const g = new THREE.Group();
-  const bodyLen = 0.05; // along +Z
+  const bodyLen = 0.05;
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(0.036, 0.028, bodyLen),
     new THREE.MeshBasicMaterial({ color: 0xf1c40f, transparent: true, opacity: 0.9 })
@@ -79,9 +105,9 @@ function makeCameraModel(): THREE.Group {
   body.position.z = bodyLen / 2;
   g.add(body);
 
-  const coneH = 0.045;
-  const lens = makeAimCone(0.016, coneH, "z", 0xe67e22, { opacity: 0.95 });
-  // makeAimCone 已把中心放到 height/2；再平移到机身前端，使底贴合、尖端朝 +Z
+  const coneH = 0.05;
+  const lens = makeAimCone(0.02, coneH, "z", 0xe67e22, { tipAtOrigin: true, opacity: 0.95 });
+  // 尖端在 z=bodyLen，底在 z=bodyLen+coneH
   lens.position.z = bodyLen + coneH / 2;
   g.add(lens);
 
@@ -89,12 +115,10 @@ function makeCameraModel(): THREE.Group {
   return g;
 }
 
-/** 枪管：原点，圆锥沿云台 +X（与标定 ideal 前向一致）。 */
+/** 枪管：原点，圆柱沿云台 +X。 */
 function makeBarrelModel(): THREE.Group {
   const g = new THREE.Group();
-  const barrel = makeAimCone(0.012, 0.12, "x", 0xbdc3c7, { opacity: 0.95 });
-  g.add(barrel);
-  // 略粗的底座示意安装点
+  g.add(makeAimCylinder(0.01, 0.14, "x", 0xbdc3c7, { opacity: 0.95 }));
   const hub = new THREE.Mesh(
     new THREE.SphereGeometry(0.012, 16, 12),
     new THREE.MeshBasicMaterial({ color: 0x7f8c8d })
