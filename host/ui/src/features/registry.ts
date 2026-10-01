@@ -3,6 +3,7 @@ import { WatchPage } from "./watch/WatchPage";
 import { ReplayPage } from "./replay/ReplayPage";
 import { DumpPage } from "./dump/DumpPage";
 import { NetcheckPage } from "./netcheck/NetcheckPage";
+import { TfVizPage } from "./tfviz/TfVizPage";
 
 /** Frontend feature registry — add a module here to show on the home page. */
 export const FEATURE_MODULES: FeatureModule[] = [
@@ -18,6 +19,13 @@ export const FEATURE_MODULES: FeatureModule[] = [
     title: "Calibrate",
     description: "棋盘格相机内参标定：覆盖度、采样、一键标定",
     route: "/calibrate",
+  },
+  {
+    id: "tfviz",
+    title: "TF Viz",
+    description: "可视化相机相对世界系（tf_pub_test）",
+    route: "/tfviz",
+    Component: TfVizPage,
   },
   {
     id: "replay",
