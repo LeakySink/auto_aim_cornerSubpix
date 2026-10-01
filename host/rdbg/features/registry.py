@@ -9,6 +9,7 @@ from .calibrate import CalibrateFeature
 from .dump import DumpFeature
 from .netcheck import NetcheckFeature
 from .replay import ReplayFeature
+from .tfviz import TfVizFeature
 from .watch import WatchFeature
 
 KINDS = {
@@ -17,6 +18,7 @@ KINDS = {
     "replay": ReplayFeature,
     "dump": DumpFeature,
     "netcheck": NetcheckFeature,
+    "tfviz": TfVizFeature,
 }
 
 
