@@ -232,6 +232,7 @@ class LiveSource:
 
     def _become_head(self, robot, queue):
         with self._lock:
+            already = self.roles.get(robot) == "head"
             self.roles[robot] = "head"
             self.queues[robot] = list(queue)
             self.heads[robot] = {
@@ -241,16 +242,18 @@ class LiveSource:
                 "data_port": self.data_port,
             }
         self.peer.unfollow(robot)
-        print(
-            "[fleet] 本机成为车 '%s' 的队首(head)：车只向本机 UDP %s 发 plot/图像；"
-            "其他调试机会从本机转发" % (robot, self.data_port)
-        )
+        if not already:
+            print(
+                "[fleet] 本机成为车 '%s' 的队首(head)：车只向本机 UDP %s 发 plot/图像；"
+                "其他调试机会从本机转发" % (robot, self.data_port)
+            )
         info = self.robots.get(robot)
         if info:
             self.client.head_alive(info["ip"], info["control"])
             self._last_alive[robot] = time.monotonic()
-        self._push_img_subscribe(force=True)
-        self.push_state()
+        if not already:
+            self._push_img_subscribe(force=True)
+            self.push_state()
 
     def _follow(self, robot, head, queue):
         if not head or not head.get("ip") or not head.get("peer_port"):
@@ -259,15 +262,21 @@ class LiveSource:
             self._become_head(robot, queue)
             return
         with self._lock:
+            already = (
+                self.roles.get(robot) == "follower"
+                and (self.heads.get(robot) or {}).get("host_id") == head.get("host_id")
+                and (self.heads.get(robot) or {}).get("peer_port") == head.get("peer_port")
+            )
             self.roles[robot] = "follower"
             self.heads[robot] = dict(head)
             self.queues[robot] = list(queue)
         self.peer.subscribe(robot, head["ip"], head["peer_port"])
-        print(
-            "[fleet] 本机是车 '%s' 的后入者(follower)：不直接收车数据，"
-            "改为订阅队首 %s:%s 的转发" % (robot, head.get("ip"), head.get("peer_port"))
-        )
-        self.push_state()
+        if not already:
+            print(
+                "[fleet] 本机是车 '%s' 的后入者(follower)：不直接收车数据，"
+                "改为订阅队首 %s:%s 的转发" % (robot, head.get("ip"), head.get("peer_port"))
+            )
+            self.push_state()
 
     def poller(self):
         while self._running:
