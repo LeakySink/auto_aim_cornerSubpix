@@ -11,6 +11,7 @@ BEACON_STALE_S = 3.0
 # Beacon `app` → portal feature. Unknown / missing → watch (normal).
 APP_FEATURES = {
     "calibrate": "calibrate",
+    "tfviz": "tfviz",
     "normal": "watch",
 }
 

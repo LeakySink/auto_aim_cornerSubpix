@@ -56,7 +56,7 @@ export function HomePage() {
 
   const openRobot = (r: Robot) => {
     const feat =
-      r.feature === "calibrate" || r.feature === "watch"
+      r.feature === "calibrate" || r.feature === "watch" || r.feature === "tfviz"
         ? r.feature
         : featureFromApp(r.app);
     open(feat, { sender: r.name });
@@ -90,7 +90,12 @@ export function HomePage() {
             <div className="sec-label">功能</div>
             <div className="launcher">
               {HOME_TOOLS.map((m) => (
-                <button key={m.id} type="button" className="tool" onClick={() => open(m.id)}>
+                <button
+                  key={m.id}
+                  type="button"
+                  className="tool"
+                  onClick={() => open(m.id, m.id === "tfviz" ? { spawn: true } : {})}
+                >
                   <span className="tool-id">{m.id}</span>
                   <span className="tool-body">
                     <span className="tool-title">{m.title}</span>
