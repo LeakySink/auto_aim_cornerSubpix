@@ -5,6 +5,8 @@ export type TfPayload = {
   R_gimbal2imubody: number[]; // row-major 9
   R_camera2gimbal: number[];
   t_camera2gimbal: number[];
+  config_path?: string;
+  config_name?: string;
   R_gimbal2world?: number[];
   R_camera2world?: number[];
   t_camera2world?: number[];
@@ -16,6 +18,10 @@ export type TfFrame = {
   t_camera2world: number[];
   q: number[];
   t_camera2gimbal: number[];
+  R_gimbal2imubody: number[];
+  R_camera2gimbal: number[];
+  config_path: string;
+  config_name: string;
 };
 
 function isNine(a: unknown): a is number[] {
@@ -94,6 +100,8 @@ export function parseTf(raw: unknown): TfPayload | null {
     R_gimbal2imubody: o.R_gimbal2imubody,
     R_camera2gimbal: o.R_camera2gimbal,
     t_camera2gimbal: o.t_camera2gimbal,
+    config_path: typeof o.config_path === "string" ? o.config_path : undefined,
+    config_name: typeof o.config_name === "string" ? o.config_name : undefined,
     R_gimbal2world: isNine(o.R_gimbal2world) ? o.R_gimbal2world : undefined,
     R_camera2world: isNine(o.R_camera2world) ? o.R_camera2world : undefined,
     t_camera2world: isThree(o.t_camera2world) ? o.t_camera2world : undefined,
@@ -105,15 +113,30 @@ export function resolveFrame(tf: TfPayload): TfFrame {
   const R_gimbal2world = computeRGimbal2World(tf.q, tf.R_gimbal2imubody);
   const R_camera2world = matMul3(R_gimbal2world, tf.R_camera2gimbal);
   const t_camera2world = matVec3(R_gimbal2world, tf.t_camera2gimbal);
+  const config_path = tf.config_path || "";
+  const config_name =
+    tf.config_name ||
+    (config_path.includes("/") ? config_path.slice(config_path.lastIndexOf("/") + 1) : config_path);
   return {
     R_gimbal2world,
     R_camera2world,
     t_camera2world,
     q: tf.q,
     t_camera2gimbal: tf.t_camera2gimbal,
+    R_gimbal2imubody: tf.R_gimbal2imubody,
+    R_camera2gimbal: tf.R_camera2gimbal,
+    config_path,
+    config_name,
   };
 }
 
 export function fmtVec(v: number[], digits = 3): string {
   return v.map((x) => x.toFixed(digits)).join(", ");
+}
+
+/** Format row-major 3x3 as three lines. */
+export function fmtMat3(R: number[], digits = 4): string {
+  const row = (i: number) =>
+    [R[i * 3], R[i * 3 + 1], R[i * 3 + 2]].map((x) => x.toFixed(digits)).join("  ");
+  return `${row(0)}\n${row(1)}\n${row(2)}`;
 }

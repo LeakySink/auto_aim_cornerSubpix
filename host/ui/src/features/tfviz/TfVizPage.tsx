@@ -3,7 +3,7 @@ import { featureStatus, getJson, postJson, startFeature, stopFeature } from "../
 import { useSSE } from "../../shared/useSSE";
 import { useInstance } from "../../shared/instance";
 import { TfScene } from "./TfScene";
-import { fmtVec, parseTf, resolveFrame, type TfFrame } from "./tfMath";
+import { fmtMat3, fmtVec, parseTf, resolveFrame, type TfFrame } from "./tfMath";
 
 export function TfVizPage() {
   const inst = useInstance();
@@ -34,7 +34,7 @@ export function TfVizPage() {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 2000);
+    const t = setInterval(refresh, 1000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -130,7 +130,7 @@ export function TfVizPage() {
         <button
           type="button"
           onClick={async () => {
-            await startFeature(inst.id, { sender: selected });
+            await startFeature(inst.id, { sender: selected, spawn: !selected });
             await refresh();
           }}
         >
@@ -141,7 +141,11 @@ export function TfVizPage() {
         {!selected && (
           <div className="pick-pane">
             <div className="sec-label">选择车辆</div>
-            <p className="sub">先跑车上 ./build/tf_pub_test &lt;config.yaml&gt;，再选车查看相机相对世界系。</p>
+            <p className="sub">
+              首页「TF Viz」会在无发布者时本机拉起 <span className="mono">build/tf_pub_test</span>
+              （默认 <span className="mono">configs/tf_pub.yaml</span>）。也可手动选已有 app=tfviz 的车。
+            </p>
+            {state === "error" && err && <p className="err-text">{err}</p>}
             {robots.length > 0 && (
               <div className="robot-list">
                 {robots.map((r) => (
@@ -155,7 +159,12 @@ export function TfVizPage() {
                 ))}
               </div>
             )}
-            {robots.length === 0 && <p className="empty">还没有发现车辆。</p>}
+            {robots.length === 0 && state === "running" && (
+              <p className="empty">等待 tf_pub beacon（app=tfviz）…</p>
+            )}
+            {robots.length === 0 && state !== "running" && state !== "error" && (
+              <p className="empty">还没有发现车辆。</p>
+            )}
             <div className="form-row">
               <input value={manual} placeholder="车名 sender_name" onChange={(e) => setManual(e.target.value)} />
               <button type="button" disabled={!manual.trim()} onClick={() => bind(manual.trim())}>
@@ -168,6 +177,27 @@ export function TfVizPage() {
           <>
             <TfScene frame={frame} />
             <aside className="tfviz-side">
+              <div className="sec-label">Config</div>
+              {!frame && <p className="empty">等待 plot.tf …</p>}
+              {frame && (
+                <div className="tfviz-nums mono">
+                  <div className="tfviz-cfg-name">{frame.config_name || "(unknown)"}</div>
+                  {frame.config_path && <div className="muted tfviz-cfg-path">{frame.config_path}</div>}
+                </div>
+              )}
+
+              <div className="sec-label">外参</div>
+              {frame && (
+                <div className="tfviz-nums mono">
+                  <div className="tfviz-mat-label">R_gimbal2imubody</div>
+                  <pre className="tfviz-mat">{fmtMat3(frame.R_gimbal2imubody)}</pre>
+                  <div className="tfviz-mat-label">R_camera2gimbal</div>
+                  <pre className="tfviz-mat">{fmtMat3(frame.R_camera2gimbal)}</pre>
+                  <div className="tfviz-mat-label">t_camera2gimbal (m)</div>
+                  <div>{fmtVec(frame.t_camera2gimbal)}</div>
+                </div>
+              )}
+
               <div className="sec-label">定义（与 Solver 一致）</div>
               <p className="sub mono">
                 R_g2w = R_g2imuᵀ · R_imuabs · R_g2imu
@@ -191,11 +221,9 @@ export function TfVizPage() {
                 <li>黄块 = camera</li>
               </ul>
               <div className="sec-label">实时</div>
-              {!frame && <p className="empty">等待 plot.tf …</p>}
               {frame && (
                 <div className="tfviz-nums mono">
                   <div>q(wxyz) {fmtVec(frame.q, 4)}</div>
-                  <div>t_c2g {fmtVec(frame.t_camera2gimbal)} m</div>
                   <div>t_c2w {fmtVec(frame.t_camera2world)} m</div>
                   <div className="muted">{carCheck}</div>
                 </div>

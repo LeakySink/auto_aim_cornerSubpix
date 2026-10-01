@@ -765,4 +765,31 @@ p.err-text { margin: 0 0 12px; }
   gap: 4px;
 }
 .tfviz-nums .muted { color: var(--muted); }
+.tfviz-cfg-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  word-break: break-all;
+}
+.tfviz-cfg-path {
+  font-size: 10px;
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.tfviz-mat-label {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.tfviz-mat {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+}
 
