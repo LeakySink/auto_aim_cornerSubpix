@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { featureStatus, getJson, postJson, startFeature, stopFeature } from "../../shared/api";
 import { useSSE } from "../../shared/useSSE";
 import { useInstance } from "../../shared/instance";
+import { alertModal } from "../../shared/AlertModal";
 import { TfScene } from "./TfScene";
 import { fmtMat3, fmtVec, parseTf, resolveFrame, type TfFrame } from "./tfMath";
 
@@ -29,6 +30,7 @@ export function TfVizPage() {
   const [carCheck, setCarCheck] = useState("");
   const [hz, setHz] = useState(0);
   const hzRef = useRef({ n: 0, window: performance.now() });
+  const lastAlertErr = useRef("");
 
   const refresh = useCallback(async () => {
     try {
@@ -38,6 +40,11 @@ export function TfVizPage() {
       setRunning(st.state === "running" && !!st.sender);
       setSelected(st.sender || "");
       setPort(st.data_port || 0);
+      if (st.state === "error" && st.error && st.error !== lastAlertErr.current) {
+        lastAlertErr.current = st.error;
+        alertModal.error("TF Viz 出错", st.error);
+      }
+      if (st.state !== "error") lastAlertErr.current = "";
     } catch (e) {
       setErr(String(e));
     }
@@ -119,7 +126,9 @@ export function TfVizPage() {
       await postJson(`${inst.base}/bind`, { sender: name });
       await refresh();
     } catch (e) {
-      setErr(String(e));
+      const msg = String(e);
+      setErr(msg);
+      alertModal.error("绑定车辆失败", msg);
     }
   };
 
