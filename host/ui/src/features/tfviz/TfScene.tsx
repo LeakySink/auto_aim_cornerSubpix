@@ -79,8 +79,10 @@ function makeCameraModel(): THREE.Group {
   body.position.z = bodyLen / 2;
   g.add(body);
 
-  const lens = makeAimCone(0.016, 0.045, "z", 0xe67e22, { opacity: 0.95 });
-  lens.position.z = bodyLen; // base at front of box, tip further +Z
+  const coneH = 0.045;
+  const lens = makeAimCone(0.016, coneH, "z", 0xe67e22, { opacity: 0.95 });
+  // makeAimCone 已把中心放到 height/2；再平移到机身前端，使底贴合、尖端朝 +Z
+  lens.position.z = bodyLen + coneH / 2;
   g.add(lens);
 
   g.add(makeAxes(0.08));
