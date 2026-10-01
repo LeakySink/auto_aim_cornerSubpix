@@ -40,12 +40,14 @@ host/
   ui/                      Vite + React + TS 源码
   rdbg/
     apps/hub_app.py        Hub 生命周期
-    features/              Feature 插件（watch/calibrate/replay/dump/netcheck）
+    features/              Feature 插件（watch/calibrate/tfviz/replay/dump/netcheck）
     static_ui/             门户前端构建产物
   HOST.md / DESIGN.md / PROTOCOL.md
 ```
 
 标定：车上 `./build/calibrate`（beacon 带 `app=calibrate`），门户首页「车辆」里点对应项打开标定页。步骤见 `calibration/calibration.md`。
+
+TF Viz：车上 `./build/tf_pub_test configs/xxx.yaml`，门户首页「功能」打开 TF Viz 后选车。
 
 ## 参数（start.sh / serve）
 
@@ -59,8 +61,9 @@ host/
 ## 使用提示
 
 - 首页点功能会 **新开页面**，每个页面一条线程，可以多开。关掉页面（或点「关闭」）会停掉这条线程。
-- 打开 Watch 时先选一辆车。Host 给每辆车分配不同的空闲 UDP 口（从 15001 起），这辆车的数据只打到那个口。同一辆车的多个 Watch 共用该口；最后一个关掉后才释放。
+- 打开 Watch / TF Viz 时先选一辆车。Host 给每辆车分配不同的空闲 UDP 口（从 15001 起），这辆车的数据只打到那个口。同一辆车的多个 Watch 共用该口；最后一个关掉后才释放。
 - 首页「车辆」按 beacon `app` 打开：`calibrate` → 标定页，其余（含缺省 `normal`）→ Watch。
+- **TF Viz**：首页「功能」打开；车上跑 `./build/tf_pub_test <config.yaml>`（读 Gimbal 姿态 + yaml 外参，plot 字段 `tf`）。页面按与 `Solver` 相同的公式画相机相对世界系。
 - Replay：在页面输入 `.rlog` 绝对/相对路径后点「加载」。
 - Dump：导出目录含 `log.txt` / `plot.txt` / `images.mp4`。
 - 标定：车上 `./build/calibrate`（beacon `app=calibrate`），首页车辆列表点进去即可。

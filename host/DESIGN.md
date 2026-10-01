@@ -37,7 +37,9 @@ flowchart LR
 2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。页面里用 `useInstance().base` 调本实例 API。标定例外：沿用 `static/calibrate.html`，由 `Feature.ui_path` 指向。
 3. `./host/ui/build.sh`，再 `./host/start.sh`。
 
-`FleetBoundFeature`：Watch / Calibrate 共用 fleet 绑定、`/events` SSE、`/bind`、`/select`、`/state`。子类用 `allow_rebind` / `default_img_streams` / `use_source_push_state` 区分行为。
+现有 Feature：`watch` / `calibrate` / `tfviz` / `replay` / `dump` / `netcheck`。
+
+`FleetBoundFeature`：Watch / Calibrate / TF Viz 共用 fleet 绑定、`/events` SSE、`/bind`、`/select`、`/state`。子类用 `allow_rebind` / `default_img_streams` / `use_source_push_state` 区分行为。
 
 控制面：`GET /api/features`（种类），`POST /api/open` 新建实例并启动线程，`GET /api/instances`，`POST /api/instances/<id>/stop?forget=1`（关页时）。  
 业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。发现口 `15999` 全局一个。每辆车单独分配数据口（自 15001）和对等口（自 15100）；打开 Watch 时选定车辆。同一辆车的多个 Watch 共用这一对口。`GET /api/robots` 列出当前 beacon，带 `app`（`normal` / `calibrate`）与 `feature`（门户要开的页）。首页车辆列表按 `app` 打开对应页。
@@ -94,6 +96,7 @@ host/
 Hub:
   Feature watch → LiveSource → /api/i/<id>/events (SSE)
   Feature calibrate → LiveSource + calib_cmd → /api/i/<id>/events|/calib
+  Feature tfviz → LiveSource → SSE plot.tf → 3D 相机/世界系
   Feature replay → session → /api/i/<id>/meta|/frame
   Feature dump → dump_rlog 后台 job
   Feature netcheck → discover/echo/ping workers
