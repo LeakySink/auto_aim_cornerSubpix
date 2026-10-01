@@ -224,16 +224,11 @@ export function TfVizPage() {
                     <div className="sec-label">图例</div>
                     <ul className="tfviz-legend">
                       <li>
-                        <span className="sw r" />X 红
-                      </li>
-                      <li>
-                        <span className="sw g" />Y 绿
-                      </li>
-                      <li>
+                        <span className="sw r" />X 红 · <span className="sw g" />Y 绿 ·{" "}
                         <span className="sw b" />Z 蓝
                       </li>
-                      <li>原点轴 = world / gimbal</li>
-                      <li>黄块 = camera</li>
+                      <li>灰圆锥 = 枪管（原点，云台 +X，电控姿态）</li>
+                      <li>黄长方体 + 橙圆锥 = 相机（光轴 +Z）</li>
                     </ul>
                   </>
                 )}

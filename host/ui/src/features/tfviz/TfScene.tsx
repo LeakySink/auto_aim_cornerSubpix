@@ -26,19 +26,79 @@ function applyPose(obj: THREE.Object3D, R: number[], t: number[]) {
   obj.updateMatrixWorld(true);
 }
 
-function makeAxes(length: number, lineWidthHint = 2): THREE.Group {
+function makeAxes(length: number): THREE.Group {
   const g = new THREE.Group();
   const mk = (dir: THREE.Vector3, color: number) => {
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0),
       dir.clone().multiplyScalar(length),
     ]);
-    const mat = new THREE.LineBasicMaterial({ color, linewidth: lineWidthHint });
-    return new THREE.Line(geo, mat);
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
   };
-  g.add(mk(new THREE.Vector3(1, 0, 0), 0xe74c3c)); // X red
-  g.add(mk(new THREE.Vector3(0, 1, 0), 0x2ecc71)); // Y green
-  g.add(mk(new THREE.Vector3(0, 0, 1), 0x3498db)); // Z blue
+  g.add(mk(new THREE.Vector3(1, 0, 0), 0xe74c3c));
+  g.add(mk(new THREE.Vector3(0, 1, 0), 0x2ecc71));
+  g.add(mk(new THREE.Vector3(0, 0, 1), 0x3498db));
+  return g;
+}
+
+/** ConeGeometry 默认沿 +Y；转到沿 localAxis，底在原点附近、尖端朝向。 */
+function makeAimCone(
+  radius: number,
+  height: number,
+  localAxis: "x" | "z",
+  color: number,
+  opts?: { wireframe?: boolean; opacity?: number }
+): THREE.Mesh {
+  const geo = new THREE.ConeGeometry(radius, height, 24);
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    wireframe: !!opts?.wireframe,
+    transparent: (opts?.opacity ?? 1) < 1,
+    opacity: opts?.opacity ?? 1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  // default tip at +Y → rotate onto +X or +Z
+  if (localAxis === "x") {
+    mesh.rotation.z = -Math.PI / 2;
+    mesh.position.x = height / 2;
+  } else {
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.z = height / 2;
+  }
+  return mesh;
+}
+
+/** 相机：长方体机身（局部 +Z 向前）+ 圆锥光轴提示。 */
+function makeCameraModel(): THREE.Group {
+  const g = new THREE.Group();
+  const bodyLen = 0.05; // along +Z
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.036, 0.028, bodyLen),
+    new THREE.MeshBasicMaterial({ color: 0xf1c40f, transparent: true, opacity: 0.9 })
+  );
+  body.position.z = bodyLen / 2;
+  g.add(body);
+
+  const lens = makeAimCone(0.016, 0.045, "z", 0xe67e22, { opacity: 0.95 });
+  lens.position.z = bodyLen; // base at front of box, tip further +Z
+  g.add(lens);
+
+  g.add(makeAxes(0.08));
+  return g;
+}
+
+/** 枪管：原点，圆锥沿云台 +X（与标定 ideal 前向一致）。 */
+function makeBarrelModel(): THREE.Group {
+  const g = new THREE.Group();
+  const barrel = makeAimCone(0.012, 0.12, "x", 0xbdc3c7, { opacity: 0.95 });
+  g.add(barrel);
+  // 略粗的底座示意安装点
+  const hub = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x7f8c8d })
+  );
+  g.add(hub);
+  g.add(makeAxes(0.1));
   return g;
 }
 
@@ -59,8 +119,8 @@ export function TfScene({ frame }: Props) {
     scene.background = new THREE.Color(0x111217);
 
     const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 50);
-    camera.up.set(0, 0, 1); // robotics Z-up
-    camera.position.set(0.6, -0.8, 0.5);
+    camera.up.set(0, 0, 1);
+    camera.position.set(0.55, -0.75, 0.45);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -68,34 +128,19 @@ export function TfScene({ frame }: Props) {
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.target.set(0, 0, 0.05);
+    controls.target.set(0.08, 0, 0.04);
 
     const grid = new THREE.GridHelper(2, 20, 0x333844, 0x22252e);
-    grid.rotation.x = Math.PI / 2; // XY plane, Z up
+    grid.rotation.x = Math.PI / 2;
     scene.add(grid);
 
-    const worldAxes = makeAxes(0.25);
+    const worldAxes = makeAxes(0.2);
     scene.add(worldAxes);
 
-    const gimbalAxes = makeAxes(0.18);
-    scene.add(gimbalAxes);
+    const barrelGroup = makeBarrelModel();
+    scene.add(barrelGroup);
 
-    const cameraGroup = new THREE.Group();
-    cameraGroup.add(makeAxes(0.12));
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.04, 0.03, 0.025),
-      new THREE.MeshBasicMaterial({ color: 0xf1c40f, transparent: true, opacity: 0.85 })
-    );
-    body.position.set(0, 0, 0);
-    cameraGroup.add(body);
-    // optical axis hint (+Z of camera in OpenCV often forward; here show +Z)
-    const fr = new THREE.Mesh(
-      new THREE.ConeGeometry(0.015, 0.04, 4),
-      new THREE.MeshBasicMaterial({ color: 0xf39c12, wireframe: true })
-    );
-    fr.rotation.x = Math.PI / 2;
-    fr.position.set(0, 0, 0.03);
-    cameraGroup.add(fr);
+    const cameraGroup = makeCameraModel();
     scene.add(cameraGroup);
 
     const resize = () => {
@@ -114,7 +159,9 @@ export function TfScene({ frame }: Props) {
       raf = requestAnimationFrame(tick);
       const f = frameRef.current;
       if (f) {
-        applyPose(gimbalAxes, f.R_gimbal2world, [0, 0, 0]);
+        // 枪管：电控姿态，位置在原点，指向云台 +X
+        applyPose(barrelGroup, f.R_gimbal2world, [0, 0, 0]);
+        // 相机：外参位姿，圆锥沿相机光轴 +Z
         applyPose(cameraGroup, f.R_camera2world, f.t_camera2world);
       }
       controls.update();
