@@ -118,7 +118,7 @@ function makeCameraModel(): THREE.Group {
 /** 枪管：原点，圆柱沿云台 +X。 */
 function makeBarrelModel(): THREE.Group {
   const g = new THREE.Group();
-  g.add(makeAimCylinder(0.01, 0.14, "x", 0xbdc3c7, { opacity: 0.95 }));
+  g.add(makeAimCylinder(0.01, 0.07, "x", 0xbdc3c7, { opacity: 0.95 }));
   const hub = new THREE.Mesh(
     new THREE.SphereGeometry(0.012, 16, 12),
     new THREE.MeshBasicMaterial({ color: 0x7f8c8d })
