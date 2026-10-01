@@ -117,7 +117,11 @@ nlohmann::json ControlPlane::make_beacon() const
   j["v"] = 1;
   j["type"] = "beacon";
   j["name"] = sender_name;
-  j["app"] = app.empty() ? "normal" : app;
+  const std::string app_s = app.empty() ? "normal" : app;
+  j["app"] = app_s;
+  // 可选：门户直接按 feature 开页（calibrate / tfviz / watch …）；缺省由 host 从 app 映射
+  if (app_s == "calibrate" || app_s == "tfviz") j["feature"] = app_s;
+  else if (app_s == "normal") j["feature"] = "watch";
   j["ip"] = local_ipv4();
   j["control"] = control_port;
   j["ts"] = now_ns();

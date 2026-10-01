@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { FEATURE_MODULES } from "../features/registry";
 import { featureStatus, getJson, listInstances, openFeature } from "../shared/api";
 import { InstanceProvider } from "../shared/instance";
-import { featureFromApp } from "../shared/robotFeature";
+import { resolvePortalFeature } from "../shared/robotFeature";
 
 type Row = { instance: string; feature: string; title: string; state: string; sender?: string; data_port?: number; path?: string };
 type Robot = {
@@ -55,10 +55,7 @@ export function HomePage() {
   };
 
   const openRobot = (r: Robot) => {
-    const feat =
-      r.feature === "calibrate" || r.feature === "watch" || r.feature === "tfviz"
-        ? r.feature
-        : featureFromApp(r.app);
+    const feat = resolvePortalFeature(r.feature, r.app);
     open(feat, { sender: r.name });
   };
 
@@ -110,11 +107,9 @@ export function HomePage() {
             <div className="sec-label">车辆</div>
             <div className="launcher">
               {robots.map((r) => {
-                const feat =
-                  r.feature === "calibrate" || r.feature === "watch"
-                    ? r.feature
-                    : featureFromApp(r.app);
+                const feat = resolvePortalFeature(r.feature, r.app);
                 const meta = [
+                  feat !== "watch" ? `feature=${feat}` : "",
                   r.app && r.app !== "normal" ? `app=${r.app}` : "",
                   r.ip,
                   r.data_port ? `UDP ${r.data_port}` : "",
@@ -139,7 +134,8 @@ export function HomePage() {
               })}
               {robots.length === 0 && (
                 <p className="empty launcher-empty">
-                  还没有发现车辆，可以直接填车名。标定程序 beacon 带 app=calibrate。
+                  还没有发现车辆，可以直接填车名。标定 app/feature=calibrate；TF Viz 用
+                  app/feature=tfviz。
                 </p>
               )}
               <form

@@ -66,6 +66,8 @@ remote_logger:
   app: "normal"              # normal=调试；calibrate=标定；tfviz=TF Viz（缺省 normal）
 ```
 
+Beacon 还可带可选 `"feature":"tfviz"`（或 `watch` / `calibrate`）；host 优先用 `feature` 决定开哪一页。
+
 ---
 
 ## 3. 发现
@@ -80,17 +82,18 @@ remote_logger:
 - 队首已连上也不能停：停了第二台调试机就看不见这辆车
 
 ```json
-{"v":1,"type":"beacon","name":"sentry","app":"normal","ip":"<车当前IPv4>","control":15000,"ts":...}
+{"v":1,"type":"beacon","name":"sentry","app":"normal","feature":"watch","ip":"<车当前IPv4>","control":15000,"ts":...}
 ```
 
 | 字段 | 含义 |
 |---|---|
 | `name` | `sender_name`，多车唯一，显示用 |
-| `app` | 程序身份。`normal`=正常调试程序（host 开 Watch）；`calibrate`=标定程序（host 开标定页）；`tfviz`=坐标变换测试（host 开 TF Viz）。**缺省 / 旧固件无此字段时按 `normal`** |
+| `app` | 程序身份。`normal` / `calibrate` / `tfviz` 等；**缺省 / 旧固件无此字段时按 `normal`** |
+| `feature` | **可选**。门户要打开的功能 id：`watch` / `calibrate` / `tfviz` …。有则优先用；无则由 host 从 `app` 映射（`normal→watch`，`calibrate→calibrate`，`tfviz→tfviz`） |
 | `ip` | 车此刻收控制包的地址 |
 | `control` | 控制口，默认 15000 |
 
-`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。门户车辆列表按 `app` 打开对应功能，**不要**用 `name` 猜身份。
+`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。门户车辆列表按 `feature`（或由 `app` 映射）打开对应功能，**不要**用 `name` 猜身份。
 
 host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 bind 15999 则回；否则等下一次周期 beacon）：
 

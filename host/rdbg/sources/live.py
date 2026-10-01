@@ -171,7 +171,7 @@ class LiveSource:
         with self._lock:
             return self.roles.get(robot) == "head"
 
-    def _on_beacon(self, name, ip, control, _addr, app="normal"):
+    def _on_beacon(self, name, ip, control, _addr, app="normal", feature=""):
         if self._target and name != self._target:
             return
         now = time.monotonic()
@@ -181,12 +181,14 @@ class LiveSource:
             if prev is None or prev["ip"] != ip or prev["control"] != control:
                 changed = True
             self.robots[name] = {
-                "ip": ip, "control": control, "last": now, "app": app or "normal",
+                "ip": ip, "control": control, "last": now,
+                "app": app or "normal", "feature": feature or "",
             }
         if changed:
             self.client.register(ip, control)
             self._last_register[name] = now
-            print("[watch] beacon %s at %s:%s app=%s" % (name, ip, control, app or "normal"))
+            print("[watch] beacon %s at %s:%s app=%s feature=%s" % (
+                name, ip, control, app or "normal", feature or ""))
             self.push_state()
 
     def _on_raw(self, data):

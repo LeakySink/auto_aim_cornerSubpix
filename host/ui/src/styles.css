@@ -712,11 +712,16 @@ p.err-text { margin: 0 0 12px; }
 
 .tfviz-layout {
   display: grid;
-  grid-template-columns: 1fr 280px;
+  grid-template-rows: 1fr minmax(220px, 38%);
   min-height: 0;
 }
 .tfviz-layout .pick-pane {
-  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+.tfviz-stage {
+  min-width: 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
 }
 .tfviz-canvas {
   min-width: 0;
@@ -730,12 +735,19 @@ p.err-text { margin: 0 0 12px; }
   width: 100% !important;
   height: 100% !important;
 }
-.tfviz-side {
-  border-left: 1px solid var(--border);
-  padding: 12px;
-  overflow: auto;
-  background: var(--surface);
+.tfviz-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   min-height: 0;
+  background: var(--surface);
+}
+.tfviz-col {
+  padding: 12px 14px;
+  overflow: auto;
+  min-height: 0;
+}
+.tfviz-col-fixed {
+  border-right: 1px solid var(--border);
 }
 .tfviz-legend {
   list-style: none;
@@ -791,5 +803,18 @@ p.err-text { margin: 0 0 12px; }
   line-height: 1.45;
   white-space: pre;
   overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .tfviz-layout {
+    grid-template-rows: 1fr minmax(280px, 50%);
+  }
+  .tfviz-bottom {
+    grid-template-columns: 1fr;
+  }
+  .tfviz-col-fixed {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 

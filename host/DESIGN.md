@@ -209,7 +209,7 @@ write_sse(handler, q, on_connect=None)  # 阻塞直到客户端断开
 
 ```python
 Discovery(port=15999, host_id="")
-d.on_beacon = lambda name, ip, control, addr, app: ...
+d.on_beacon = lambda name, ip, control, addr, app, feature="": ...
 d.start() / d.stop() / d.probe()   # probe 发 who
 
 RobotClient(host_id, host_name, data_port, peer_port)
