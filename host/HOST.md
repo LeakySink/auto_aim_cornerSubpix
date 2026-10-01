@@ -47,7 +47,7 @@ host/
 
 标定：车上 `./build/calibrate`（beacon 带 `app=calibrate`），门户首页「车辆」里点对应项打开标定页。步骤见 `calibration/calibration.md`。
 
-TF Viz：车上 `./build/tf_pub_test configs/xxx.yaml`，门户首页「功能」打开 TF Viz 后选车。
+TF Viz：首页「功能 → TF Viz」在无 `app=tfviz` 发布者时，本机拉起 `build/tf_pub_test`（默认 `configs/tf_pub.yaml`；可用环境变量 `RDBG_TF_PUB_CONFIG` 覆盖；缺文件则拉起失败）。也可手动 `./build/tf_pub_test configs/xxx.yaml`，车辆列表会出现该发布者。
 
 ## 参数（start.sh / serve）
 
@@ -61,9 +61,9 @@ TF Viz：车上 `./build/tf_pub_test configs/xxx.yaml`，门户首页「功能�
 ## 使用提示
 
 - 首页点功能会 **新开页面**，每个页面一条线程，可以多开。关掉页面（或点「关闭」）会停掉这条线程。
-- 打开 Watch / TF Viz 时先选一辆车。Host 给每辆车分配不同的空闲 UDP 口（从 15001 起），这辆车的数据只打到那个口。同一辆车的多个 Watch 共用该口；最后一个关掉后才释放。
-- 首页「车辆」按 beacon `app` 打开：`calibrate` → 标定页，其余（含缺省 `normal`）→ Watch。
-- **TF Viz**：首页「功能」打开；车上跑 `./build/tf_pub_test <config.yaml>`（读 Gimbal 姿态 + yaml 外参，plot 字段 `tf`）。页面按与 `Solver` 相同的公式画相机相对世界系。
+- 打开 Watch / TF Viz 时先选一辆车（TF Viz 也可由功能入口自动拉起本机 `tf_pub_test` 后再绑定）。Host 给每辆车分配不同的空闲 UDP 口（从 15001 起），这辆车的数据只打到那个口。同一辆车的多个 Watch 共用该口；最后一个关掉后才释放。
+- 首页「车辆」按 beacon `app` 打开：`calibrate` → 标定页，`tfviz` → TF Viz，其余（含缺省 `normal`）→ Watch。
+- **TF Viz**：`tf_pub_test` beacon `app=tfviz`。首页「功能」打开时若网上无发布者，Hub 本机 spawn `build/tf_pub_test`，配置解析顺序：`config_path` → `RDBG_TF_PUB_CONFIG` → **`configs/tf_pub.yaml`**；文件不存在则拉起失败。侧栏展示 config 路径名与外参（`plot.tf`）。手工联调：`./build/tf_pub_test configs/xxx.yaml`。
 - Replay：在页面输入 `.rlog` 绝对/相对路径后点「加载」。
 - Dump：导出目录含 `log.txt` / `plot.txt` / `images.mp4`。
 - 标定：车上 `./build/calibrate`（beacon `app=calibrate`），首页车辆列表点进去即可。

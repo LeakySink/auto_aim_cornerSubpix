@@ -63,7 +63,7 @@ remote_logger:
   heartbeat_interval_ms: 500
   head_timeout_ms: 2000
   sender_name: "sentry"
-  app: "normal"              # normal=调试；calibrate=标定（缺省 normal）
+  app: "normal"              # normal=调试；calibrate=标定；tfviz=TF Viz（缺省 normal）
 ```
 
 ---
@@ -86,7 +86,7 @@ remote_logger:
 | 字段 | 含义 |
 |---|---|
 | `name` | `sender_name`，多车唯一，显示用 |
-| `app` | 程序身份。`normal`=正常调试程序（host 开 Watch）；`calibrate`=标定程序（host 开标定页）。**缺省 / 旧固件无此字段时按 `normal`** |
+| `app` | 程序身份。`normal`=正常调试程序（host 开 Watch）；`calibrate`=标定程序（host 开标定页）；`tfviz`=坐标变换测试（host 开 TF Viz）。**缺省 / 旧固件无此字段时按 `normal`** |
 | `ip` | 车此刻收控制包的地址 |
 | `control` | 控制口，默认 15000 |
 

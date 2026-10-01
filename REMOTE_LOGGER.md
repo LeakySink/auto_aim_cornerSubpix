@@ -35,7 +35,7 @@ tools::RemoteLogger::instance().init(config_path);
 // 或手动构造 Config（测试程序）
 tools::RemoteLogger::Config cfg;
 cfg.sender_name  = "my_robot";
-cfg.app = "normal";  // 或 "calibrate"；进 beacon，host 门户按此开页
+cfg.app = "normal";  // 或 "calibrate" / "tfviz"；进 beacon，host 门户按此开页
 cfg.heartbeat_interval_ms = 500;
 tools::RemoteLogger::instance().init(cfg);
 
@@ -70,7 +70,7 @@ remote_logger:
   img_quality: 50
   heartbeat_interval_ms: 500   # 0=关闭
   sender_name: "sentry"
-  app: "normal"              # 可选；normal=调试，calibrate=标定；缺省 normal
+  app: "normal"              # 可选；normal=调试，calibrate=标定，tfviz=TF Viz；缺省 normal
   beacon_interval_ms: 1000     # 缺省 1000；连上后也一直发
   head_timeout_ms: 2000        # 缺省 2000；队首失联出队
 ```
@@ -87,7 +87,7 @@ remote_logger:
 | `img_quality` | 50 | JPEG 质量 |
 | `heartbeat_interval_ms` | 0 | 向队首发 `hb` 的间隔，0=关闭 |
 | `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`），多车必须唯一 |
-| `app` | `"normal"` | beacon 身份：`normal` 调试 / `calibrate` 标定；host 门户按此开页 |
+| `app` | `"normal"` | beacon 身份：`normal` 调试 / `calibrate` 标定 / `tfviz` TF Viz；host 门户按此开页 |
 | `beacon_interval_ms` | 1000 | LAN 发现广播间隔，已连接也不停 |
 | `head_timeout_ms` | 2000 | 队首无 `head_alive` 则出队 |
 
