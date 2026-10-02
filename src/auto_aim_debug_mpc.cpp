@@ -9,6 +9,7 @@
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "io/remote_debug.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -119,6 +120,7 @@ int main(int argc, char * argv[])
       }
       if (target.has_value()) {
         data["w"] = target->ekf_x()[7];
+        data["markers"] = tools::viz::kalman_markers(*target);
       } else {
         data["w"] = 0.0;
       }
