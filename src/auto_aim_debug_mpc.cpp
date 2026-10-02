@@ -59,7 +59,7 @@ int main(int argc, char * argv[])
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
       const auto yaw_err = tools::limit_rad(plan.yaw0 - gs.yaw);
-      const auto pitch_err = plan.pitch0 - gs.pitch;
+      const auto pitch_err = plan.pitch0 + gs.pitch;
       const auto yp_error=std::hypot(yaw_err, pitch_err);
       const bool fire =std::hypot(yaw_err, pitch_err)< planner.fire_thresh();
       if (plan.control) {
