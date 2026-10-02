@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 
 namespace tools
 {
@@ -23,6 +24,7 @@ bool ControlPlane::start()
     queue_.clear();
     calib_cmds_.clear();
     inbound_json_.clear();
+    json_handler_ = nullptr;
     img_subs_.clear();
     img_union_.clear();
     host_tx_cap_ = {};
@@ -57,6 +59,7 @@ void ControlPlane::stop()
     queue_.clear();
     calib_cmds_.clear();
     inbound_json_.clear();
+    json_handler_ = nullptr;
     img_subs_.clear();
     img_union_.clear();
   }
@@ -497,28 +500,39 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
 
   if (type == "json") {
     if (host_id.empty() || !msg.contains("data")) return;
+    nlohmann::json data;
+    JsonHandler handler;
     {
       std::lock_guard<std::mutex> lock(mtx_);
       if (!find_locked(host_id)) return;
+      data = msg["data"];
       if (inbound_json_.size() >= 64) inbound_json_.pop_front();
-      inbound_json_.push_back(msg["data"]);
-      // 调试指令：远程画质上限，立即生效（不依赖业务 poll）。
-      if (msg["data"].is_object() &&
-          msg["data"].value("cmd", "") == "set_img_tx") {
-        const auto & d = msg["data"];
+      inbound_json_.push_back(data);
+      // 调试指令：远程画质上限，立即生效（不依赖业务 poll / 回调）。
+      if (data.is_object() && data.value("cmd", "") == "set_img_tx") {
         TxCap cap = host_tx_cap_;
-        if (d.contains("max_width") && d["max_width"].is_number_integer())
-          cap.max_width = d["max_width"].get<int>();
-        if (d.contains("max_quality") && d["max_quality"].is_number_integer())
-          cap.max_quality = d["max_quality"].get<int>();
-        if (d.contains("max_fps") && d["max_fps"].is_number_integer())
-          cap.max_fps = d["max_fps"].get<int>();
-        if (d.contains("level") && d["level"].is_number_integer())
-          cap.max_level = d["level"].get<int>();
+        if (data.contains("max_width") && data["max_width"].is_number_integer())
+          cap.max_width = data["max_width"].get<int>();
+        if (data.contains("max_quality") && data["max_quality"].is_number_integer())
+          cap.max_quality = data["max_quality"].get<int>();
+        if (data.contains("max_fps") && data["max_fps"].is_number_integer())
+          cap.max_fps = data["max_fps"].get<int>();
+        if (data.contains("level") && data["level"].is_number_integer())
+          cap.max_level = data["level"].get<int>();
         host_tx_cap_ = cap;
         std::fprintf(stderr,
                      "[RemoteLogger] set_img_tx w=%d q=%d fps=%d level=%d\n",
                      cap.max_width, cap.max_quality, cap.max_fps, cap.max_level);
+      }
+      handler = json_handler_;
+    }
+    if (handler) {
+      try {
+        handler(data);
+      } catch (const std::exception & e) {
+        std::fprintf(stderr, "[RemoteLogger] json_handler: %s\n", e.what());
+      } catch (...) {
+        std::fprintf(stderr, "[RemoteLogger] json_handler: unknown error\n");
       }
     }
     return;
@@ -588,6 +602,12 @@ bool ControlPlane::poll_json(nlohmann::json & data)
   data = std::move(inbound_json_.front());
   inbound_json_.pop_front();
   return true;
+}
+
+void ControlPlane::set_json_handler(JsonHandler handler)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  json_handler_ = std::move(handler);
 }
 
 }  // namespace rdbg

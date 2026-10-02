@@ -1,10 +1,12 @@
 #include <chrono>
+#include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"
 #include "tasks/auto_aim/aimer.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -80,6 +82,9 @@ int main(int argc, char * argv[])
 
         data["plan_yaw"] = plan.yaw;
         data["plan_pitch"] = plan.pitch;
+        if (target.has_value()) {
+          data["markers"] = tools::viz::kalman_markers(*target);
+        }
         gimbal.send(
           plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);

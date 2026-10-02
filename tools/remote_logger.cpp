@@ -75,6 +75,11 @@ bool RemoteLogger::poll_calib_cmd(std::string & cmd) { return impl_->poll_calib_
 
 bool RemoteLogger::poll_json(nlohmann::json & data) { return impl_->poll_json(data); }
 
+void RemoteLogger::set_json_callback(std::function<void(const nlohmann::json &)> cb)
+{
+  impl_->set_json_handler(std::move(cb));
+}
+
 void RemoteLogger::apply_tx_cap(int max_width, int max_quality, int max_fps,
                                 int max_level)
 {

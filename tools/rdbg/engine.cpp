@@ -160,6 +160,11 @@ bool Engine::poll_calib_cmd(std::string & cmd) { return control_.poll_calib_cmd(
 
 bool Engine::poll_json(nlohmann::json & data) { return control_.poll_json(data); }
 
+void Engine::set_json_handler(ControlPlane::JsonHandler handler)
+{
+  control_.set_json_handler(std::move(handler));
+}
+
 void Engine::apply_tx_cap(const TxCap & cap)
 {
   control_.set_host_tx_cap(cap);

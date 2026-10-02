@@ -36,6 +36,7 @@ public:
   void plot_image(const cv::Mat & img, const nlohmann::json & meta);
   bool poll_calib_cmd(std::string & cmd);
   bool poll_json(nlohmann::json & data);
+  void set_json_handler(ControlPlane::JsonHandler handler);
   // Host/IO 调试指令设置的远程画质上限（不改本地落盘）。
   void apply_tx_cap(const TxCap & cap);
   int tx_level() const { return tx_.level(); }

@@ -1,4 +1,5 @@
 #include <chrono>
+#include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
@@ -6,6 +7,7 @@
 #include "io/dm_imu/dm_imu.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/detector.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -80,6 +82,12 @@ int main(int argc, char * argv[])
       auto armors = detector.detect(img);
 
       auto targets = tracker.track(armors, t);
+
+      if (!targets.empty()) {
+        nlohmann::json data;
+        data["markers"] = tools::viz::kalman_markers(targets.front());
+        tools::RemoteLogger::instance().plot(data);
+      }
 
       auto command = aimer.aim(targets, t, cboard.bullet_speed);
 

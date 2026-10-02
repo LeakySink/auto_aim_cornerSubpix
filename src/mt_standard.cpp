@@ -1,10 +1,12 @@
 #include <chrono>
+#include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"
 #include "tasks/auto_aim/aimer.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -90,6 +92,12 @@ int main(int argc, char * argv[])
       Eigen::Vector3d ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 
       auto targets = tracker.track(armors, t);
+
+      if (!targets.empty()) {
+        nlohmann::json data;
+        data["markers"] = tools::viz::kalman_markers(targets.front());
+        tools::RemoteLogger::instance().plot(data);
+      }
 
       commandgener.push(targets, t, cboard.bullet_speed, ypr);  // 发送给决策线程
 
