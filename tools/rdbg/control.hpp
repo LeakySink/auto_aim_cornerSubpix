@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -59,10 +60,13 @@ public:
   TxCap host_tx_cap() const;
   void set_host_tx_cap(const TxCap & cap);
 
-  // host → 车：标定网页按钮（兼容旧协议；新代码优先用 poll_json）
+  // host → 车：标定网页按钮（兼容旧协议；新代码优先用 poll_json / set_json_handler）
   bool poll_calib_cmd(std::string & cmd);
-  // host → 车：通用 JSON（type=json 的 data 字段）
+  // host → 车：通用 JSON（type=json 的 data 字段）；仍可轮询，也可用 set_json_handler
   bool poll_json(nlohmann::json & data);
+  /// 控制线程收到 type=json 时回调（在锁外调用；可换线程）。空 = 取消。
+  using JsonHandler = std::function<void(const nlohmann::json &)>;
+  void set_json_handler(JsonHandler handler);
 
 private:
   void send_beacon_to(const sockaddr_in & dest);
@@ -86,6 +90,7 @@ private:
   std::vector<HostSlot> queue_;
   std::deque<std::string> calib_cmds_;
   std::deque<nlohmann::json> inbound_json_;
+  JsonHandler json_handler_;
   sockaddr_in head_addr_{};
   std::chrono::steady_clock::time_point last_beacon_{};
   std::chrono::steady_clock::time_point last_alive_{};

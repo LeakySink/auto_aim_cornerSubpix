@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -15,7 +16,7 @@ namespace tools
 
 /// 车上远程调试日志（单例）。调用方只 include 本头文件。
 ///
-/// 生命周期：`init` → `plot` / `log` / `plot_image` / `poll_json` → `shutdown`。
+/// 生命周期：`init` → `plot` / `log` / `plot_image` /（可选）`set_json_callback` → `shutdown`。
 /// 实现分层在 `tools/rdbg/`：engine（入队+worker）/ session（.rlog）/
 /// data（UDP→队首）/ control（beacon+host 队列）/ transport。
 ///
@@ -24,6 +25,7 @@ namespace tools
 /// - `plot` JSON 可嵌套 `markers`（Watch 3D marker_v1）、`tf` / `frames`
 /// - `plot_image` 按 `meta.name` ~30fps 选帧；UDP 仅当 Host `img_subscribe` 该流
 /// - 落盘优先级：image(0) < normal(1) < WARN(2) < ERROR(3)；队列满丢低优先级
+/// - Host 下行优先 `set_json_callback`；`poll_json` / `poll_calib_cmd` 仍可用
 /// - 配置见 yaml `remote_logger`；文档 `REMOTE_LOGGER.md` / 门户 Help `#vehicle`
 class RemoteLogger
 {
@@ -71,8 +73,10 @@ public:
 
   /// Host 网页下发的标定指令（旧协议，保留兼容）。
   bool poll_calib_cmd(std::string & cmd);
-  /// Host 下发的通用 JSON（控制口 `type=json` 的 `data` 字段）。
+  /// Host 下发的通用 JSON（控制口 `type=json` 的 `data`）；仍可轮询。
   bool poll_json(nlohmann::json & data);
+  /// Host `type=json` 到达时回调（控制线程、锁外）。空 function 取消。优先于每帧 poll。
+  void set_json_callback(std::function<void(const nlohmann::json &)> cb);
 
   /// 远程 UDP JPEG 上限（与 img_subscribe / set_img_tx 同语义；max_level≥0 表示至少降到该档）。
   /// 只影响 UDP 编码与 img_tx_level 自适应；本地 .rlog 仍用 yaml img_width/img_quality。

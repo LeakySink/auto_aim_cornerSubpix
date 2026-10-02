@@ -23,7 +23,7 @@ host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
 - **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker JPEG；**本地 `.rlog` 始终用 yaml `img_width`/`img_quality`**；**UDP 仅在 host `img_subscribe` 了该 `meta.name` 时**，按远程自适应档位（见 §远程 JPEG）编码，≤1200B 的 `0xFE` 分片；与本地参数不同时 **双路编码**
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
-- **远端下行 JSON**：host `send_json` → 车 `poll_json`（控制口 `type=json`）；旧 `calib_cmd` / `poll_calib_cmd` 仍可用
+- **远端下行 JSON**：host `send_json` → 车优先 `set_json_callback`（收到即调）；仍可用 `poll_json`。旧 `calib_cmd` / `poll_calib_cmd` 仍可用
 
 ## 快速开始
 
@@ -46,10 +46,15 @@ tools::RemoteLogger::instance().log("INFO", "target locked");
 tools::RemoteLogger::instance().log("ERROR", "motor {} fail, code={}", 3, 0x1F);
 tools::RemoteLogger::instance().plot_image(frame, {{"name", "front"}});
 
-// 消费 host 下发的 JSON（队首/已注册 host 的 type=json）
+// 推荐：回调消费 host 下行（无主循环轮询）
+tools::RemoteLogger::instance().set_json_callback([](const nlohmann::json & msg) {
+  // msg 即协议里的 data 字段
+});
+// 或 io::RemoteDebug::install();  // 内置处理 set_img_tx
+
+// 仍可用轮询（标定等）
 nlohmann::json msg;
 while (tools::RemoteLogger::instance().poll_json(msg)) {
-  // msg 即协议里的 data 字段
 }
 
 tools::RemoteLogger::instance().shutdown();  // 自动注销
@@ -266,4 +271,4 @@ tools::RemoteLogger::instance().plot(data);
 | `img_tx_fps` | `img_worker` 成功发出远程 JPEG 计数 | 远程出图 fps |
 | `img_tx_level` | 远程自适应档位 0–3 | 与 `img_subscribe`/`set_img_tx` 上限叠加 |
 
-主循环应调用 `io::RemoteDebug::poll()`（消费 `set_img_tx`）与 `on_frame(cam_fps)`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
+`init` 后调用一次 `io::RemoteDebug::install()`（回调消费 `set_img_tx`）；主循环只需 `on_frame(cam_fps)`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。

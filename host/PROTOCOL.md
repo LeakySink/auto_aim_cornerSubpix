@@ -210,7 +210,7 @@ frag n: [chunk...]
 {"cmd":"set_img_tx","max_width":480,"max_quality":40,"max_fps":20,"level":1}
 ```
 
-车端控制面收到后立即更新上限（不必等业务 `poll_json`）；业务侧 `io::RemoteDebug::poll()` 也会处理同形 JSON。
+车端控制面收到后立即更新上限（不必等业务 `poll_json`）；业务侧 `io::RemoteDebug::install()` 通过 `set_json_callback` 同步处理同形 JSON。
 
 `streams: []` 表示该 host 退订。车对队列内各 host 的订阅取并集；出队时清掉该 host 的订阅。ack：
 

@@ -11,37 +11,20 @@ namespace io
 
 /// Host→车调试指令入口（RemoteLogger 控制面，不是电控 CAN Command）。
 ///
-/// 主循环每帧调用 `poll()`：消费 `set_img_tx` 等；并可用 `on_frame` 上报 loop/cam fps。
+/// `install()` 注册 JSON 回调（收到即处理，无需主循环 poll）；
+/// `on_frame` 上报 loop/cam fps。
 class RemoteDebug
 {
 public:
-  /// 排空 poll_json；对 `cmd=set_img_tx` 调用 RemoteLogger::apply_tx_cap。
-  static void poll()
+  /// 在 `RemoteLogger::init` 之后调用一次：注册 Host `type=json` 回调（ctrl 线程）。
+  /// 可重复调用（覆盖为同一处理函数）。`shutdown` 后再 `init` 需重新 install。
+  static void install()
   {
-    nlohmann::json data;
-    auto & rl = tools::RemoteLogger::instance();
-    while (rl.poll_json(data)) {
-      if (!data.is_object()) continue;
-      if (data.value("cmd", "") != "set_img_tx") continue;
-      const int max_width =
-        data.contains("max_width") && data["max_width"].is_number_integer()
-          ? data["max_width"].get<int>()
-          : 0;
-      const int max_quality =
-        data.contains("max_quality") && data["max_quality"].is_number_integer()
-          ? data["max_quality"].get<int>()
-          : 0;
-      const int max_fps =
-        data.contains("max_fps") && data["max_fps"].is_number_integer()
-          ? data["max_fps"].get<int>()
-          : 0;
-      const int level =
-        data.contains("level") && data["level"].is_number_integer()
-          ? data["level"].get<int>()
-          : -1;
-      rl.apply_tx_cap(max_width, max_quality, max_fps, level);
-    }
+    tools::RemoteLogger::instance().set_json_callback(&RemoteDebug::on_json);
   }
+
+  /// @deprecated 等价于 `install()`；请改在 init 后调用一次 `install()`。
+  static void poll() { install(); }
 
   /// 主循环每帧调用；约 1Hz plot `loop_fps`，若 cam_fps>=0 则附带 `cam_fps`。
   static void on_frame(double cam_fps = -1.0)
@@ -64,6 +47,31 @@ public:
     nlohmann::json j = {{"loop_fps", loop_fps}};
     if (cam_fps >= 0.0) j["cam_fps"] = cam_fps;
     tools::RemoteLogger::instance().plot(j);
+  }
+
+private:
+  static void on_json(const nlohmann::json & data)
+  {
+    if (!data.is_object()) return;
+    if (data.value("cmd", "") != "set_img_tx") return;
+    const int max_width =
+      data.contains("max_width") && data["max_width"].is_number_integer()
+        ? data["max_width"].get<int>()
+        : 0;
+    const int max_quality =
+      data.contains("max_quality") && data["max_quality"].is_number_integer()
+        ? data["max_quality"].get<int>()
+        : 0;
+    const int max_fps =
+      data.contains("max_fps") && data["max_fps"].is_number_integer()
+        ? data["max_fps"].get<int>()
+        : 0;
+    const int level =
+      data.contains("level") && data["level"].is_number_integer()
+        ? data["level"].get<int>()
+        : -1;
+    tools::RemoteLogger::instance().apply_tx_cap(max_width, max_quality, max_fps,
+                                                 level);
   }
 };
 

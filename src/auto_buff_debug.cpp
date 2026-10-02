@@ -34,6 +34,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
 
   tools::RemoteLogger::instance().init(config_path);
+  io::RemoteDebug::install();
 
   // 初始化C板、相机
   io::CBoard cboard(config_path);
@@ -144,7 +145,6 @@ int main(int argc, char * argv[])
 
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "result"}});
-    io::RemoteDebug::poll();
     io::RemoteDebug::on_frame(camera.fps());
   }
 

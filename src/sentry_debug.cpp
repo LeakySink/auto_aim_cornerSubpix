@@ -41,6 +41,7 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>(0);
 
   tools::RemoteLogger::instance().init(config_path);
+  io::RemoteDebug::install();
 
   io::ROS2 ros2;
   io::CBoard cboard(config_path);
@@ -188,7 +189,6 @@ int main(int argc, char * argv[])
 
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
-    io::RemoteDebug::poll();
     io::RemoteDebug::on_frame(camera.fps());
   }
 
