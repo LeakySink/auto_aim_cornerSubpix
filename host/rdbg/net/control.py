@@ -204,11 +204,18 @@ class RobotClient:
             "data": data,
         })
 
-    def img_subscribe(self, ip, control_port, streams):
-        self._send(ip, control_port, {
+    def img_subscribe(self, ip, control_port, streams, **caps):
+        msg = {
             "v": 1,
             "type": "img_subscribe",
             "host_id": self.host_id,
             "peer_port": self.peer_port,
             "streams": list(streams or []),
-        })
+        }
+        for key in ("max_width", "max_quality", "max_fps", "max_level"):
+            if key in caps and caps[key] is not None:
+                try:
+                    msg[key] = int(caps[key])
+                except (TypeError, ValueError):
+                    pass
+        self._send(ip, control_port, msg)

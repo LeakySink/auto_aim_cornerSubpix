@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { featureStatus, getJson, postJson, startFeature, stopFeature } from "../../shared/api";
+import { featureStatus, getJson, openFeature, postJson, startFeature, stopFeature } from "../../shared/api";
 import { useSSE } from "../../shared/useSSE";
 import { useInstance } from "../../shared/instance";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
@@ -7,7 +7,21 @@ import { markersFromFlatEkf, parseMarkerArray } from "./markerTypes";
 
 const NESTED_SKIP = new Set(["markers", "frames", "tf", "ts", "_from", "type", "hb"]);
 
-function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: { current: number | null }) {
+type TxPreset = "full" | "balanced" | "smooth";
+
+const TX_QUERY: Record<TxPreset, string> = {
+  full: "",
+  balanced: "&max_width=480&max_quality=40&max_fps=20&max_level=1",
+  smooth: "&max_width=320&max_quality=30&max_fps=15&max_level=2",
+};
+
+function handleEvent(
+  bus: DataBus | null,
+  msg: Record<string, unknown>,
+  t0Ref: { current: number | null },
+  fpsRef: { current: { cam: number; loop: number; tx: number; level: number } },
+  onFps: () => void
+) {
   if (!bus) return;
   const type = msg.type as string | undefined;
   if (type === "plot" || (!type && msg.data && typeof msg.data === "object")) {
@@ -29,10 +43,26 @@ function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: {
     if (data.frames) bus.setFrames(data.frames);
     if (data.tf) bus.setTf(data.tf);
 
+    let fpsChanged = false;
     for (const [k, v] of Object.entries(data)) {
       if (NESTED_SKIP.has(k) || k === "markers_reset") continue;
-      if (typeof v === "number") bus.addPoint(k, t, v);
+      if (typeof v !== "number") continue;
+      bus.addPoint(k, t, v);
+      if (k === "cam_fps") {
+        fpsRef.current.cam = v;
+        fpsChanged = true;
+      } else if (k === "loop_fps") {
+        fpsRef.current.loop = v;
+        fpsChanged = true;
+      } else if (k === "img_tx_fps") {
+        fpsRef.current.tx = v;
+        fpsChanged = true;
+      } else if (k === "img_tx_level") {
+        fpsRef.current.level = v;
+        fpsChanged = true;
+      }
     }
+    if (fpsChanged) onFps();
     return;
   }
   if (type === "log") {
@@ -67,7 +97,13 @@ export function WatchPage() {
   const [manual, setManual] = useState("");
   const busRef = useRef<DataBus | null>(null);
   const t0Ref = useRef<number | null>(null);
+  const fpsRef = useRef({ cam: 0, loop: 0, tx: 0, level: 0 });
+  const [fpsTick, setFpsTick] = useState(0);
   const [running, setRunning] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordPath, setRecordPath] = useState("");
+  const [txPreset, setTxPreset] = useState<TxPreset>("full");
+  const streamsRef = useRef<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -77,6 +113,11 @@ export function WatchPage() {
       setRunning(st.state === "running" && !!st.sender);
       setSelected(st.sender || "");
       setPort(st.data_port || 0);
+      const rec = (st as { record?: { recording?: boolean; path?: string } }).record;
+      if (rec) {
+        setRecording(!!rec.recording);
+        if (rec.path) setRecordPath(rec.path);
+      }
     } catch (e) {
       setErr(String(e));
     }
@@ -92,10 +133,19 @@ export function WatchPage() {
     busRef.current = b;
   }, []);
 
-  const imageSubscribe = useCallback((names: string[]) => {
-    const q = names.map(encodeURIComponent).join(",");
-    fetch(`${inst.base}/img_subscribe?streams=${q}`).catch(() => {});
-  }, [inst.base]);
+  const pushSubscribe = useCallback(
+    (names: string[]) => {
+      streamsRef.current = names;
+      const q = names.map(encodeURIComponent).join(",");
+      fetch(`${inst.base}/img_subscribe?streams=${q}${TX_QUERY[txPreset]}`).catch(() => {});
+    },
+    [inst.base, txPreset]
+  );
+
+  useEffect(() => {
+    if (!running) return;
+    pushSubscribe(streamsRef.current);
+  }, [txPreset, running, pushSubscribe]);
 
   useSSE(
     running ? `${inst.base}/events` : null,
@@ -107,7 +157,7 @@ export function WatchPage() {
         }
         return;
       }
-      handleEvent(busRef.current, msg, t0Ref);
+      handleEvent(busRef.current, msg, t0Ref, fpsRef, () => setFpsTick((n) => n + 1));
     },
     running
   );
@@ -141,12 +191,73 @@ export function WatchPage() {
     }
   };
 
+  const fps = fpsRef.current;
+  void fpsTick;
+
   return (
     <div className="feature-page">
       <div className="feature-toolbar">
         <strong>Watch</strong>
-        <span className="mono">{selected || "未选择车辆"}{port ? ` · UDP ${port}` : ""} · {state}</span>
+        <span className="mono">
+          {selected || "未选择车辆"}
+          {port ? ` · UDP ${port}` : ""} · {state}
+          {running
+            ? ` · cam ${fps.cam.toFixed(0)} / loop ${fps.loop.toFixed(0)} / tx ${fps.tx.toFixed(0)} L${fps.level}`
+            : ""}
+        </span>
         {err && <span className="err-text">{err}</span>}
+        <label className="toolbar-inline">
+          实况
+          <select
+            value={txPreset}
+            disabled={!running}
+            onChange={(e) => setTxPreset(e.target.value as TxPreset)}
+          >
+            <option value="full">画质优先</option>
+            <option value="balanced">均衡</option>
+            <option value="smooth">流畅优先</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className={recording ? "" : "ghost"}
+          disabled={!running}
+          onClick={async () => {
+            setErr("");
+            try {
+              if (recording) {
+                const r = await postJson<{ path?: string }>(`${inst.base}/record/stop`, {});
+                setRecording(false);
+                if (r.path) setRecordPath(r.path);
+              } else {
+                const r = await postJson<{ path?: string }>(`${inst.base}/record/start`, {});
+                setRecording(true);
+                if (r.path) setRecordPath(r.path);
+              }
+              await refresh();
+            } catch (e) {
+              setErr(String(e));
+            }
+          }}
+        >
+          {recording ? "停止录制" : "录制"}
+        </button>
+        {recordPath && !recording && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={async () => {
+              try {
+                const r = await openFeature("replay", { path: recordPath });
+                if (r.path) window.open(r.path, "_blank");
+              } catch (e) {
+                setErr(String(e));
+              }
+            }}
+          >
+            打开 Replay
+          </button>
+        )}
         <button type="button" className="ghost" onClick={() => busRef.current?.clear()}>
           清除
         </button>
@@ -173,6 +284,11 @@ export function WatchPage() {
           启动
         </button>
       </div>
+      {recordPath && (
+        <div className="mono" style={{ fontSize: 12, opacity: 0.75, padding: "0 12px" }}>
+          录制文件：{recordPath}
+        </div>
+      )}
       <div className="feature-body fill">
         {!selected && (
           <div className="pick-pane">
@@ -200,7 +316,7 @@ export function WatchPage() {
             </div>
           </div>
         )}
-        <DebugWorkbench busOut={onBus} imageSubscribe={imageSubscribe} />
+        <DebugWorkbench busOut={onBus} imageSubscribe={pushSubscribe} />
       </div>
     </div>
   );

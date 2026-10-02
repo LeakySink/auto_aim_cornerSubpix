@@ -54,6 +54,7 @@ class LiveSource:
         self._last_senders = []
         self._img_by_key = {}
         self._last_img_sub = 0.0
+        self._tx_profile = {}
         if self._target:
             self._selected = self._target
 
@@ -136,6 +137,11 @@ class LiveSource:
             self._img_by_key[key] = list(streams or [])
         self._push_img_subscribe(force=True)
 
+    def set_tx_profile(self, profile):
+        with self._lock:
+            self._tx_profile = dict(profile or {})
+        self._push_img_subscribe(force=True)
+
     def clear_img_key(self, key):
         with self._lock:
             self._img_by_key.pop(key, None)
@@ -149,6 +155,7 @@ class LiveSource:
             streams = self._streams_locked()
             selected = self._target or self._selected
             robots = dict(self.robots)
+            caps = dict(self._tx_profile)
         if not selected:
             return
         info = robots.get(selected)
@@ -156,7 +163,7 @@ class LiveSource:
             return
         if now - info["last"] > BEACON_STALE_S:
             return
-        self.client.img_subscribe(info["ip"], info["control"], streams)
+        self.client.img_subscribe(info["ip"], info["control"], streams, **caps)
         self._last_img_sub = now
 
     def _streams_locked(self):
