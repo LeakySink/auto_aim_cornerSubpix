@@ -3,6 +3,9 @@ import { featureStatus, getJson, postJson, startFeature, stopFeature } from "../
 import { useSSE } from "../../shared/useSSE";
 import { useInstance } from "../../shared/instance";
 import { DebugWorkbench, type DataBus } from "../../shared/DebugWorkbench";
+import { markersFromFlatEkf, parseMarkerArray } from "./markerTypes";
+
+const NESTED_SKIP = new Set(["markers", "frames", "tf", "ts", "_from", "type", "hb"]);
 
 function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: { current: number | null }) {
   if (!bus) return;
@@ -12,8 +15,22 @@ function handleEvent(bus: DataBus | null, msg: Record<string, unknown>, t0Ref: {
     const ts = Number(msg.ts || data.ts || 0);
     if (!t0Ref.current && ts) t0Ref.current = ts;
     const t = t0Ref.current ? (ts - t0Ref.current) / 1e9 : 0;
+
+    if (data.markers_reset === true) bus.resetMarkers();
+
+    const parsed = parseMarkerArray(data.markers);
+    if (parsed) {
+      bus.setMarkers(parsed);
+    } else if (!data.markers) {
+      const fallback = markersFromFlatEkf(data);
+      if (fallback) bus.setMarkers(fallback);
+    }
+
+    if (data.frames) bus.setFrames(data.frames);
+    if (data.tf) bus.setTf(data.tf);
+
     for (const [k, v] of Object.entries(data)) {
-      if (k === "ts" || k === "_from" || k === "type" || k === "hb") continue;
+      if (NESTED_SKIP.has(k) || k === "markers_reset") continue;
       if (typeof v === "number") bus.addPoint(k, t, v);
     }
     return;

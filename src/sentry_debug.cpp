@@ -11,6 +11,7 @@
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -168,6 +169,8 @@ int main(int argc, char * argv[])
       data["nis_fail"] = target.ekf().data.at("nis_fail");
       data["nees_fail"] = target.ekf().data.at("nees_fail");
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
+
+      data["markers"] = tools::viz::kalman_markers(target);
     }
 
     // 云台响应情况

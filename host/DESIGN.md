@@ -95,12 +95,17 @@ host/
 
 Hub:
   Feature watch → LiveSource → /api/i/<id>/events (SSE)
+             → plot 数字 → DebugWorkbench 曲线
+             → plot.markers → DataBus.setMarkers → MarkerScene（按 ns 图层 / display_frame）
+             → plot.tf / plot.frames → FrameStore（跨系预留）
   Feature calibrate → LiveSource + calib_cmd → /api/i/<id>/events|/calib
   Feature tfviz → LiveSource → SSE plot.tf → 3D 相机/世界系
   Feature replay → session → /api/i/<id>/meta|/frame
   Feature dump → dump_rlog 后台 job
   Feature netcheck → discover/echo/ping workers
 ```
+
+扩展 Watch 3D：定义在 `tools/rdbg/markers/`（`MarkerArray`）；业务转换在 task（如 `kalman_markers`）；`src` debug 调用后写入 `plot.markers`。前端按 `ns` 通用渲染，一般无需改 UI。
 
 `python -m rdbg watch|calibrate|replay` 也进入同一 Hub（打开门户首页）。
 

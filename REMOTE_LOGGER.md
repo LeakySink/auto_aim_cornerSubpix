@@ -18,7 +18,7 @@ plot / log / plot_image     对外 API（tools/remote_logger.hpp）
 host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
 
 支持五种数据：
-- **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化
+- **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化；JSON 内可嵌套 **`markers`**（Watch 3D，见下），仍算同一种 plot 传输
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
 - **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker resize 后 JPEG；`.rlog` 照写；**UDP 仅在 host `img_subscribe` 了该 `meta.name` 时**，以 ≤1200B 的 `0xFE` 分片发给队首
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
@@ -199,3 +199,49 @@ plot/log → var_buf  ───────────────────�
 | `ctrl_worker` | `control`：beacon、队列、队首超时 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。
+
+## 3D Markers（Watch）
+
+Watch 工作台可显示通用 3D Marker（类 ROS Marker 精简版）。**不是**新 UDP 类型：仍放进 `plot(json)` 的保留键 `markers`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md) 的 `plot.markers`。
+
+**分层：**
+
+| 层 | 路径 | 职责 |
+|----|------|------|
+| 定义 | [`tools/rdbg/markers/viz_markers.hpp`](tools/rdbg/markers/viz_markers.hpp) | `MarkerArray` 结构 / `to_json`；rdbg **不依赖**业务 |
+| 转换 | 各 task（如 [`tasks/auto_aim/kalman_markers.hpp`](tasks/auto_aim/kalman_markers.hpp)） | 领域状态 → markers |
+| 调用 | `src/*_debug` 等 | `plot` 时挂上 `data["markers"]` |
+
+### 快速用法
+
+```cpp
+#include "tools/rdbg/markers/viz_markers.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"  // 自瞄：Target → markers
+
+nlohmann::json data;
+data["x"] = 1.2;   // 扁平字段 → Watch 曲线
+data["vx"] = 0.3;
+
+// 手写 MarkerArray（frame_id 可选，默认 "world"）
+tools::viz::MarkerArray arr;
+arr.sphere("demo.point", "p0", {1, 0, 0.5}, 0.05);
+arr.arrow("demo.vel", "v0", {1, 0, 0.5}, {0.2, 0, 0}, 0.3);
+data["markers"] = arr.to_json();
+
+// 或自瞄 EKF（ns: kalman.center / kalman.vel / kalman.armor / kalman.spin）
+// data["markers"] = tools::viz::kalman_markers(target);
+
+tools::RemoteLogger::instance().plot(data);
+```
+
+### 约定摘要
+
+| 项 | 说明 |
+|----|------|
+| `schema` | `"marker_v1"` |
+| `frame_id` | 可选，默认 `"world"`；单条 Marker 可覆盖 |
+| `ns` | 图层名（必填）；Watch 侧可单独开关；同 `ns` 整组替换合并 |
+| 图元 | `sphere` / `arrow` / `box` / `line_list`（`axes` 预留） |
+| 可选 `frames` / `tf` | 同包可附坐标系；Watch `FrameStore` 用于以后跨系显示 |
+
+新业务 3D：在对应 task 写转换助手填不同 `ns`，前端一般不用改。

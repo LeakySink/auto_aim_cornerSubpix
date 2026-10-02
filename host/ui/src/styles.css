@@ -735,6 +735,43 @@ p.err-text { margin: 0 0 12px; }
   width: 100% !important;
   height: 100% !important;
 }
+.marker-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--canvas, #111217);
+}
+.marker-canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+.marker-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+.marker-hud {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  font-size: 11px;
+  pointer-events: none;
+}
+.marker-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: 13px;
+}
 .tfviz-bottom {
   display: grid;
   grid-template-columns: 1fr 1fr;

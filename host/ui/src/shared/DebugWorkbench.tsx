@@ -9,6 +9,16 @@ import {
 } from "chart.js";
 import zoomPlugin from "chartjs-plugin-zoom";
 import Hammer from "hammerjs";
+import { FrameStore } from "../features/watch/FrameStore";
+import { MarkerScene, projectMarkers } from "../features/watch/MarkerScene";
+import {
+  flattenCache,
+  listNamespaces,
+  mergeMarkers,
+  parseMarkerArray,
+  type MarkerArrayPayload,
+  type MarkerCache,
+} from "../features/watch/markerTypes";
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, Legend, zoomPlugin);
 (window as unknown as { Hammer: typeof Hammer }).Hammer = Hammer;
@@ -18,6 +28,10 @@ export type DataBus = {
   addLog: (level: string, msg: string, ts?: number) => void;
   setImage: (name: string, objectUrl: string) => void;
   setStreams: (names: string[]) => void;
+  setMarkers: (arr: MarkerArrayPayload) => void;
+  setFrames: (frames: unknown) => void;
+  setTf: (tf: unknown) => void;
+  resetMarkers: () => void;
   loadReplay: (
     series: Record<string, [number, number][]>,
     logs: { t: number; ts?: number; level: string; msg: string }[],
@@ -27,12 +41,13 @@ export type DataBus = {
   resetView: () => void;
 };
 
-type PanelKind = "plot" | "log" | "image";
+type PanelKind = "plot" | "log" | "image" | "3d";
 type PanelState = { kind: PanelKind; imgSel: string };
 type LogLine = { level: string; msg: string; ts?: number; t?: number };
 type ViewMode = "sliding" | "centered" | "paused";
 
 const COLORS = ["#4fc3f7", "#ffb74d", "#81c784", "#e57373", "#ba68c8", "#4dd0e1", "#fff176", "#a1887f"];
+const DEFAULT_LAYER_OFF = new Set(["kalman.spin"]);
 
 function fillEmptyImgSels(panels: PanelState[], fallback: string): PanelState[] {
   if (!fallback) return panels;
@@ -43,6 +58,22 @@ function fillEmptyImgSels(panels: PanelState[], fallback: string): PanelState[] 
     return { ...p, imgSel: fallback };
   });
   return changed ? next : panels;
+}
+
+function ensure3dPanel(panels: PanelState[]): PanelState[] {
+  if (panels.some((p) => p.kind === "3d")) return panels;
+  if (panels.length < 6) return [...panels, { kind: "3d", imgSel: "" }];
+  const next = [...panels];
+  // Prefer replacing last non-plot pane; else last pane.
+  let idx = next.length - 1;
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (next[i].kind !== "plot") {
+      idx = i;
+      break;
+    }
+  }
+  next[idx] = { kind: "3d", imgSel: "" };
+  return next;
 }
 
 function normLevel(lv: string) {
@@ -87,6 +118,11 @@ export function DebugWorkbench({
   const [images, setImages] = useState<Record<string, string>>({});
   const [streams, setStreams] = useState<string[]>([]);
   const [manual, setManual] = useState(false);
+  const [markerCache, setMarkerCache] = useState<MarkerCache>(() => new Map());
+  const [layerOn, setLayerOn] = useState<Record<string, boolean>>({});
+  const [displayFrame, setDisplayFrame] = useState("world");
+  const [frameTick, setFrameTick] = useState(0);
+  const [skippedCount, setSkippedCount] = useState(0);
   const kinds = panels.map((p) => p.kind);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -100,6 +136,10 @@ export function DebugWorkbench({
   const logBuf = useRef<LogLine[]>([]);
   const imgBuf = useRef<Record<string, string>>({});
   const streamBuf = useRef<string[]>([]);
+  const markerBuf = useRef<MarkerArrayPayload[]>([]);
+  const markersResetBuf = useRef(false);
+  const frameStoreRef = useRef(new FrameStore());
+  const auto3dDone = useRef(false);
   const chartDirty = useRef(false);
   const rafRef = useRef(0);
   const replayRef = useRef(replay);
@@ -182,6 +222,35 @@ export function DebugWorkbench({
         return [...s].sort();
       });
       setPanels((prev) => fillEmptyImgSels(prev, list[0] || ""));
+    }
+    if (markersResetBuf.current) {
+      markersResetBuf.current = false;
+      markerBuf.current = [];
+      setMarkerCache(new Map());
+      setLayerOn({});
+      setSkippedCount(0);
+      auto3dDone.current = false;
+    } else if (markerBuf.current.length) {
+      const batch = markerBuf.current;
+      markerBuf.current = [];
+      setMarkerCache((prev) => {
+        let next = prev;
+        for (const arr of batch) next = mergeMarkers(next, arr);
+        return new Map(next);
+      });
+      setLayerOn((prev) => {
+        const n = { ...prev };
+        for (const arr of batch) {
+          for (const it of arr.items) {
+            if (n[it.ns] === undefined) n[it.ns] = !DEFAULT_LAYER_OFF.has(it.ns);
+          }
+        }
+        return n;
+      });
+      if (!auto3dDone.current) {
+        auto3dDone.current = true;
+        setPanels((p) => ensure3dPanel(p));
+      }
     }
   }, [syncChart]);
 
@@ -382,6 +451,22 @@ export function DebugWorkbench({
         streamBuf.current.push(...names);
         schedule();
       },
+      setMarkers(arr) {
+        markerBuf.current.push(arr);
+        schedule();
+      },
+      setFrames(frames) {
+        frameStoreRef.current.ingestFrames(frames);
+        setFrameTick((t) => t + 1);
+      },
+      setTf(tf) {
+        frameStoreRef.current.ingestTf(tf);
+        setFrameTick((t) => t + 1);
+      },
+      resetMarkers() {
+        markersResetBuf.current = true;
+        schedule();
+      },
       loadReplay(series, logs, duration) {
         const nextSeries: Record<string, { x: number; y: number }[]> = {};
         const nextFields = { ...fieldsRef.current };
@@ -416,6 +501,15 @@ export function DebugWorkbench({
         lastX.current = 0;
         logBuf.current = [];
         chartDirty.current = false;
+        markerBuf.current = [];
+        markersResetBuf.current = false;
+        frameStoreRef.current.clear();
+        setMarkerCache(new Map());
+        setLayerOn({});
+        setSkippedCount(0);
+        setDisplayFrame("world");
+        setFrameTick((t) => t + 1);
+        auto3dDone.current = false;
         Object.values(imgBuf.current).forEach((u) => {
           if (u.startsWith("blob:")) URL.revokeObjectURL(u);
         });
@@ -495,6 +589,73 @@ export function DebugWorkbench({
                 </label>
               ))}
             </div>
+            {kinds.includes("3d") && (
+              <div className="side-sec">
+                <div className="side-h">3D 显示系</div>
+                <select value={displayFrame} onChange={(e) => setDisplayFrame(e.target.value)}>
+                  {[
+                    ...new Set([
+                      "world",
+                      displayFrame,
+                      ...frameStoreRef.current.knownFrames(),
+                      ...listNamespaces(markerCache).flatMap((ns) => {
+                        const layer = markerCache.get(ns);
+                        return layer ? [layer.frame_id] : [];
+                      }),
+                    ]),
+                  ]
+                    .filter(Boolean)
+                    .sort()
+                    .map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                </select>
+                <div className="side-h" style={{ marginTop: 8 }}>
+                  3D 图层
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ marginLeft: 8, fontSize: 11 }}
+                    onClick={() =>
+                      setLayerOn((prev) => {
+                        const n: Record<string, boolean> = {};
+                        for (const k of Object.keys(prev)) n[k] = true;
+                        return n;
+                      })
+                    }
+                  >
+                    全开
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ marginLeft: 4, fontSize: 11 }}
+                    onClick={() =>
+                      setLayerOn((prev) => {
+                        const n: Record<string, boolean> = {};
+                        for (const k of Object.keys(prev)) n[k] = false;
+                        return n;
+                      })
+                    }
+                  >
+                    全关
+                  </button>
+                </div>
+                {listNamespaces(markerCache).length === 0 && <span className="muted">等待 markers…</span>}
+                {listNamespaces(markerCache).map((ns) => (
+                  <label key={ns} className="field-row">
+                    <input
+                      type="checkbox"
+                      checked={layerOn[ns] !== false}
+                      onChange={(e) => setLayerOn((prev) => ({ ...prev, [ns]: e.target.checked }))}
+                    />
+                    {ns}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </aside>
@@ -525,6 +686,7 @@ export function DebugWorkbench({
                   <option value="plot">绘图</option>
                   <option value="log">日志</option>
                   <option value="image">图像</option>
+                  <option value="3d">3D</option>
                 </select>
                 <button
                   type="button"
@@ -609,6 +771,17 @@ export function DebugWorkbench({
                     }
                   />
                 )}
+                {k === "3d" && (
+                  <Marker3dPane
+                    cache={markerCache}
+                    layerOn={layerOn}
+                    displayFrame={displayFrame}
+                    frameStore={frameStoreRef.current}
+                    frameTick={frameTick}
+                    onSkipped={setSkippedCount}
+                    skippedCount={skippedCount}
+                  />
+                )}
               </div>
             </div>
           );
@@ -616,6 +789,37 @@ export function DebugWorkbench({
       </div>
     </div>
   );
+}
+
+function Marker3dPane({
+  cache,
+  layerOn,
+  displayFrame,
+  frameStore,
+  frameTick,
+  onSkipped,
+  skippedCount,
+}: {
+  cache: MarkerCache;
+  layerOn: Record<string, boolean>;
+  displayFrame: string;
+  frameStore: FrameStore;
+  frameTick: number;
+  onSkipped: (n: number) => void;
+  skippedCount: number;
+}) {
+  const projected = useMemo(() => {
+    const enabled = flattenCache(cache).filter((m) => layerOn[m.ns] !== false);
+    return projectMarkers(enabled, displayFrame, frameStore);
+    // frameTick forces recompute when FrameStore mutates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cache, layerOn, displayFrame, frameTick, frameStore]);
+
+  useEffect(() => {
+    onSkipped(projected.skipped);
+  }, [projected.skipped, onSkipped]);
+
+  return <MarkerScene items={projected.drawn} skippedCount={skippedCount} />;
 }
 
 function LogPane({

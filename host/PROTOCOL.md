@@ -209,6 +209,52 @@ frag n: [chunk...]
 
 心跳间隔 `heartbeat_interval_ms`（默认 500）。host 侧仍丢弃带 `"hb"` 的 JSON，只当链路活着。
 
+### plot.markers（marker_v1）
+
+Watch 3D 用。仍走普通 plot JSON（Host 发射后仍是 `type:"plot"`），**不是**独立 UDP/SSE 类型。
+
+```json
+{
+  "ts": 123, "_from": "sentry",
+  "x": 1.0, "vx": 0.1,
+  "markers": {
+    "schema": "marker_v1",
+    "frame_id": "world",
+    "items": [
+      {
+        "ns": "kalman.center", "id": "c", "type": "sphere",
+        "pose": { "p": [1, 0, 0.5], "q": [1, 0, 0, 0] },
+        "scale": [0.04, 0.04, 0.04],
+        "color": [1, 0.45, 0.1, 1]
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 约束 |
+|------|------|
+| `schema` | 必须为 `"marker_v1"`；否则 Watch 忽略 `markers`（曲线字段照常） |
+| `frame_id` | **可选**，默认 `"world"`；空串按默认 |
+| `items` | 数组；可空 |
+| `ns` / `id` / `type` | 单条必填；`ns` 为图层键 |
+| 单条 `frame_id` | 可选；缺省继承 array；再缺省 `"world"` |
+| `pose.p` / `pose.q` | 米；四元数 Eigen `(w,x,y,z)` |
+| `dir` / `shaft_len` | `arrow` |
+| `points` | `line_list`，成对点 |
+| `scale` / `color` | 随 type；RGBA 0–1 |
+
+图元：`sphere`、`arrow`、`box`、`line_list`（`axes` 预留）。未知 `type` 跳过该条。
+
+**合并：** Watch 按 `ns` 缓存；本包出现的每个 `ns` 整组替换；未出现的 ns 保留（多发布者可交错）。根字段 `markers_reset: true` 可清空缓存。
+
+**可选同包：**
+
+- `frames`: `{ "gimbal": { "parent":"world", "R":[9], "t":[3] }, ... }`（child→parent）
+- `tf`: 与 TF Viz 相同的外参包；Watch 可 ingest 进 FrameStore
+
+车端 API：定义 [`tools/rdbg/markers/viz_markers.hpp`](../tools/rdbg/markers/viz_markers.hpp)；自瞄转换 [`tasks/auto_aim/kalman_markers.hpp`](../tasks/auto_aim/kalman_markers.hpp)。用法见 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+
 **仅队首 → 车 `:15000`**
 
 ```json
