@@ -65,6 +65,8 @@ TF Viz：首页「功能 → TF Viz」在无 `app=tfviz` 发布者时，本机�
 - 打开 Watch / TF Viz 时先选一辆车（TF Viz 也可由功能入口自动拉起本机 `tf_pub_test` 后再绑定）。Host 给每辆车分配不同的空闲 UDP 口（从 15001 起），这辆车的数据只打到那个口。同一辆车的多个 Watch 共用该口；最后一个关掉后才释放。
 - 首页「车辆」按 beacon `app` 打开：`calibrate` → 标定页，`tfviz` → TF Viz，其余（含缺省 `normal`）→ Watch。
 - **Watch 3D**：工作台面板可选「3D」。车端 `plot` 带合法 `markers`（`marker_v1`）时会**自动插入**一格 3D。侧栏可按 `ns` 开关图层（如关掉 `kalman.vel`）、选择 `display_frame`（默认 `world`）。与 TF Viz 分工：Watch = 通用 Marker；TF Viz = 相机/枪管外参专用页。协议见 `PROTOCOL.md` / `REMOTE_LOGGER.md`。
+- **Watch 录制**：工具栏「录制」把当前 SSE 流异步写入本机 `.rlog`（RLG2）；「停止录制」后可一键 **打开 Replay**。与车上 `enable_local` 的 `.rlog` 独立；不增加车端负载。
+- **Watch 远程画质**：下拉 **画质优先 / 均衡 / 流畅优先** 通过 `img_subscribe` 下发 `max_width` 等上限；弱网时车上还会自适应 `img_tx_level`（0–3）。标题栏显示 **cam / loop / tx / L***（来自车上诊断 plot）。本地回放/Dump 仍读 yaml 画质的那路 `.rlog`。
 - **TF Viz**：`tf_pub_test` beacon `app=tfviz`。首页「功能」打开时若网上无发布者，Hub 本机 spawn `build/tf_pub_test`，配置解析顺序：`config_path` → `RDBG_TF_PUB_CONFIG` → **`configs/tf_pub.yaml`**；文件不存在则拉起失败。侧栏展示 config 路径名与外参（`plot.tf`）。手工联调：`./build/tf_pub_test configs/xxx.yaml`。
 - Replay：在页面输入 `.rlog` 绝对/相对路径后点「加载」。
 - Dump：导出目录含 `log.txt` / `plot.txt` / `images.mp4`。

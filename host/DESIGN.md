@@ -78,7 +78,7 @@ host/
 | 层 | 职责 | 禁止 |
 |---|---|---|
 | `net/` | UDP 字节 ↔ JSON 事件 | 不知道 HTTP |
-| `log/` | 文件字节 ↔ 会话 dict | 不知道浏览器 |
+| `log/` | 文件字节 ↔ 会话 dict；`writer.RlogWriter` / `recorder.LiveRecorder` | 不知道浏览器 |
 | `http/` | 端口、路由、静态、SSE | 不知道 plot 语义 |
 | `features/` | 功能线程 + `/api/<id>` | 不改 SPA 构建 |
 | `ui/` | 门户与 Feature 页 | 不直接碰 UDP |
@@ -90,12 +90,13 @@ host/
 
 ```
 车上 RemoteLogger
-  plot/log  → JSON UDP
-  plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片
+  plot/log  → disk-first 入队 .rlog，再 MSG_DONTWAIT JSON UDP
+  plot_image → yaml JPEG → .rlog；订阅流另路远程 JPEG（0xFE 分片，可自适应档位）
 
 Hub:
   Feature watch → LiveSource → /api/i/<id>/events (SSE)
-             → plot 数字 → DebugWorkbench 曲线
+             → LiveRecorder（可选）→ RlogWriter 本机 .rlog
+             → plot 数字 → DebugWorkbench 曲线（含 cam_fps / loop_fps / img_tx_*）
              → plot.markers → DataBus.setMarkers → MarkerScene（按 ns 图层 / display_frame）
              → plot.tf / plot.frames → FrameStore（跨系预留）
   Feature calibrate → LiveSource + calib_cmd → /api/i/<id>/events|/calib
@@ -282,6 +283,20 @@ summarize(path) -> (n_json, n_img, sender_name)
 
 Magic：v1 `0x524C4F47`（仅 JSON），v2 `0x32474C52`（`RLG2`）。v2：`type 0x00` json，`0x01` image。截断则打印 stderr 并停止。文件格式细节见 `REMOTE_LOGGER.md`。
 
+### 4.7a `rdbg.log.writer` / `rdbg.log.recorder`
+
+Watch **Host 侧录制**（与车上 `session` 无关）：
+
+```python
+RlogWriter(path)          # 追加 RLG2；close() 刷盘
+LiveRecorder()            # 实现 fan 订阅；bounded queue(512)，满则丢最旧
+LiveRecorder.start(path)  # 后台线程写 writer
+LiveRecorder.stop()       # join + close，返回 path
+LiveRecorder.status()     # recording / path / n_json / n_img / dropped / elapsed_s
+```
+
+`WatchFeature`：`POST/GET …/record/*` 把 `LiveRecorder` 挂到该车 `fleet` fan 的 `subs`，tap 与 SSE 相同的 JSON 行。默认路径见 `recorder.default_record_path(sender)`。
+
 ### 4.7b `rdbg.log.dump`
 
 ```python
@@ -323,6 +338,7 @@ load_session_or_exit(path, max_bytes=...)  # 失败 SystemExit 1/2
 
 - 不注册 HTML 页。Hub 的 Watch Feature 自己挂 `/api/watch/events`、`/api/watch/select`。
 - `attach()` 仍提供旧路径：`GET /events`、`GET /select?sender=`、`GET /img_subscribe`（给仍直接调用 `attach` 的代码）。
+- `set_tx_profile({max_width, …})` 与 `img_subscribe` 一并推到车；节流约 1s（`force` 立即）。
 - 听 beacon；向每辆在线车 `register`；队首 `head_alive`，follower `subscribe`
 - 3s 无 beacon 的车从 `senders` 拿掉，不清车上队列
 

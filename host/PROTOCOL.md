@@ -198,8 +198,19 @@ frag n: [chunk...]
 **按需发图**：无人订阅时车不发图像 UDP（仍可写 `.rlog`）。host → 车：
 
 ```json
-{"v":1,"type":"img_subscribe","host_id":"...","peer_port":15100,"streams":["reprojection"]}
+{"v":1,"type":"img_subscribe","host_id":"...","peer_port":15100,"streams":["reprojection"],
+ "max_width":480,"max_quality":40,"max_fps":20,"max_level":1}
 ```
+
+可选 **`max_width` / `max_quality` / `max_fps` / `max_level`**（整数）：远程 JPEG 上限，与车上自适应档位叠加（`max_level`≥0 表示至少降到该档）。本地 `.rlog` 仍只用 yaml `img_width`/`img_quality`。HTTP 侧见 [`API.md`](API.md) `GET …/img_subscribe?streams=&max_*`。
+
+等价调试指令（队首已 `register`，`type=json` 的 `data`）：
+
+```json
+{"cmd":"set_img_tx","max_width":480,"max_quality":40,"max_fps":20,"level":1}
+```
+
+车端控制面收到后立即更新上限（不必等业务 `poll_json`）；业务侧 `io::RemoteDebug::poll()` 也会处理同形 JSON。
 
 `streams: []` 表示该 host 退订。车对队列内各 host 的订阅取并集；出队时清掉该 host 的订阅。ack：
 
@@ -208,6 +219,21 @@ frag n: [chunk...]
 ```
 
 心跳间隔 `heartbeat_interval_ms`（默认 500）。host 侧仍丢弃带 `"hb"` 的 JSON，只当链路活着。
+
+**远程 JPEG 档位 0–3**（仅 UDP；本地 `.rlog` 始终 yaml）：
+
+| level | 典型宽×质×fps（相对 yaml 封顶） |
+|-------|----------------------------------|
+| 0 | yaml 宽/质，30fps |
+| 1 | ≤480×≤40，20fps |
+| 2 | ≤320×≤30，15fps |
+| 3 | ≤320×≤25，10fps |
+
+车上按 **1s 窗口**统计非阻塞发送成败自适应升降档；Host `max_*` / `max_level` 再封顶。与 yaml 参数相同时只编码一次 JPEG。实现细节见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+
+**数据面非阻塞**：车向队首 `sendto`/`sendmsg` 使用 `MSG_DONTWAIT`；缓冲满或弱网时 **丢远程包**，不阻塞本地 `.rlog`（disk-first 入队）。
+
+**诊断 plot 键（~1Hz，普通 plot JSON）**：`cam_fps`、`loop_fps`（主循环）、`img_tx_fps`、`img_tx_level`（远程出图）。来源 `io::FpsMeter` / `io::RemoteDebug`，**不是** CAN Command。字段说明见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md) §诊断曲线。
 
 ### plot.markers（marker_v1）
 

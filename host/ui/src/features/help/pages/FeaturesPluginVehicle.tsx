@@ -29,7 +29,7 @@ export function FeaturesPage() {
               title: "Watch",
               tag: "绑车",
               meta: "主战场",
-              body: "曲线、日志、图像；工作台可加 3D 面板。收到合法 markers 时自动插一格 3D。侧栏按 ns 开关图层，选 display_frame（默认 world）。",
+              body: "曲线、日志、图像；工具栏录制（Host RLG2）、画质/流畅档、cam·loop·tx·L FPS。3D 见 marker_v1。",
             },
             {
               title: "Calibrate",
@@ -157,7 +157,7 @@ export function PluginPage() {
         <MiniTable
           headers={["id", "绑车", "典型 API / 行为"]}
           rows={[
-            ["`watch` / `calibrate`", "是", "status · layout · image_sub · SSE；标定另有 calib_cmd"],
+            ["`watch` / `calibrate`", "是", "SSE · img_subscribe · record/*；标定另有 calib_cmd"],
             ["`tfviz`", "是", "TF 树 + 场景；可选 spawn tf_pub_test"],
             ["`replay`", "否", "加载本地 .rlog"],
             ["`dump`", "否", "导出 txt / mp4"],
@@ -224,8 +224,9 @@ rl.shutdown();`}
             ["`init(Config|path)`", "读配置、起 worker、可选开 beacon"],
             ["`plot(json)`", "标量/嵌套 JSON → UDP(队首) + .rlog；可含 markers/tf"],
             ["`log(level, fmt, …)`", "stderr + 远程；fmt；level 决定落盘优先级"],
-            ["`plot_image(Mat, meta)`", "按 meta.name ~30fps 选帧 → JPEG；UDP 仅已订阅流"],
-            ["`poll_json(json&)`", "消费 Host 下行 type=json"],
+            ["`plot_image(Mat, meta)`", "选帧 → yaml JPEG 落盘；UDP 远程档（可双编码）"],
+            ["`apply_tx_cap(...)`", "远程 JPEG 上限；本地 .rlog 不变"],
+            ["`poll_json(json&)`", "消费 Host 下行 type=json（含 set_img_tx）"],
             ["`poll_calib_cmd(string&)`", "旧标定指令，兼容保留"],
             ["`shutdown()`", "停远程、冲刷落盘"],
           ]}
@@ -252,7 +253,7 @@ rl.shutdown();`}
             {
               title: "plot_image",
               tag: "img",
-              body: "主线程相位锁选帧；clone 进深 1 邮箱；img_worker JPEG。未订阅不发 UDP；.rlog 仍可写。",
+              body: "选帧 → 邮箱；yaml JPEG 先落盘；订阅流再非阻塞 UDP（档位 0–3 自适应）。",
             },
             {
               title: "heartbeat",
@@ -285,9 +286,9 @@ rl.shutdown();`}
         <MiniTable
           headers={["线程", "职责"]}
           rows={[
-            ["`var_worker`", "JSON：先 UDP，再入落盘队列"],
-            ["`img_worker`", "邮箱 → JPEG → 先 UDP（订阅）→ 落盘队列"],
-            ["`disk_worker`", "写 RLG2；可落后；满则丢低优先级"],
+            ["`var_worker`", "JSON：先入落盘队列，再 MSG_DONTWAIT UDP"],
+            ["`img_worker`", "邮箱 → yaml/远程 JPEG → 先入队 → 非阻塞 UDP"],
+            ["`disk_worker`", "写 RLG2；队列≤1024；满则丢低优先级"],
             ["`ctrl_worker`", "beacon、host 队列、队首超时（enable_remote）"],
           ]}
         />
@@ -312,7 +313,7 @@ rl.shutdown();`}
             },
             {
               title: "编码发送",
-              body: "resize 到 img_width → JPEG(img_quality) → 0xFE 分片 ≤1200B 给队首（仅订阅流）。",
+              body: "本地 yaml 宽/质写 .rlog；远程按档位+Host max_* UDP 分片（见 PROTOCOL §5）。",
             },
             {
               title: "落盘",

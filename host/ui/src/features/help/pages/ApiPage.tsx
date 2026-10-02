@@ -73,7 +73,9 @@ export function ApiPage() {
             ["POST", "`/bind`", "`{ sender }`；Watch 不可换绑"],
             ["GET", "`/state`", "status + senders + selected"],
             ["GET", "`/select?sender=`", "允许 rebind 时换车"],
-            ["GET", "`/img_subscribe?streams=`", "仅 Watch；逗号分隔话题"],
+            ["GET", "`/img_subscribe?streams=`", "Watch；可选 max_width/quality/fps/level"],
+            ["POST", "`/record/start|stop`", "Watch Host 侧 RLG2 录制"],
+            ["GET", "`/record/status`", "recording · path · n_json/n_img"],
           ]}
         />
         <p className="hp-footnote">上表路径均相对 <code>/api/i/&lt;id&gt;</code>。标定另有 <code>/calib</code>、<code>/done</code>。</p>

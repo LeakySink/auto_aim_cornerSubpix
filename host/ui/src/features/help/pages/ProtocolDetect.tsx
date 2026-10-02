@@ -69,7 +69,8 @@ export function ProtocolPage() {
             ["`who`", "Host → :15999", "加速发现；车单播回一条等价 beacon"],
             ["`register`", "Host → 车", "入队；同 host_id 再注册只更新地址"],
             ["`head_alive`", "队首 → 车", "保活；超时出队并 promote"],
-            ["`img_subscribe`", "Host → 车", "声明要哪些图像话题"],
+            ["`img_subscribe`", "Host → 车", "图像话题 + 可选 max_width/quality/fps/level"],
+            ["`set_img_tx`", "Host → 车 json.data", "同上限；控制面立即生效"],
             ["`hb` / plot / log", "车 → 队首", "心跳与调试数据"],
             ["`subscribe`", "follower → 队首 peer", "后入调试机拉流"],
           ]}
@@ -88,7 +89,7 @@ export function ProtocolPage() {
           <Node title="队首 → SSE" sub="浏览器出图" accent="host" />
         </FlowRow>
         <Callout tone="info" title="为什么默认不推图">
-          省带宽。曲线/日志可一直走；图要你显式订阅。主线程还会按 ~30fps 相位选帧，未入选直接丢。
+          省带宽。曲线/日志可一直走；图要你显式订阅。UDP 非阻塞，弱网丢远程不降本地 .rlog；远程 JPEG 可自适应 0–3 档。档位表见 PROTOCOL.md §5。
         </Callout>
       </Section>
     </div>

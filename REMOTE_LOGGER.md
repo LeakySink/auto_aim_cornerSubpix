@@ -21,7 +21,7 @@ host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host
 支持五种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化；JSON 内可嵌套 **`markers`**（Watch 3D，见下），仍算同一种 plot 传输
 - **文本日志**：`log(level, fmt, args...)` — 同时输出终端 stderr + 远程 UDP，支持 fmt 格式
-- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker resize 后 JPEG；`.rlog` 照写；**UDP 仅在 host `img_subscribe` 了该 `meta.name` 时**，以 ≤1200B 的 `0xFE` 分片发给队首
+- **图像数据**：`plot_image(cv::Mat, meta)` — 主线程按采集时间相位锁定选 ~30fps（未入选直接 return）；worker JPEG；**本地 `.rlog` 始终用 yaml `img_width`/`img_quality`**；**UDP 仅在 host `img_subscribe` 了该 `meta.name` 时**，按远程自适应档位（见 §远程 JPEG）编码，≤1200B 的 `0xFE` 分片；与本地参数不同时 **双路编码**
 - **心跳**：配置 `heartbeat_interval_ms` 后自动发送
 - **远端下行 JSON**：host `send_json` → 车 `poll_json`（控制口 `type=json`）；旧 `calib_cmd` / `poll_calib_cmd` 仍可用
 
@@ -84,8 +84,8 @@ remote_logger:
 | `log_dir` | "./logs" | 本地日志目录 |
 | `var_buffer_size` | 1024 | 变量缓冲条数 |
 | `img_buffer_size` | 10 | yaml 兼容保留，图像侧不再使用深队列 |
-| `img_width` | 640 | 图像压缩宽度 |
-| `img_quality` | 50 | JPEG 质量 |
+| `img_width` | 640 | **本地 `.rlog`** 与 level 0 远程宽度的基准 |
+| `img_quality` | 50 | **本地 `.rlog`** JPEG 质量；远程可单独降档 |
 | `heartbeat_interval_ms` | 0 | 向队首发 `hb` 的间隔，0=关闭 |
 | `sender_name` | "" | 发送方名称（空=自动 `dev_xxxx`），多车必须唯一 |
 | `app` | `"normal"` | beacon 身份：`normal` 调试 / `calibrate` 标定 / `tfviz` TF Viz；host 门户按此开页 |
@@ -153,7 +153,13 @@ frag n: [chunk]
 
 单次 `init()` → `shutdown()` 写入同一个文件：`log_dir/run_<ts_ns>.rlog`。变量与图像交错追加。
 
-`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路，resize 到 `img_width` 后立刻 `release` 全分辨率，再 JPEG。**先** `sendmsg` 分片 UDP（仅已订阅流），**再**把记录丢进落盘队列。`disk_worker` 用 `writev` 异步写 `.rlog`，不挡住发送；队列超过 256 条则丢掉最旧的。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
+`plot_image` 按 `meta.name` 分路，每路独立对齐到 30Hz 网格。未入选的帧只比较时间戳后返回。入选帧 **clone 像素** 后按 name 放入深度 1 邮箱（每路在飞 1 张 + 等待最新 1 张），调用方可立即复用/改写原 `Mat`。`img_worker` 轮询各路：**先**按 yaml 编码并入 `disk_worker` 队列，**再**（若已订阅）按远程档位编码并 `MSG_DONTWAIT` 发 UDP；弱网时丢远程包，不拖 `.rlog`。`disk_worker` 用 `writev` 异步写 `.rlog`；`kDiskQueueMax=1024`，满则按优先级丢最旧（图像最低）。未订阅且关闭本地时，主线程不 clone。JPEG 跟不上时只覆盖该路等待槽。
+
+### 远程 JPEG（仅 UDP）
+
+档位 **0–3**（数字越大越省带宽）：由发送成败自适应升降；Host 还可通过 `img_subscribe` 的 `max_*` 或 `type=json` 的 `set_img_tx` 设上限（`apply_tx_cap`）。档位与 yaml 宽/质/fps 对照见 [`host/PROTOCOL.md`](host/PROTOCOL.md) §5。
+
+本地 `.rlog` **不受**远程档位影响，始终 yaml `img_width`/`img_quality`。
 
 回放：`./host/replay.sh logs/run_<ts_ns>.rlog`（与 `./host/watch.sh` 独立，不占用控制口）。
 
@@ -177,27 +183,29 @@ type 0x01 image:
 
 ## 线程模型
 
-四条后台路径。发送与落盘分开：`var_worker` / `img_worker` 先 UDP，`disk_worker` 延后写盘。
+四条后台路径。**disk-first**：`var_worker` / `img_worker` 先入 `disk_worker` 队列，再非阻塞 UDP（`MSG_DONTWAIT`）；发送失败只丢远程，不阻塞落盘。
 
-落盘可靠性：`disk_worker` 约每 1s `fdatasync`；`ERROR` 写后立刻 sync；队列满时优先丢图像、保留 WARN/ERROR；`shutdown()`（含析构）先排空队列再强制 sync。`kill -9`/掉电仍可能丢最近约 1s。
+数据面 UDP 一律非阻塞；队首 socket 满或链路差时丢包，由远程 JPEG 自适应降档。
+
+落盘可靠性：`disk_worker` 约每 1s `fdatasync`；`ERROR` 写后立刻 sync；队列满（1024）时优先丢图像、保留 WARN/ERROR；`shutdown()`（含析构）先排空队列再强制 sync。`kill -9`/掉电仍可能丢最近约 1s。
 
 ```
 主线程                         img_worker             var_worker        disk_worker
 ──────                         ──────────             ──────────        ───────────
 plot_image
   按 name 未到 30Hz → return
-  入选 → clone → mailbox(1) ──► JPEG → UDP（订阅才发）
-                               └──────────────► 队列 → .rlog
-plot/log → var_buf  ──────────────────────────► UDP
-                               └──────────────► 队列 → .rlog
+  入选 → clone → mailbox(1) ──► yaml JPEG → 队列 ──► .rlog
+                               └─ tx JPEG → UDP（订阅；可丢）
+plot/log → var_buf  ──────────► 队列 → .rlog
+                               └─ UDP（非阻塞；可丢）
 ```
 
 | 线程 | 职责 | 唤醒 |
 |------|------|------|
-| `var_worker` | JSON → 先 UDP，再入落盘队列 | `plot()` notify；空闲 poll 50ms |
-| `img_worker` | 邮箱 → JPEG → 先 UDP，再入落盘队列 | 入选帧 publish；空闲 poll 50ms |
-| `disk_worker` | 队列 → `.rlog`（可落后，满则丢最旧） | 入队 notify |
-| `ctrl_worker` | `control`：beacon、队列、队首超时 | 独立轮询 200ms（`enable_remote` 时启动） |
+| `var_worker` | JSON → **先入落盘队列**，再非阻塞 UDP | `plot()` notify；空闲 poll 50ms |
+| `img_worker` | 邮箱 → yaml/远程 JPEG → **先入队**，再非阻塞 UDP | 入选帧 publish；空闲 poll 50ms |
+| `disk_worker` | 队列 → `.rlog`（可落后；`kDiskQueueMax=1024`） | 入队 notify |
+| `ctrl_worker` | `control`：beacon、队列、队首超时、`img_subscribe`/`set_img_tx` 上限 | 独立轮询 200ms（`enable_remote` 时启动） |
 
 150fps+ 热路径：未入选帧无拷贝。入选帧 clone 后入邮箱，避免异步 JPEG 读到被覆盖的像素。每路保存间隔为 `33.3ms ± 一帧相机周期`。不同 `meta.name` 互不影响。
 
@@ -246,3 +254,16 @@ tools::RemoteLogger::instance().plot(data);
 | 可选 `frames` / `tf` | 同包可附坐标系；Watch `FrameStore` 用于以后跨系显示 |
 
 新业务 3D：在对应 task 写转换助手填不同 `ns`，前端一般不用改。
+
+## 诊断曲线（~1Hz）
+
+车上经 `plot(json)` 上报（Watch 可画曲线；**不是**电控 CAN Command）：
+
+| 键 | 来源 | 含义 |
+|----|------|------|
+| `cam_fps` | 主循环 + `io::FpsMeter`（如相机） | 采集帧率 |
+| `loop_fps` | `io::RemoteDebug::on_frame()` | 主循环帧率 |
+| `img_tx_fps` | `img_worker` 成功发出远程 JPEG 计数 | 远程出图 fps |
+| `img_tx_level` | 远程自适应档位 0–3 | 与 `img_subscribe`/`set_img_tx` 上限叠加 |
+
+主循环应调用 `io::RemoteDebug::poll()`（消费 `set_img_tx`）与 `on_frame(cam_fps)`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。

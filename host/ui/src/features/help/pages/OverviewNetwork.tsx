@@ -115,7 +115,8 @@ export function NetworkPage() {
             <ul>
               <li>一直广播 beacon → LAN <code>:15999</code></li>
               <li>控制口默认 <code>:15000</code> 收 register / img_subscribe / head_alive</li>
-              <li>数据只向<strong>队首</strong>单播一份（plot / log / 图 / hb）</li>
+              <li>数据只向<strong>队首</strong>单播一份（plot / log / 图 / hb）；UDP 非阻塞，弱网可丢远程</li>
+              <li>本地 .rlog disk-first，不随 UDP 阻塞</li>
               <li>维护 host_id FIFO 队列</li>
             </ul>
           </div>

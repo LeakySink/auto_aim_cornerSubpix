@@ -124,7 +124,7 @@ export function TroubleshootPage() {
             },
             {
               q: "有曲线无图？",
-              a: "侧栏勾选图像话题（img_subscribe）。查 JPEG 质量/分辨率与带宽；确认 meta.name 一致。",
+              a: "侧栏勾选话题（img_subscribe）。弱网试 Watch「流畅优先」或看 img_tx_level；无图但车在写盘则正常（远程丢包）。确认 meta.name。",
             },
             {
               q: "3D 空白？",
@@ -157,7 +157,8 @@ export function TroubleshootPage() {
           rows={[
             ["名单空", "beacon / 网段 / :15999"],
             ["名单有、无 plot", "队首 · register · 车上 plot"],
-            ["无图", "img_subscribe · 话题名"],
+            ["无图", "img_subscribe · 话题 · tx 档/带宽"],
+            ["有图但卡", "流畅档 · img_tx_fps · 非队首转发"],
             ["无 3D", "markers · ns · frame"],
             ["通达不明", "Netcheck（不替代列表）"],
           ]}

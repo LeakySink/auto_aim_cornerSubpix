@@ -128,7 +128,10 @@ Hub 发现目录（周期 beacon，约 3 个周期无则剔除）。由 `RobotFl
 | POST | `/bind` | body `{ "sender" }` 或 `{ "robot" }`；Watch 绑一次不可换（`allow_rebind=false`）→ 冲突 `409` |
 | GET | `/state` | 状态 + `senders` + `selected` |
 | GET | `/select?sender=` | 可选重绑（仅 `allow_rebind`）；返回 `{ ok, sender, data_port? }` |
-| GET | `/img_subscribe?streams=` | **仅 Watch**。逗号分隔话题名；空=退订。触发车控面 `img_subscribe` |
+| GET | `/img_subscribe?streams=` | **仅 Watch**。逗号分隔话题名；空=退订。可选 query：`max_width`、`max_quality`、`max_fps`、`max_level`（远程 JPEG 上限，见 [`PROTOCOL.md`](PROTOCOL.md) §5）。触发车控面 `img_subscribe` |
+| POST | `/record/start` | **仅 Watch**。body 可选 `{ "path" \| "dir" }`；默认写到 host 侧录制目录。返回 `{ ok, path, recording, … }` |
+| POST | `/record/stop` | 停录制；返回 `{ ok, path, … }` |
+| GET | `/record/status` | `{ recording, path, n_json, n_img, dropped, elapsed_s }` |
 
 ### SSE 事件（JSON 行，`data: …\n\n`）
 
@@ -145,8 +148,10 @@ Hub 发现目录（周期 beacon，约 3 个周期无则剔除）。由 `RobotFl
 
 ### Watch
 
-- `attach`：`select` + `img_subscribe`
+- `attach`：`select` + `img_subscribe` + `record/*`
 - `config.sender`：开页时自动 bind
+- `GET /api/instances/<id>/status` 的 `record`、`tx_profile`：录制状态与当前远程画质上限
+- 工具栏：**录制**（SSE → 本机 RLG2，不占用车上队列）、**画质/流畅档**（改 `img_subscribe` 的 `max_*`）、标题栏 **cam / loop / tx / L*** 来自车上 ~1Hz plot 键
 
 ### Calibrate
 
