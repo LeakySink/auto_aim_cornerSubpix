@@ -194,15 +194,16 @@ void Engine::var_loop()
       rec.emplace_back(e.ts, std::move(e.json_str));
     }
     pending.clear();
-    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
-      for (const auto & e : rec) data_.send_raw_json(e.second);
-    }
+    // 落盘优先：弱网 UDP 失败不得拖住本地 .rlog。
     if (cfg_.enable_local) {
       DiskJob job;
       job.prio = prio;
       job.urgent = (prio >= 3);
-      job.jsons = std::move(rec);
+      job.jsons = rec;
       enqueue_disk(std::move(job));
+    }
+    if (cfg_.enable_remote && remote_ok_ && control_.has_head()) {
+      for (const auto & e : rec) data_.send_raw_json(e.second);
     }
   };
 
@@ -249,16 +250,17 @@ void Engine::img_loop()
       data_.inject(meta);
       if (!meta.contains("ts")) meta["ts"] = entry.ts;
       const std::string meta_str = meta.dump();
-      if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
+      // 落盘优先：同一 JPEG 先入盘，再非阻塞发 UDP（可丢）。
       if (cfg_.enable_local) {
         DiskJob job;
         job.image = true;
         job.prio = 0;
         job.ts = entry.ts;
         job.meta = meta_str;
-        job.jpeg = std::move(jpeg);
+        job.jpeg = jpeg;
         enqueue_disk(std::move(job));
       }
+      if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
     }
     entry.meta = nlohmann::json{};
     entry.img.release();
@@ -288,14 +290,26 @@ void Engine::enqueue_disk(DiskJob job)
 
 void Engine::disk_loop()
 {
+  auto last_sync = std::chrono::steady_clock::now();
   while (true) {
     DiskJob job;
     {
       std::unique_lock<std::mutex> lock(disk_mtx_);
-      disk_cv_.wait(lock, [&] { return !disk_q_.empty() || !disk_open_.load(); });
+      disk_cv_.wait_for(lock, std::chrono::milliseconds(kDiskSyncIntervalMs),
+                        [&] { return !disk_q_.empty() || !disk_open_.load(); });
       if (disk_q_.empty()) {
         disk_idle_cv_.notify_all();
-        break;
+        if (!disk_open_.load()) break;
+        // 空闲也按周期 sync，避免长时间无写时残留页缓存。
+        auto now = std::chrono::steady_clock::now();
+        auto ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sync);
+        if (ms.count() >= static_cast<int64_t>(kDiskSyncIntervalMs)) {
+          lock.unlock();
+          session_.sync(true);
+          last_sync = now;
+        }
+        continue;
       }
       job = std::move(disk_q_.front());
       disk_q_.pop_front();
@@ -303,8 +317,18 @@ void Engine::disk_loop()
     }
     if (job.image) session_.write_image(job.ts, job.meta, job.jpeg);
     else if (!job.jsons.empty()) session_.write_jsons(job.jsons);
-    if (job.urgent) session_.sync(true);
-    else session_.sync(false);
+    if (job.urgent) {
+      session_.sync(true);
+      last_sync = std::chrono::steady_clock::now();
+    } else {
+      auto now = std::chrono::steady_clock::now();
+      auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sync);
+      if (ms.count() >= static_cast<int64_t>(kDiskSyncIntervalMs)) {
+        session_.sync(true);
+        last_sync = now;
+      }
+    }
   }
   session_.sync(true);
 }

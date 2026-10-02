@@ -24,7 +24,7 @@ namespace tools
 namespace rdbg
 {
 
-// 主线程只入队。发送与落盘分开：var/img 先 UDP，disk_worker 异步写 .rlog。
+// 主线程只入队。worker：先落盘再非阻塞 UDP；disk_worker 异步写 .rlog。
 class Engine
 {
 public:
