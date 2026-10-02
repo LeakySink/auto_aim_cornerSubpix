@@ -29,6 +29,9 @@ public:
   void send_raw_json(const std::string & json_str);
   void send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
                   const std::string & meta_str);
+  // 成功发完所有分片返回 true；弱网 EAGAIN 等返回 false。
+  bool try_send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
+                      const std::string & meta_str);
   void send_heartbeat();
   void send_img_catalog(const std::vector<std::string> & streams);
 

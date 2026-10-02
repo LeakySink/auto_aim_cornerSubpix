@@ -59,13 +59,19 @@ void DataPlane::send_raw_json(const std::string & json_str)
 void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
                            const std::string & meta_str)
 {
+  (void)try_send_image(jpeg, ts, meta_str);
+}
+
+bool DataPlane::try_send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
+                               const std::string & meta_str)
+{
   if (meta_str.size() > 0xffff) {
     std::fprintf(stderr, "[RemoteLogger] image meta too large, skipped\n");
-    return;
+    return false;
   }
   if (sender_.size() > 255) {
     std::fprintf(stderr, "[RemoteLogger] sender name too long, skipped\n");
-    return;
+    return false;
   }
 
   const uint16_t frame_seq = frame_seq_.fetch_add(1);
@@ -74,12 +80,12 @@ void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
   const size_t frag0_hdr = common + 2 + meta_str.size() + 4;
   if (frag0_hdr >= kUdpSafePayload) {
     std::fprintf(stderr, "[RemoteLogger] image header too large, skipped\n");
-    return;
+    return false;
   }
 
   const size_t frag0_cap = kUdpSafePayload - frag0_hdr;
   const size_t frag_n_cap = kUdpSafePayload - common;
-  if (frag_n_cap == 0) return;
+  if (frag_n_cap == 0) return false;
 
   const size_t jpg_size = jpeg.size();
   const size_t first_chunk = jpg_size < frag0_cap ? jpg_size : frag0_cap;
@@ -88,11 +94,10 @@ void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
     left_after0 == 0 ? 0 : (left_after0 + frag_n_cap - 1) / frag_n_cap;
   if (1 + extra > 0xffff) {
     std::fprintf(stderr, "[RemoteLogger] image too many fragments, skipped\n");
-    return;
+    return false;
   }
   const uint16_t frag_cnt = static_cast<uint16_t>(1 + extra);
 
-  // 头放栈上；JPEG 用 iovec 直接引用，不再拷进 packet 缓冲。
   alignas(8) uint8_t hdr[kUdpSafePayload];
   size_t offset = 0;
   for (uint16_t idx = 0; idx < frag_cnt; ++idx) {
@@ -138,8 +143,9 @@ void DataPlane::send_image(const std::vector<uint8_t> & jpeg, uint64_t ts,
       iovcnt = 2;
       offset += n;
     }
-    if (!ctrl_.send_to_head(iov, iovcnt)) return;
+    if (!ctrl_.send_to_head(iov, iovcnt)) return false;
   }
+  return true;
 }
 
 void DataPlane::send_heartbeat()

@@ -8,6 +8,7 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
+#include "io/remote_debug.hpp"
 #include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -145,6 +146,8 @@ int main(int argc, char * argv[])
     }
 
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
+    io::RemoteDebug::poll();
+    io::RemoteDebug::on_frame(camera.fps());
   }
 
   quit = true;

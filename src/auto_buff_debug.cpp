@@ -4,6 +4,7 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
+#include "io/remote_debug.hpp"
 #include "tasks/auto_buff/buff_aimer.hpp"
 #include "tasks/auto_buff/buff_detector.hpp"
 #include "tasks/auto_buff/buff_solver.hpp"
@@ -143,6 +144,8 @@ int main(int argc, char * argv[])
 
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "result"}});
+    io::RemoteDebug::poll();
+    io::RemoteDebug::on_frame(camera.fps());
   }
 
   tools::RemoteLogger::instance().shutdown();

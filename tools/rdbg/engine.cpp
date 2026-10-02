@@ -30,7 +30,11 @@ void Engine::init(const RemoteLogger::Config & cfg)
   else session_.close();
 
   fps_.reset();
+  tx_fps_.reset();
   mailbox_.reset();
+  tx_.reset();
+  img_tx_ok_ = 0;
+  last_tx_stats_ = {};
   last_hb_ = {};
   last_catalog_ = {};
   {
@@ -156,6 +160,12 @@ bool Engine::poll_calib_cmd(std::string & cmd) { return control_.poll_calib_cmd(
 
 bool Engine::poll_json(nlohmann::json & data) { return control_.poll_json(data); }
 
+void Engine::apply_tx_cap(const TxCap & cap)
+{
+  control_.set_host_tx_cap(cap);
+  tx_.set_host_cap(cap);
+}
+
 void Engine::note_stream(const std::string & name)
 {
   if (name.empty()) return;
@@ -179,6 +189,22 @@ void Engine::maybe_send_catalog()
   }
   last_catalog_ = now;
   data_.send_img_catalog(streams);
+}
+
+void Engine::maybe_plot_tx_stats()
+{
+  auto now = std::chrono::steady_clock::now();
+  if (last_tx_stats_.time_since_epoch().count() != 0) {
+    auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tx_stats_);
+    if (ms.count() < 1000) return;
+  }
+  last_tx_stats_ = now;
+  const uint32_t ok = img_tx_ok_.exchange(0);
+  const int level = tx_.level();
+  // 约 1Hz：远程出图帧率与档位（Watch 可画曲线）。
+  plot({{"img_tx_fps", static_cast<double>(ok)},
+        {"img_tx_level", level}});
 }
 
 void Engine::var_loop()
@@ -232,6 +258,7 @@ void Engine::img_loop()
   while (true) {
     if (!mailbox_.take(entry, kImgWorkerPollMs, running_)) {
       if (!running_.load()) break;
+      maybe_plot_tx_stats();
       continue;
     }
     const auto name = stream_name(entry.meta);
@@ -244,24 +271,58 @@ void Engine::img_loop()
       continue;
     }
 
-    std::vector<uint8_t> jpeg;
-    if (encode_jpeg(entry.img, cfg_.img_width, cfg_.img_quality, jpeg)) {
-      nlohmann::json meta = std::move(entry.meta);
-      data_.inject(meta);
-      if (!meta.contains("ts")) meta["ts"] = entry.ts;
-      const std::string meta_str = meta.dump();
-      // 落盘优先：同一 JPEG 先入盘，再非阻塞发 UDP（可丢）。
-      if (cfg_.enable_local) {
+    // Host 上限与自适应档同步（subscribe 可能刚更新）。
+    tx_.set_host_cap(control_.host_tx_cap());
+    const TxProfile txp = tx_.effective(cfg_.img_width, cfg_.img_quality);
+
+    nlohmann::json meta = std::move(entry.meta);
+    data_.inject(meta);
+    if (!meta.contains("ts")) meta["ts"] = entry.ts;
+    const cv::Mat mat = std::move(entry.img);
+
+    std::vector<uint8_t> local_jpeg;
+    bool have_local = false;
+    if (cfg_.enable_local) {
+      have_local =
+        encode_jpeg(mat, cfg_.img_width, cfg_.img_quality, local_jpeg);
+      if (have_local) {
         DiskJob job;
         job.image = true;
         job.prio = 0;
         job.ts = entry.ts;
-        job.meta = meta_str;
-        job.jpeg = jpeg;
+        job.meta = meta.dump();
+        job.jpeg = local_jpeg;
         enqueue_disk(std::move(job));
       }
-      if (want_remote) data_.send_image(jpeg, entry.ts, meta_str);
     }
+
+    if (want_remote) {
+      const std::string tx_key = name + "#tx";
+      if (tx_fps_.select(entry.ts, tx_key, txp.fps)) {
+        const bool same_as_local =
+          have_local && txp.width == cfg_.img_width &&
+          txp.quality == cfg_.img_quality;
+        std::vector<uint8_t> tx_jpeg;
+        bool have_tx = false;
+        if (same_as_local) {
+          tx_jpeg = std::move(local_jpeg);
+          have_tx = true;
+        } else {
+          have_tx = encode_jpeg(mat, txp.width, txp.quality, tx_jpeg);
+        }
+        if (have_tx) {
+          nlohmann::json tx_meta = meta;
+          tx_meta["img_tx_level"] = txp.level;
+          tx_meta["img_tx_w"] = txp.width;
+          tx_meta["img_tx_q"] = txp.quality;
+          const bool ok =
+            data_.try_send_image(tx_jpeg, entry.ts, tx_meta.dump());
+          tx_.note_send(ok);
+          if (ok) img_tx_ok_.fetch_add(1);
+        }
+      }
+    }
+    maybe_plot_tx_stats();
     entry.meta = nlohmann::json{};
     entry.img.release();
   }

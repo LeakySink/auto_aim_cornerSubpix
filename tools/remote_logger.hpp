@@ -74,6 +74,9 @@ public:
   /// Host 下发的通用 JSON（控制口 `type=json` 的 `data` 字段）。
   bool poll_json(nlohmann::json & data);
 
+  /// 设置远程图像发送上限（宽/质/fps/最低档位）；不影响本地 .rlog 画质。
+  void apply_tx_cap(int max_width, int max_quality, int max_fps, int max_level = -1);
+
   /// 停 beacon、冲刷落盘、释放资源。
   void shutdown();
 

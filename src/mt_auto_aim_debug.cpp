@@ -6,6 +6,7 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
+#include "io/remote_debug.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
@@ -162,6 +163,8 @@ int main(int argc, char * argv[])
 
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
+    io::RemoteDebug::poll();
+    io::RemoteDebug::on_frame(camera.fps());
   }
 
   detect_thread.join();

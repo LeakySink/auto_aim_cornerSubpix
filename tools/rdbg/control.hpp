@@ -2,6 +2,7 @@
 #define TOOLS_RDBG_CONTROL_HPP
 
 #include "transport.hpp"
+#include "tx_profile.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -54,6 +55,10 @@ public:
   bool image_subscribed(const std::string & stream) const;
   bool any_image_subscribed() const;
 
+  // Host 通过 img_subscribe / set_img_tx 下发的远程画质上限。
+  TxCap host_tx_cap() const;
+  void set_host_tx_cap(const TxCap & cap);
+
   // host → 车：标定网页按钮（兼容旧协议；新代码优先用 poll_json）
   bool poll_calib_cmd(std::string & cmd);
   // host → 车：通用 JSON（type=json 的 data 字段）
@@ -87,6 +92,7 @@ private:
 
   std::unordered_map<std::string, std::unordered_set<std::string>> img_subs_;
   std::unordered_set<std::string> img_union_;
+  TxCap host_tx_cap_{};
 };
 
 }  // namespace rdbg

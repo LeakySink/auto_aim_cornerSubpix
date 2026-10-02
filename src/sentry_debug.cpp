@@ -7,6 +7,7 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
+#include "io/remote_debug.hpp"
 #include "io/ros2/publish2nav.hpp"
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
@@ -187,6 +188,8 @@ int main(int argc, char * argv[])
 
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
+    io::RemoteDebug::poll();
+    io::RemoteDebug::on_frame(camera.fps());
   }
 
   tools::RemoteLogger::instance().shutdown();
