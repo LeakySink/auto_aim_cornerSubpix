@@ -1,81 +1,84 @@
-# tests/ 分类说明
+# tests/ 分类目录
 
-构建约定：本目录每个 `*.cpp` 自动编成同名可执行文件（见 `cmake/auto_executables.cmake`），**保持扁平目录**；分类只作索引，不按文件夹拆分。
+每个子目录内的 `*.cpp` 编成**同名**可执行文件，输出仍在 `build/tests/`（不随源码分子目录）。
+约定见 `cmake/auto_executables.cmake`。
 
-Python 脚本需手动跑；`*_offline` / `detector_video` 等一般要本地视频或 yaml。
-
----
-
-## 1. RemoteLogger / Host 协议与证明
-
-| 文件 | 类型 | 说明 |
-|------|------|------|
-| `rdbg_improvement_proof.cpp` | **证明 / 回归** | 落盘优先顺序、写盘吞吐、JPEG 降档体积；无真车 |
-| `rdbg_host_proof.py` | **证明 / 回归** | Host RLG2 writer + LiveRecorder 洪水/稳态 |
-| `multi_sender_test.cpp` | 协议集成 | 多车 beacon / register / data_port / img_subscribe |
-| `fake_robot.cpp` | 夹具 | 假车进程，供 `multi_sender_test` 拉起 |
-| `markers_pub_test.cpp` | 功能 | Watch 3D markers 上行 |
-| `tf_pub_test.cpp` | 功能 | TF plot 上行（配合 yaml） |
-| `tf_pub_fake.py` | 本地夹具 | 假 TF 源；注释写明可不入库 |
-
-```bash
-./build/tests/rdbg_improvement_proof
-python3 tests/rdbg_host_proof.py
-./build/tests/multi_sender_test   # 依赖 fake_robot
+```
+tests/
+  rdbg/   RemoteLogger / Host 协议与证明
+  algo/   感知 / 自瞄算法
+  io/     IO 硬件冒烟
+  ros2/   ROS2 桥
 ```
 
 ---
 
-## 2. 感知 / 自瞄算法（离线或半离线）
+## `rdbg/` — RemoteLogger / Host
 
 | 文件 | 说明 |
 |------|------|
-| `auto_aim_test.cpp` | 自瞄管线：视频 + 标注回放 |
-| `auto_aim_debug_mpc_offline.cpp` | MPC 自瞄离线调试 |
-| `auto_buff_test.cpp` | 能量机关检测/解算 |
+| `rdbg_improvement_proof.cpp` | 落盘优先、写盘吞吐、JPEG 降档体积证明 |
+| `rdbg_host_proof.py` | Host RLG2 writer / LiveRecorder 洪水与稳态 |
+| `multi_sender_test.cpp` | 多车协议集成 |
+| `fake_robot.cpp` | 假车夹具（供 multi_sender） |
+| `markers_pub_test.cpp` | Watch 3D markers |
+| `tf_pub_test.cpp` | TF plot 上行 |
+| `tf_pub_fake.py` | 假 TF 源（本地夹具） |
+
+```bash
+./build/tests/rdbg_improvement_proof
+python3 tests/rdbg/rdbg_host_proof.py
+./build/tests/multi_sender_test
+```
+
+---
+
+## `algo/` — 感知 / 自瞄
+
+| 文件 | 说明 |
+|------|------|
+| `auto_aim_test.cpp` | 视频 + 标注回放 |
+| `auto_aim_debug_mpc_offline.cpp` | MPC 离线 |
+| `auto_buff_test.cpp` | 能量机关 |
 | `detector_video_test.cpp` | 检测器打视频 |
-| `planner_test.cpp` / `planner_test_offline.cpp` | 规划器在线/离线 |
-| `minimum_vision_system.cpp` | 最小视觉闭环（相机+检测+瞄准） |
+| `planner_test.cpp` / `planner_test_offline.cpp` | 规划器 |
+| `minimum_vision_system.cpp` | 最小视觉闭环 |
 
 ---
 
-## 3. IO 硬件冒烟
+## `io/` — 硬件冒烟
 
 | 文件 | 说明 |
 |------|------|
-| `camera_test.cpp` / `camera_thread_test.cpp` / `camera_detect_test.cpp` | 工业相机读帧 / 线程 / 探测 |
-| `usbcamera_test.cpp` / `usbcamera_detect_test.cpp` / `multi_usbcamera_test.cpp` | UVC 相机 |
-| `cboard_test.cpp` | 电控板 CAN/串口 |
-| `gimbal_test.cpp` / `gimbal_response_test.cpp` | 云台通信与响应 |
+| `camera_*.cpp` | 工业相机 |
+| `usbcamera_*.cpp` / `multi_usbcamera_test.cpp` | UVC |
+| `cboard_test.cpp` | 电控板 |
+| `gimbal_*.cpp` | 云台 |
 | `dm_test.cpp` | DM IMU |
-| `fire_test.cpp` | 开火相关 IO |
-| `handeye_test.cpp` | 手眼标定相关 |
-| `calibrate_test.cpp` | 标定流程冒烟（链 calibration） |
+| `fire_test.cpp` | 开火 |
+| `handeye_test.cpp` / `calibrate_test.cpp` | 手眼 / 标定 |
 
 ---
 
-## 4. ROS2（需 `USE_ROS2=ON` 或 ros2_* 依赖齐）
+## `ros2/` — ROS2
+
+需 `USE_ROS2=ON`，或 `ros2_*` 在已装 rclcpp+sensor_msgs 时软启用。
 
 | 文件 | 说明 |
 |------|------|
-| `publish_test.cpp` / `subscribe_test.cpp` / `topic_loop_test.cpp` | 话题收发环回 |
+| `publish_test.cpp` / `subscribe_test.cpp` / `topic_loop_test.cpp` | 话题环回 |
 | `ros2_image_pub_test.cpp` | 图像发布 |
 
 ---
 
-## 5. 怎么选
+## 怎么选
 
-| 你想验证… | 跑这些 |
-|-----------|--------|
-| 本次弱网落盘 / 降画质 / Host 录制是否正向 | **§1** `rdbg_*_proof` |
-| 多车 Host 协议有没有挂 | **§1** `multi_sender_test` + `fake_robot` |
-| 算法是否回归 | **§2** 对应 offline/video |
-| 车上硬件是否通 | **§3** 插上设备后单测 |
-| ROS2 桥 | **§4** |
+| 目标 | 目录 |
+|------|------|
+| 弱网落盘 / 降画质 / Host 录制 | `rdbg/` 的 `*_proof` |
+| 多车协议 | `rdbg/multi_sender_test` |
+| 算法回归 | `algo/` |
+| 外设通断 | `io/` |
+| ROS2 | `ros2/` |
 
-**命名习惯（建议新测试遵守）**
-
-- `*_proof`：可量化 A/B 或契约证明，CI/合并前可跑、尽量无硬件  
-- `*_test`：功能/冒烟，可能要 yaml、视频或外设  
-- `*_offline`：不依赖实时相机/电控  
-- `fake_*`：测试夹具，不是断言主体  
+**命名**：`*_proof` 可量化证明（尽量无硬件）；`*_test` 功能/冒烟；`*_offline` 不依赖实时外设；`fake_*` 夹具。

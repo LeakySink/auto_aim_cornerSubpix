@@ -11,7 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]  # tests/rdbg/ → repo root
 sys.path.insert(0, str(ROOT / "host"))
 
 from rdbg.log.recorder import LiveRecorder  # noqa: E402

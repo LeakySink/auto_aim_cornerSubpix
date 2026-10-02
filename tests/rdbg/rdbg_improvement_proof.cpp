@@ -7,7 +7,7 @@
  * C. JPEG 档位体积：level0 vs level3
  *
  *   ./build/tests/rdbg_improvement_proof
- *   python3 tests/rdbg_host_proof.py
+ *   python3 tests/rdbg/rdbg_host_proof.py
  */
 #include "tools/rdbg/image.hpp"
 #include "tools/rdbg/proto.hpp"
