@@ -15,7 +15,8 @@ plot / log / plot_image     对外 API（tools/remote_logger.hpp）
         └─ rdbg/transport   UDP bind / sendto / recv
 ```
 
-host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
+host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。  
+门户图形化摘要：Host Help → **RemoteLogger**（`/help#vehicle`）。
 
 支持五种数据：
 - **变量数据**：`plot(nlohmann::json)` — UDP 发送 + 本地 `.rlog` 持久化；JSON 内可嵌套 **`markers`**（Watch 3D，见下），仍算同一种 plot 传输

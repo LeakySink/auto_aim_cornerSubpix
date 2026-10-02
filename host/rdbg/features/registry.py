@@ -1,4 +1,14 @@
-"""Feature kinds and per-page instances. Each open page is its own thread."""
+"""Feature kinds and per-page instances. Each open page is its own thread.
+
+HTTP surface (see host/API.md):
+  GET  /api/features
+  POST /api/open
+  GET  /api/instances
+  GET|POST /api/instances/<id>/{status,start,stop}
+
+Instance business routes are registered in Feature.attach under /api/i/<id>/….
+Help is frontend-only and is NOT listed in KINDS.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +22,7 @@ from .replay import ReplayFeature
 from .tfviz import TfVizFeature
 from .watch import WatchFeature
 
+# kind id → Feature subclass（与 UI FEATURE_MODULES 对齐，不含 help）
 KINDS = {
     "watch": WatchFeature,
     "calibrate": CalibrateFeature,
@@ -23,11 +34,14 @@ KINDS = {
 
 
 class FeatureRegistry:
+    """Owns running Feature instances for one Hub process."""
+
     def __init__(self):
         self._shell = None
         self._instances = {}
 
     def attach(self, shell):
+        """Mount Hub-level control routes on the HTTP shell."""
         self._shell = shell
         shell.route("/api/features", self._handle_kinds, methods=("GET",))
         shell.route("/api/open", self._handle_open, methods=("POST",))
@@ -43,6 +57,7 @@ class FeatureRegistry:
         self._instances.clear()
 
     def open(self, kind, config=None):
+        """Construct, attach routes, start thread; return the Feature."""
         cls = KINDS.get(kind)
         if cls is None:
             raise KeyError(kind)
@@ -57,6 +72,7 @@ class FeatureRegistry:
         return feat
 
     def _public(self, feat: Feature):
+        """JSON-safe status blob for list/open/status responses."""
         st = feat.status()
         st["feature"] = feat.id
         st["instance"] = getattr(feat, "instance_id", "")
@@ -97,6 +113,7 @@ class FeatureRegistry:
         })
 
     def _handle_instance(self, handler):
+        # /api/instances/<id>/{status|start|stop}
         parts = handler.route_path.strip("/").split("/")
         # api instances <id> [start|stop|status]
         if len(parts) < 3:

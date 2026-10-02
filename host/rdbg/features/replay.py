@@ -1,4 +1,8 @@
-"""Replay feature — load .rlog session on start(config.path)."""
+"""Replay feature — load .rlog session on start(config.path).
+
+Routes under /api/i/<id>/: events, meta|session, frame/<idx>, POST load
+（host/API.md §4）。
+"""
 
 from __future__ import annotations
 

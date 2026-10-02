@@ -4,13 +4,14 @@
 Unix 入口经 `_env.sh` 自动使用 `host/.venv`（离线无 venv 则回退系统 Python）。  
 dump 导出视频依赖 `opencv-python-headless`（`requirements.txt`）。
 
-**内部构造与扩展** 见 [`DESIGN.md`](DESIGN.md)。协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+**内部构造与扩展** 见 [`DESIGN.md`](DESIGN.md)。**HTTP API** 见 [`API.md`](API.md)。协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。  
+**门户 Help**：首页「Help」或 `/help`（纯前端；含图解指南 + HOST/API/PROTOCOL/DESIGN/REMOTE_LOGGER/readme **全文**，左侧一级/二级目录）。
 
 ## 快速开始
 
 ```bash
 ./host/start.sh                          # 门户 http://127.0.0.1:8080
-# 浏览器首页：车辆列表按 beacon 打开 Watch 或标定页；也可点 Replay / Dump / Netcheck
+# 浏览器首页：车辆列表按 beacon 打开 Watch 或标定页；也可点 Replay / Dump / Netcheck / Help
 ```
 
 构建前端（改 `host/ui` 后）：

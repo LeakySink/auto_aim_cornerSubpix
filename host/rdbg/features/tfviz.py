@@ -1,4 +1,7 @@
-"""TF Viz feature — receive plot.tf; optionally spawn local tf_pub_test."""
+"""TF Viz feature — receive plot.tf; optionally spawn local tf_pub_test.
+
+Fleet routes only（host/API.md §3 TF Viz）。spawn 配置见 resolve_tf_pub_config。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""One beacon listener; each robot gets its own free data/peer UDP ports."""
+"""One beacon listener; each robot gets its own free data/peer UDP ports.
+
+HTTP: GET /api/robots → snapshot()（见 host/API.md）。
+列表离线由 BEACON_STALE_S 过滤；不清车上 host 队列。
+"""
 
 from __future__ import annotations
 

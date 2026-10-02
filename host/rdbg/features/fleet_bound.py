@@ -1,4 +1,12 @@
-"""Fleet-bound feature base — Watch / Calibrate share bind + SSE scaffolding."""
+"""Fleet-bound feature base — Watch / Calibrate / TF Viz share bind + SSE.
+
+Per-instance HTTP (prefix usually /api/i/<id>, see host/API.md):
+  GET  {p}/events          SSE
+  POST {p}/bind            {sender|robot}
+  GET  {p}/state
+  GET  {p}/select?sender=  if select=True
+  GET  {p}/img_subscribe?streams=  if img_subscribe=True (Watch)
+"""
 
 from __future__ import annotations
 
@@ -30,6 +38,7 @@ class FleetBoundFeature(Feature):
         self.sse = SSEQueue()
 
     def attach_fleet_routes(self, shell, *, select=True, img_subscribe=False):
+        """Register shared fleet HTTP routes under self.api_prefix."""
         p = getattr(self, "api_prefix", f"/api/{self.id}")
         shell.route(p + "/events", self._handle_events)
         shell.route(p + "/bind", self._handle_bind, methods=("POST",))

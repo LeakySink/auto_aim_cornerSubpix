@@ -1,6 +1,6 @@
 # Host 内部设计
 
-给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。**浏览器 HTTP API** 见 [`API.md`](API.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 本文约定：路径相对 `host/`。包名 `rdbg`。主入口 `./host/start.sh` → `python -m rdbg serve`。
 
