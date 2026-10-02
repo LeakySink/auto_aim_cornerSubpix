@@ -110,7 +110,7 @@ void HikRobot::capture_start()
     set_float_value("Gain", gain_);
   }
   // 标定不需要极限帧率；过高可能导致曝光/增益来不及稳定
-  MV_CC_SetFrameRate(handle_, 60);
+  MV_CC_SetFrameRate(handle_, 240);
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
