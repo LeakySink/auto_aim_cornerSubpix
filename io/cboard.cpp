@@ -1,6 +1,7 @@
 #include "cboard.hpp"
 
 #include "tools/math_tools.hpp"
+#include "tools/rdbg/tf_auto_pub.hpp"
 #include "tools/yaml.hpp"
 
 namespace io
@@ -40,7 +41,7 @@ Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestam
   // 四元数插值
   auto k = t_ac / t_ab;
   Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
-
+  tools::rdbg::publish_tf_attitude(q_c);
   return q_c;
 }
 

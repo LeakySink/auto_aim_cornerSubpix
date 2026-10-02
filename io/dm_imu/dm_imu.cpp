@@ -9,9 +9,10 @@
 #include <thread>
 
 #include "tools/crc.hpp"
+#include "tools/math_tools.hpp"
+#include "tools/rdbg/tf_auto_pub.hpp"
 #include "tools/remote_logger.hpp"
 #include <unistd.h>
-#include "tools/math_tools.hpp"
 
 namespace io
 {
@@ -125,7 +126,7 @@ Eigen::Quaterniond DM_IMU::imu_at(std::chrono::steady_clock::time_point timestam
   // 四元数插值
   auto k = t_ac / t_ab;
   Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
-
+  tools::rdbg::publish_tf_attitude(q_c);
   return q_c;
 }
 
