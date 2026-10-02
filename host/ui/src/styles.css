@@ -973,3 +973,7 @@ p.err-text { margin: 0 0 12px; }
   background: #c99642;
 }
 
+a.tool {
+  text-decoration: none;
+  color: inherit;
+}

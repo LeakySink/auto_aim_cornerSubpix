@@ -4,8 +4,13 @@ import { ReplayPage } from "./replay/ReplayPage";
 import { DumpPage } from "./dump/DumpPage";
 import { NetcheckPage } from "./netcheck/NetcheckPage";
 import { TfVizPage } from "./tfviz/TfVizPage";
+import { HelpPage } from "./help/HelpPage";
 
-/** Frontend feature registry — add a module here to show on the home page. */
+/**
+ * 前端功能注册表。
+ * - 多数项经首页 `openFeature` → Hub KINDS 起线程；
+ * - `help` 仅路由 `/help`，Home 用 Link 打开，**不要** POST /api/open。
+ */
 export const FEATURE_MODULES: FeatureModule[] = [
   {
     id: "watch",
@@ -47,5 +52,12 @@ export const FEATURE_MODULES: FeatureModule[] = [
     description: "UDP discover / echo / ping",
     route: "/netcheck",
     Component: NetcheckPage,
+  },
+  {
+    id: "help",
+    title: "Help",
+    description: "用法、协议、检测、插件、自瞄、SSH 与 HTTP API（无线程）",
+    route: "/help",
+    Component: HelpPage,
   },
 ];

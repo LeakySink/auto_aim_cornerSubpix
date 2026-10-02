@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { FEATURE_MODULES } from "../features/registry";
 import { featureStatus, getJson, listInstances, openFeature } from "../shared/api";
 import { InstanceProvider } from "../shared/instance";
@@ -15,7 +15,11 @@ type Robot = {
   feature?: string;
 };
 
-const HOME_TOOLS = FEATURE_MODULES.filter((m) => m.id !== "watch" && m.id !== "calibrate");
+// watch/calibrate 从车辆列表进；help 用 Link，避免 openFeature 建线程
+const HOME_TOOLS = FEATURE_MODULES.filter(
+  (m) => m.id !== "watch" && m.id !== "calibrate" && m.id !== "help",
+);
+const HELP_META = FEATURE_MODULES.find((m) => m.id === "help");
 
 export function HomePage() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -74,6 +78,9 @@ export function HomePage() {
         <span className="topbar-sep" />
         <span className="topbar-title">Host</span>
         <div className="spacer" />
+        <Link to="/help" className="pill">
+          Help
+        </Link>
         <span className="pill">{rows.length ? `${rows.length} 个页面` : "无打开页面"}</span>
       </header>
       <div className="main">
@@ -101,6 +108,16 @@ export function HomePage() {
                   <span className="tool-go">新窗口</span>
                 </button>
               ))}
+              {HELP_META && (
+                <Link to="/help" className="tool">
+                  <span className="tool-id">{HELP_META.id}</span>
+                  <span className="tool-body">
+                    <span className="tool-title">{HELP_META.title}</span>
+                    <span className="tool-desc">{HELP_META.description}</span>
+                  </span>
+                  <span className="tool-go">本页</span>
+                </Link>
+              )}
             </div>
           </section>
           <section className="block">
