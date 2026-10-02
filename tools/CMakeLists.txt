@@ -15,6 +15,7 @@ add_library(tools OBJECT
     rdbg/session.cpp
     rdbg/image.cpp
     rdbg/engine.cpp
+    rdbg/tf_auto_pub.cpp
     trajectory.cpp
     pid.cpp
     crc.cpp

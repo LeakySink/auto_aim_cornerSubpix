@@ -11,8 +11,12 @@ BEACON_STALE_S = 3.0
 # Beacon `app` → portal feature. Unknown / missing → watch (normal).
 APP_FEATURES = {
     "calibrate": "calibrate",
+    "tfviz": "tfviz",
     "normal": "watch",
 }
+
+# Beacon optional `feature` must be one of these portal ids.
+KNOWN_FEATURES = frozenset({"watch", "calibrate", "tfviz", "replay", "dump", "netcheck"})
 
 
 def normalize_app(raw):
@@ -20,8 +24,21 @@ def normalize_app(raw):
     return app
 
 
+def normalize_feature(raw):
+    feat = (raw or "").strip().lower()
+    return feat if feat in KNOWN_FEATURES else ""
+
+
 def app_feature(app):
     return APP_FEATURES.get(normalize_app(app), "watch")
+
+
+def resolve_portal_feature(feature=None, app=None):
+    """Prefer explicit beacon `feature`; else map from `app`."""
+    feat = normalize_feature(feature)
+    if feat:
+        return feat
+    return app_feature(app)
 
 
 def _udp(broadcast=False, reuse_port=False):
@@ -106,9 +123,10 @@ class Discovery:
                 continue
             control = int(msg.get("control") or 15000)
             app = normalize_app(msg.get("app"))
+            feature = normalize_feature(msg.get("feature"))
             cb = self.on_beacon
             if cb:
-                cb(name, ip, control, addr, app)
+                cb(name, ip, control, addr, app, feature)
 
 
 class RobotClient:
@@ -186,11 +204,18 @@ class RobotClient:
             "data": data,
         })
 
-    def img_subscribe(self, ip, control_port, streams):
-        self._send(ip, control_port, {
+    def img_subscribe(self, ip, control_port, streams, **caps):
+        msg = {
             "v": 1,
             "type": "img_subscribe",
             "host_id": self.host_id,
             "peer_port": self.peer_port,
             "streams": list(streams or []),
-        })
+        }
+        for key in ("max_width", "max_quality", "max_fps", "max_level"):
+            if key in caps and caps[key] is not None:
+                try:
+                    msg[key] = int(caps[key])
+                except (TypeError, ValueError):
+                    pass
+        self._send(ip, control_port, msg)

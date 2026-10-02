@@ -28,11 +28,18 @@ void FpsGate::reset()
 
 bool FpsGate::select(uint64_t ts, const std::string & name)
 {
+  return select(ts, name, kImgSaveFps);
+}
+
+bool FpsGate::select(uint64_t ts, const std::string & name, int fps)
+{
+  if (fps < 1) fps = 1;
+  const uint64_t period = 1000000000ULL / static_cast<uint64_t>(fps);
   std::lock_guard<std::mutex> lock(mtx_);
   uint64_t & due = due_ns_[name];
   if (due != 0 && ts < due) return false;
-  due = (due == 0) ? ts + kImgSavePeriodNs
-                   : due + ((ts - due) / kImgSavePeriodNs + 1) * kImgSavePeriodNs;
+  due = (due == 0) ? ts + period
+                   : due + ((ts - due) / period + 1) * period;
   return true;
 }
 
@@ -104,22 +111,20 @@ void Mailbox::clear()
   rr_key_.clear();
 }
 
-bool encode_jpeg(cv::Mat & img, int width, int quality, std::vector<uint8_t> & jpeg)
+bool encode_jpeg(const cv::Mat & img, int width, int quality, std::vector<uint8_t> & jpeg)
 {
   if (img.empty() || img.cols <= 0) return false;
   cv::Mat work;
+  const cv::Mat * src = &img;
   if (width > 0 && img.cols > width) {
     double scale = static_cast<double>(width) / img.cols;
     int new_h = static_cast<int>(img.rows * scale);
     if (new_h < 1) new_h = 1;
     cv::resize(img, work, cv::Size(width, new_h));
-    img.release();
-  } else {
-    work = std::move(img);
+    src = &work;
   }
   std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, quality};
-  if (!cv::imencode(".jpg", work, jpeg, params) || jpeg.empty()) return false;
-  work.release();
+  if (!cv::imencode(".jpg", *src, jpeg, params) || jpeg.empty()) return false;
   return true;
 }
 

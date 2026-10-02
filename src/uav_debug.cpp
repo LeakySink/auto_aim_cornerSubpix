@@ -4,8 +4,10 @@
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"
+#include "io/remote_debug.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/detector.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -147,6 +149,8 @@ int main(int argc, char * argv[])
       data["nis_fail"] = target.ekf().data.at("nis_fail");
       data["nees_fail"] = target.ekf().data.at("nees_fail");
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
+
+      data["markers"] = tools::viz::kalman_markers(target);
     }
 
     // 云台响应情况
@@ -160,6 +164,8 @@ int main(int argc, char * argv[])
     }
     tools::RemoteLogger::instance().plot(data);
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
+    io::RemoteDebug::poll();
+    io::RemoteDebug::on_frame(camera.fps());
   }
 
   tools::RemoteLogger::instance().shutdown();

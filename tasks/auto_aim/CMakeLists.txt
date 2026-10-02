@@ -16,6 +16,7 @@ add_library(auto_aim OBJECT
     tracker.cpp
     voter.cpp
     shooter.cpp
+    kalman_markers.cpp
     yolo.cpp
     yolos/yolov5.cpp
     yolos/yolov8.cpp

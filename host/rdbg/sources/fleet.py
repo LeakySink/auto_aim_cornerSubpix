@@ -1,4 +1,8 @@
-"""One beacon listener; each robot gets its own free data/peer UDP ports."""
+"""One beacon listener; each robot gets its own free data/peer UDP ports.
+
+HTTP: GET /api/robots → snapshot()（见 host/API.md）。
+列表离线由 BEACON_STALE_S 过滤；不清车上 host 队列。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ import threading
 import time
 import uuid
 
-from ..net.control import BEACON_STALE_S, Discovery, app_feature, normalize_app
+from ..net.control import BEACON_STALE_S, Discovery, resolve_portal_feature, normalize_app
 from .live import LiveSource
 
 DISCOVER_PORT = 15999
@@ -84,10 +88,11 @@ class RobotFleet:
                     "ip": info["ip"],
                     "control": info["control"],
                     "app": info.get("app") or "normal",
+                    "feature": info.get("feature") or resolve_portal_feature(
+                        info.get("feature_raw"), info.get("app")),
                     "data_port": slot["data_port"] if slot else 0,
                     "peer_port": slot["peer_port"] if slot else 0,
                     "watches": len(slot["fan"].subs) if slot else 0,
-                    "feature": app_feature(info.get("app")),
                 })
         out.sort(key=lambda row: row["name"])
         return out
@@ -96,13 +101,16 @@ class RobotFleet:
         from ..features.base import send_json
         send_json(handler, {"robots": self.snapshot()})
 
-    def _on_beacon(self, name, ip, control, _addr, app="normal"):
+    def _on_beacon(self, name, ip, control, _addr, app="normal", feature=""):
         app = normalize_app(app)
+        feat = resolve_portal_feature(feature, app)
         with self._lock:
             self._robots[name] = {
                 "ip": ip,
                 "control": int(control),
                 "app": app,
+                "feature_raw": (feature or "").strip().lower(),
+                "feature": feat,
                 "last": time.monotonic(),
             }
             slot = self._slots.get(name)

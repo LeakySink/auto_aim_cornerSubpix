@@ -1,4 +1,8 @@
-"""Netcheck feature — discover / echo / ping via HTTP (threaded workers)."""
+"""Netcheck feature — discover / echo / ping via HTTP (threaded workers).
+
+Routes: discover/* · echo/* · POST /ping · jobs/（host/API.md §6）。
+Does not populate GET /api/robots.
+"""
 
 from __future__ import annotations
 

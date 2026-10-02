@@ -1,6 +1,6 @@
 # Host 内部设计
 
-给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。**浏览器 HTTP API** 见 [`API.md`](API.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 本文约定：路径相对 `host/`。包名 `rdbg`。主入口 `./host/start.sh` → `python -m rdbg serve`。
 
@@ -37,7 +37,9 @@ flowchart LR
 2. **前端**：`ui/src/features/foo/FooPage.tsx` + 在 `ui/src/features/registry.ts` 追加一项。页面里用 `useInstance().base` 调本实例 API。标定例外：沿用 `static/calibrate.html`，由 `Feature.ui_path` 指向。
 3. `./host/ui/build.sh`，再 `./host/start.sh`。
 
-`FleetBoundFeature`：Watch / Calibrate 共用 fleet 绑定、`/events` SSE、`/bind`、`/select`、`/state`。子类用 `allow_rebind` / `default_img_streams` / `use_source_push_state` 区分行为。
+现有 Feature：`watch` / `calibrate` / `tfviz` / `replay` / `dump` / `netcheck`。
+
+`FleetBoundFeature`：Watch / Calibrate / TF Viz 共用 fleet 绑定、`/events` SSE、`/bind`、`/select`、`/state`。子类用 `allow_rebind` / `default_img_streams` / `use_source_push_state` 区分行为。
 
 控制面：`GET /api/features`（种类），`POST /api/open` 新建实例并启动线程，`GET /api/instances`，`POST /api/instances/<id>/stop?forget=1`（关页时）。  
 业务 API 挂在 `/api/i/<id>/...`。关掉浏览器页会 `sendBeacon` 停掉该线程。发现口 `15999` 全局一个。每辆车单独分配数据口（自 15001）和对等口（自 15100）；打开 Watch 时选定车辆。同一辆车的多个 Watch 共用这一对口。`GET /api/robots` 列出当前 beacon，带 `app`（`normal` / `calibrate`）与 `feature`（门户要开的页）。首页车辆列表按 `app` 打开对应页。
@@ -76,7 +78,7 @@ host/
 | 层 | 职责 | 禁止 |
 |---|---|---|
 | `net/` | UDP 字节 ↔ JSON 事件 | 不知道 HTTP |
-| `log/` | 文件字节 ↔ 会话 dict | 不知道浏览器 |
+| `log/` | 文件字节 ↔ 会话 dict；`writer.RlogWriter` / `recorder.LiveRecorder` | 不知道浏览器 |
 | `http/` | 端口、路由、静态、SSE | 不知道 plot 语义 |
 | `features/` | 功能线程 + `/api/<id>` | 不改 SPA 构建 |
 | `ui/` | 门户与 Feature 页 | 不直接碰 UDP |
@@ -88,16 +90,23 @@ host/
 
 ```
 车上 RemoteLogger
-  plot/log  → JSON UDP
-  plot_image → 本地 .rlog；UDP 仅订阅流，0xFE 分片
+  plot/log  → disk-first 入队 .rlog，再 MSG_DONTWAIT JSON UDP
+  plot_image → yaml JPEG → .rlog；订阅流另路远程 JPEG（0xFE 分片，可自适应档位）
 
 Hub:
   Feature watch → LiveSource → /api/i/<id>/events (SSE)
+             → LiveRecorder（可选）→ RlogWriter 本机 .rlog
+             → plot 数字 → DebugWorkbench 曲线（含 cam_fps / loop_fps / img_tx_*）
+             → plot.markers → DataBus.setMarkers → MarkerScene（按 ns 图层 / display_frame）
+             → plot.tf / plot.frames → FrameStore（跨系预留）
   Feature calibrate → LiveSource + calib_cmd → /api/i/<id>/events|/calib
+  Feature tfviz → LiveSource → SSE plot.tf → 3D 相机/世界系
   Feature replay → session → /api/i/<id>/meta|/frame
   Feature dump → dump_rlog 后台 job
   Feature netcheck → discover/echo/ping workers
 ```
+
+扩展 Watch 3D：定义在 `tools/rdbg/markers/`（`MarkerArray`）；业务转换在 task（如 `kalman_markers`）；`src` debug 调用后写入 `plot.markers`。前端按 `ns` 通用渲染，一般无需改 UI。
 
 `python -m rdbg watch|calibrate|replay` 也进入同一 Hub（打开门户首页）。
 
@@ -206,7 +215,7 @@ write_sse(handler, q, on_connect=None)  # 阻塞直到客户端断开
 
 ```python
 Discovery(port=15999, host_id="")
-d.on_beacon = lambda name, ip, control, addr, app: ...
+d.on_beacon = lambda name, ip, control, addr, app, feature="": ...
 d.start() / d.stop() / d.probe()   # probe 发 who
 
 RobotClient(host_id, host_name, data_port, peer_port)
@@ -274,6 +283,20 @@ summarize(path) -> (n_json, n_img, sender_name)
 
 Magic：v1 `0x524C4F47`（仅 JSON），v2 `0x32474C52`（`RLG2`）。v2：`type 0x00` json，`0x01` image。截断则打印 stderr 并停止。文件格式细节见 `REMOTE_LOGGER.md`。
 
+### 4.7a `rdbg.log.writer` / `rdbg.log.recorder`
+
+Watch **Host 侧录制**（与车上 `session` 无关）：
+
+```python
+RlogWriter(path)          # 追加 RLG2；close() 刷盘
+LiveRecorder()            # 实现 fan 订阅；bounded queue(512)，满则丢最旧
+LiveRecorder.start(path)  # 后台线程写 writer
+LiveRecorder.stop()       # join + close，返回 path
+LiveRecorder.status()     # recording / path / n_json / n_img / dropped / elapsed_s
+```
+
+`WatchFeature`：`POST/GET …/record/*` 把 `LiveRecorder` 挂到该车 `fleet` fan 的 `subs`，tap 与 SSE 相同的 JSON 行。默认路径见 `recorder.default_record_path(sender)`。
+
 ### 4.7b `rdbg.log.dump`
 
 ```python
@@ -315,6 +338,7 @@ load_session_or_exit(path, max_bytes=...)  # 失败 SystemExit 1/2
 
 - 不注册 HTML 页。Hub 的 Watch Feature 自己挂 `/api/watch/events`、`/api/watch/select`。
 - `attach()` 仍提供旧路径：`GET /events`、`GET /select?sender=`、`GET /img_subscribe`（给仍直接调用 `attach` 的代码）。
+- `set_tx_profile({max_width, …})` 与 `img_subscribe` 一并推到车；节流约 1s（`force` 立即）。
 - 听 beacon；向每辆在线车 `register`；队首 `head_alive`，follower `subscribe`
 - 3s 无 beacon 的车从 `senders` 拿掉，不清车上队列
 

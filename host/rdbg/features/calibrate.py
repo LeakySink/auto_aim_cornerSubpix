@@ -1,4 +1,7 @@
-"""Calibrate feature — original calibrate.html UI on the hub."""
+"""Calibrate feature — original calibrate.html UI on the hub.
+
+Fleet routes + /calib + /done（host/API.md §3 Calibrate）。
+"""
 
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ class CalibrateFeature(FleetBoundFeature):
 
     @property
     def ui_path(self):
+        # 标定仍用静态页；?i= 把实例 id 传给前端拼 /api/i/<id>
         iid = getattr(self, "instance_id", "")
         return f"/calibrate.html?i={iid}" if iid else "/calibrate.html"
 

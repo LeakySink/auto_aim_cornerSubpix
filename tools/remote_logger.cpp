@@ -1,6 +1,7 @@
 #include "remote_logger.hpp"
 
 #include "rdbg/engine.hpp"
+#include "rdbg/tf_auto_pub.hpp"
 
 #include "tools/yaml.hpp"
 
@@ -52,6 +53,10 @@ void RemoteLogger::init(const std::string & config_path)
     cfg.beacon_port = node["beacon_port"].as<uint16_t>();
 
   init(cfg);
+
+  // 外参只发一次；姿态由 io::Gimbal::q 持续发布
+  const std::string resolved = tools::project_path(config_path);
+  tools::rdbg::publish_tf_extrinsics_once(yaml, resolved);
 }
 
 void RemoteLogger::plot(const nlohmann::json & data) { impl_->plot(data); }
@@ -69,6 +74,17 @@ void RemoteLogger::plot_image(const cv::Mat & img, const nlohmann::json & meta)
 bool RemoteLogger::poll_calib_cmd(std::string & cmd) { return impl_->poll_calib_cmd(cmd); }
 
 bool RemoteLogger::poll_json(nlohmann::json & data) { return impl_->poll_json(data); }
+
+void RemoteLogger::apply_tx_cap(int max_width, int max_quality, int max_fps,
+                                int max_level)
+{
+  rdbg::TxCap cap;
+  cap.max_width = max_width;
+  cap.max_quality = max_quality;
+  cap.max_fps = max_fps;
+  cap.max_level = max_level;
+  impl_->apply_tx_cap(cap);
+}
 
 void RemoteLogger::shutdown() { impl_->shutdown(); }
 

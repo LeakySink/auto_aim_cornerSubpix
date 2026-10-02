@@ -1,4 +1,7 @@
-"""Dump feature — export .rlog to folder (async job)."""
+"""Dump feature — export .rlog to folder (async job).
+
+Routes: POST /run → job_id；GET /jobs/<id>（host/API.md §5）。
+"""
 
 from __future__ import annotations
 

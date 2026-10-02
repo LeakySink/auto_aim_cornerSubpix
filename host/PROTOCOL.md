@@ -63,8 +63,10 @@ remote_logger:
   heartbeat_interval_ms: 500
   head_timeout_ms: 2000
   sender_name: "sentry"
-  app: "normal"              # normal=调试；calibrate=标定（缺省 normal）
+  app: "normal"              # normal=调试；calibrate=标定；tfviz=TF Viz（缺省 normal）
 ```
+
+Beacon 还可带可选 `"feature":"tfviz"`（或 `watch` / `calibrate`）；host 优先用 `feature` 决定开哪一页。
 
 ---
 
@@ -80,17 +82,18 @@ remote_logger:
 - 队首已连上也不能停：停了第二台调试机就看不见这辆车
 
 ```json
-{"v":1,"type":"beacon","name":"sentry","app":"normal","ip":"<车当前IPv4>","control":15000,"ts":...}
+{"v":1,"type":"beacon","name":"sentry","app":"normal","feature":"watch","ip":"<车当前IPv4>","control":15000,"ts":...}
 ```
 
 | 字段 | 含义 |
 |---|---|
 | `name` | `sender_name`，多车唯一，显示用 |
-| `app` | 程序身份。`normal`=正常调试程序（host 开 Watch）；`calibrate`=标定程序（host 开标定页）。**缺省 / 旧固件无此字段时按 `normal`** |
+| `app` | 程序身份。`normal` / `calibrate` / `tfviz` 等；**缺省 / 旧固件无此字段时按 `normal`** |
+| `feature` | **可选**。门户要打开的功能 id：`watch` / `calibrate` / `tfviz` …。有则优先用；无则由 host 从 `app` 映射（`normal→watch`，`calibrate→calibrate`，`tfviz→tfviz`） |
 | `ip` | 车此刻收控制包的地址 |
 | `control` | 控制口，默认 15000 |
 
-`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。门户车辆列表按 `app` 打开对应功能，**不要**用 `name` 猜身份。
+`ip` 必须是车 **此刻** 准备收控制包的地址（每次发前读网卡，不要缓存开机时的 IP）。host 听到后向 `beacon.ip:control` 单播 `register`。已在队列里的 host 若发现 `ip` 变了，用同一 `host_id` 再 `register` 一次（只更新地址，不换队序）。门户车辆列表按 `feature`（或由 `app` 映射）打开对应功能，**不要**用 `name` 猜身份。
 
 host 先于车启动时，可向 `255.255.255.255:15999` 探一次（车若也 bind 15999 则回；否则等下一次周期 beacon）：
 
@@ -195,8 +198,19 @@ frag n: [chunk...]
 **按需发图**：无人订阅时车不发图像 UDP（仍可写 `.rlog`）。host → 车：
 
 ```json
-{"v":1,"type":"img_subscribe","host_id":"...","peer_port":15100,"streams":["reprojection"]}
+{"v":1,"type":"img_subscribe","host_id":"...","peer_port":15100,"streams":["reprojection"],
+ "max_width":480,"max_quality":40,"max_fps":20,"max_level":1}
 ```
+
+可选 **`max_width` / `max_quality` / `max_fps` / `max_level`**（整数）：远程 JPEG 上限，与车上自适应档位叠加（`max_level`≥0 表示至少降到该档）。本地 `.rlog` 仍只用 yaml `img_width`/`img_quality`。HTTP 侧见 [`API.md`](API.md) `GET …/img_subscribe?streams=&max_*`。
+
+等价调试指令（队首已 `register`，`type=json` 的 `data`）：
+
+```json
+{"cmd":"set_img_tx","max_width":480,"max_quality":40,"max_fps":20,"level":1}
+```
+
+车端控制面收到后立即更新上限（不必等业务 `poll_json`）；业务侧 `io::RemoteDebug::poll()` 也会处理同形 JSON。
 
 `streams: []` 表示该 host 退订。车对队列内各 host 的订阅取并集；出队时清掉该 host 的订阅。ack：
 
@@ -205,6 +219,67 @@ frag n: [chunk...]
 ```
 
 心跳间隔 `heartbeat_interval_ms`（默认 500）。host 侧仍丢弃带 `"hb"` 的 JSON，只当链路活着。
+
+**远程 JPEG 档位 0–3**（仅 UDP；本地 `.rlog` 始终 yaml）：
+
+| level | 典型宽×质×fps（相对 yaml 封顶） |
+|-------|----------------------------------|
+| 0 | yaml 宽/质，30fps |
+| 1 | ≤480×≤40，20fps |
+| 2 | ≤320×≤30，15fps |
+| 3 | ≤320×≤25，10fps |
+
+车上按 **1s 窗口**统计非阻塞发送成败自适应升降档；Host `max_*` / `max_level` 再封顶。与 yaml 参数相同时只编码一次 JPEG。实现细节见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+
+**数据面非阻塞**：车向队首 `sendto`/`sendmsg` 使用 `MSG_DONTWAIT`；缓冲满或弱网时 **丢远程包**，不阻塞本地 `.rlog`（disk-first 入队）。
+
+**诊断 plot 键（~1Hz，普通 plot JSON）**：`cam_fps`、`loop_fps`（主循环）、`img_tx_fps`、`img_tx_level`（远程出图）。来源 `io::FpsMeter` / `io::RemoteDebug`，**不是** CAN Command。字段说明见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md) §诊断曲线。
+
+### plot.markers（marker_v1）
+
+Watch 3D 用。仍走普通 plot JSON（Host 发射后仍是 `type:"plot"`），**不是**独立 UDP/SSE 类型。
+
+```json
+{
+  "ts": 123, "_from": "sentry",
+  "x": 1.0, "vx": 0.1,
+  "markers": {
+    "schema": "marker_v1",
+    "frame_id": "world",
+    "items": [
+      {
+        "ns": "kalman.center", "id": "c", "type": "sphere",
+        "pose": { "p": [1, 0, 0.5], "q": [1, 0, 0, 0] },
+        "scale": [0.04, 0.04, 0.04],
+        "color": [1, 0.45, 0.1, 1]
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 约束 |
+|------|------|
+| `schema` | 必须为 `"marker_v1"`；否则 Watch 忽略 `markers`（曲线字段照常） |
+| `frame_id` | **可选**，默认 `"world"`；空串按默认 |
+| `items` | 数组；可空 |
+| `ns` / `id` / `type` | 单条必填；`ns` 为图层键 |
+| 单条 `frame_id` | 可选；缺省继承 array；再缺省 `"world"` |
+| `pose.p` / `pose.q` | 米；四元数 Eigen `(w,x,y,z)` |
+| `dir` / `shaft_len` | `arrow` |
+| `points` | `line_list`，成对点 |
+| `scale` / `color` | 随 type；RGBA 0–1 |
+
+图元：`sphere`、`arrow`、`box`、`line_list`（`axes` 预留）。未知 `type` 跳过该条。
+
+**合并：** Watch 按 `ns` 缓存；本包出现的每个 `ns` 整组替换；未出现的 ns 保留（多发布者可交错）。根字段 `markers_reset: true` 可清空缓存。
+
+**可选同包：**
+
+- `frames`: `{ "gimbal": { "parent":"world", "R":[9], "t":[3] }, ... }`（child→parent）
+- `tf`: 与 TF Viz 相同的外参包；Watch 可 ingest 进 FrameStore
+
+车端 API：定义 [`tools/rdbg/markers/viz_markers.hpp`](../tools/rdbg/markers/viz_markers.hpp)；自瞄转换 [`tasks/auto_aim/kalman_markers.hpp`](../tasks/auto_aim/kalman_markers.hpp)。用法见 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
 
 **仅队首 → 车 `:15000`**
 

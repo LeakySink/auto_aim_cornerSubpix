@@ -3,11 +3,11 @@
 # 自动把目录下每个 *.cpp 编成同名可执行文件。
 # 使用 file(GLOB CONFIGURE_DEPENDS)：增删 .cpp 会触发重新配置，一般无需改 CMakeLists。
 #
-# 用法（在 src/ / tests/ / calibration/ 的 CMakeLists.txt）：
+# 用法（在 src/ / tests/<分类>/ / calibration/ 的 CMakeLists.txt）：
 #
 #   include(${PROJECT_SOURCE_DIR}/cmake/auto_executables.cmake)
 #   auto_add_executables(
-#     [DIR path]                 # 默认 CMAKE_CURRENT_SOURCE_DIR
+#     [DIR path]                 # 默认 CMAKE_CURRENT_SOURCE_DIR；tests 按 rdbg|algo|io|ros2 分目录调用
 #     [EXCLUDE file.cpp ...]     # 不做成可执行文件（如库源码 calibrator.cpp）
 #     DEFAULT_LIBS lib1 lib2 ...
 #   )

@@ -1,4 +1,8 @@
-"""Feature plugin base — each feature runs in its own thread when started."""
+"""Feature plugin base — each feature runs in its own thread when started.
+
+Subclass must set id/title/description, implement attach(shell) to register
+`/api/i/<id>/…` routes (see host/API.md), and usually override on_start/on_stop/run.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ from abc import ABC, abstractmethod
 
 
 def json_body(handler):
+    """Parse request body JSON; empty/invalid → {}."""
     raw = getattr(handler, "body", b"") or b""
     if not raw:
         return {}
@@ -37,6 +42,7 @@ class Feature(ABC):
 
     @property
     def ui_path(self):
+        """Browser path returned by POST /api/open (override for calibrate.html)."""
         iid = getattr(self, "instance_id", "")
         return f"/i/{iid}" if iid else "/"
 

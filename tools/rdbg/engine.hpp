@@ -5,6 +5,7 @@
 #include "data.hpp"
 #include "image.hpp"
 #include "session.hpp"
+#include "tx_profile.hpp"
 
 #include "tools/remote_logger.hpp"
 
@@ -24,7 +25,7 @@ namespace tools
 namespace rdbg
 {
 
-// 主线程只入队。发送与落盘分开：var/img 先 UDP，disk_worker 异步写 .rlog。
+// 主线程只入队。worker：先落盘再非阻塞 UDP；disk_worker 异步写 .rlog。
 class Engine
 {
 public:
@@ -35,6 +36,9 @@ public:
   void plot_image(const cv::Mat & img, const nlohmann::json & meta);
   bool poll_calib_cmd(std::string & cmd);
   bool poll_json(nlohmann::json & data);
+  // Host/IO 调试指令设置的远程画质上限（不改本地落盘）。
+  void apply_tx_cap(const TxCap & cap);
+  int tx_level() const { return tx_.level(); }
 
 private:
   struct VarEntry
@@ -63,6 +67,7 @@ private:
   static uint8_t level_prio(const std::string & level);
   void note_stream(const std::string & name);
   void maybe_send_catalog();
+  void maybe_plot_tx_stats();
   static std::string resolve_sender(const std::string & name);
 
   RemoteLogger::Config cfg_;
@@ -73,7 +78,11 @@ private:
   DataPlane data_{control_};
   Session session_;
   FpsGate fps_;
+  FpsGate tx_fps_;
   Mailbox mailbox_;
+  TxAdaptor tx_;
+  std::atomic<uint32_t> img_tx_ok_{0};
+  std::chrono::steady_clock::time_point last_tx_stats_{};
 
   std::vector<VarEntry> var_buf_;
   std::mutex var_mtx_;

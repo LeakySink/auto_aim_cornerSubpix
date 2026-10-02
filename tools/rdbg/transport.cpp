@@ -61,20 +61,25 @@ ssize_t UdpSocket::recvfrom_nb(void * buf, size_t len, sockaddr_in * from)
 bool UdpSocket::sendto(const void * data, size_t len, const sockaddr_in & dest) const
 {
   if (fd_ < 0) return false;
-  return ::sendto(fd_, data, len, 0, reinterpret_cast<const sockaddr *>(&dest),
-                  sizeof(dest)) >= 0;
+  // 数据面不可阻塞：弱网 EAGAIN 直接失败，由上层丢包，避免回压 worker/落盘。
+  ssize_t n = ::sendto(fd_, data, len, MSG_DONTWAIT,
+                       reinterpret_cast<const sockaddr *>(&dest), sizeof(dest));
+  return n >= 0 && static_cast<size_t>(n) == len;
 }
 
 bool UdpSocket::sendmsg(const struct iovec * iov, int iovcnt,
                         const sockaddr_in & dest) const
 {
   if (fd_ < 0 || !iov || iovcnt <= 0) return false;
+  size_t total = 0;
+  for (int i = 0; i < iovcnt; ++i) total += iov[i].iov_len;
   msghdr msg{};
   msg.msg_name = const_cast<sockaddr_in *>(&dest);
   msg.msg_namelen = sizeof(dest);
   msg.msg_iov = const_cast<struct iovec *>(iov);
   msg.msg_iovlen = static_cast<size_t>(iovcnt);
-  return ::sendmsg(fd_, &msg, 0) >= 0;
+  ssize_t n = ::sendmsg(fd_, &msg, MSG_DONTWAIT);
+  return n >= 0 && static_cast<size_t>(n) == total;
 }
 
 bool UdpSocket::sendto(const void * data, size_t len, in_addr ip, uint16_t port) const

@@ -31,6 +31,8 @@ class FpsGate
 public:
   void reset();
   bool select(uint64_t ts, const std::string & name);
+  // fps<=0 时用默认 kImgSaveFps。
+  bool select(uint64_t ts, const std::string & name, int fps);
 
 private:
   std::mutex mtx_;
@@ -59,7 +61,7 @@ private:
   std::condition_variable cv_;
 };
 
-bool encode_jpeg(cv::Mat & img, int width, int quality, std::vector<uint8_t> & jpeg);
+bool encode_jpeg(const cv::Mat & img, int width, int quality, std::vector<uint8_t> & jpeg);
 
 }  // namespace rdbg
 }  // namespace tools

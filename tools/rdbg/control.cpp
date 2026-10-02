@@ -25,6 +25,7 @@ bool ControlPlane::start()
     inbound_json_.clear();
     img_subs_.clear();
     img_union_.clear();
+    host_tx_cap_ = {};
     head_addr_ = sockaddr_in{};
     head_addr_.sin_family = AF_INET;
   }
@@ -91,6 +92,18 @@ bool ControlPlane::any_image_subscribed() const
   return !img_union_.empty();
 }
 
+TxCap ControlPlane::host_tx_cap() const
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  return host_tx_cap_;
+}
+
+void ControlPlane::set_host_tx_cap(const TxCap & cap)
+{
+  std::lock_guard<std::mutex> lock(mtx_);
+  host_tx_cap_ = cap;
+}
+
 void ControlPlane::clear_img_sub_locked(const std::string & host_id)
 {
   img_subs_.erase(host_id);
@@ -117,7 +130,11 @@ nlohmann::json ControlPlane::make_beacon() const
   j["v"] = 1;
   j["type"] = "beacon";
   j["name"] = sender_name;
-  j["app"] = app.empty() ? "normal" : app;
+  const std::string app_s = app.empty() ? "normal" : app;
+  j["app"] = app_s;
+  // 可选：门户直接按 feature 开页（calibrate / tfviz / watch …）；缺省由 host 从 app 映射
+  if (app_s == "calibrate" || app_s == "tfviz") j["feature"] = app_s;
+  else if (app_s == "normal") j["feature"] = "watch";
   j["ip"] = local_ipv4();
   j["control"] = control_port;
   j["ts"] = now_ns();
@@ -485,6 +502,24 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
       if (!find_locked(host_id)) return;
       if (inbound_json_.size() >= 64) inbound_json_.pop_front();
       inbound_json_.push_back(msg["data"]);
+      // 调试指令：远程画质上限，立即生效（不依赖业务 poll）。
+      if (msg["data"].is_object() &&
+          msg["data"].value("cmd", "") == "set_img_tx") {
+        const auto & d = msg["data"];
+        TxCap cap = host_tx_cap_;
+        if (d.contains("max_width") && d["max_width"].is_number_integer())
+          cap.max_width = d["max_width"].get<int>();
+        if (d.contains("max_quality") && d["max_quality"].is_number_integer())
+          cap.max_quality = d["max_quality"].get<int>();
+        if (d.contains("max_fps") && d["max_fps"].is_number_integer())
+          cap.max_fps = d["max_fps"].get<int>();
+        if (d.contains("level") && d["level"].is_number_integer())
+          cap.max_level = d["level"].get<int>();
+        host_tx_cap_ = cap;
+        std::fprintf(stderr,
+                     "[RemoteLogger] set_img_tx w=%d q=%d fps=%d level=%d\n",
+                     cap.max_width, cap.max_quality, cap.max_fps, cap.max_level);
+      }
     }
     return;
   }
@@ -500,6 +535,17 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
         }
       }
     }
+    TxCap cap;
+    if (msg.contains("max_width") && msg["max_width"].is_number_integer())
+      cap.max_width = msg["max_width"].get<int>();
+    if (msg.contains("max_quality") && msg["max_quality"].is_number_integer())
+      cap.max_quality = msg["max_quality"].get<int>();
+    if (msg.contains("max_fps") && msg["max_fps"].is_number_integer())
+      cap.max_fps = msg["max_fps"].get<int>();
+    if (msg.contains("max_level") && msg["max_level"].is_number_integer())
+      cap.max_level = msg["max_level"].get<int>();
+    const bool has_cap = cap.max_width > 0 || cap.max_quality > 0 ||
+                         cap.max_fps > 0 || cap.max_level >= 0;
     nlohmann::json ack = {{"v", 1}, {"type", "img_subscribe_ack"}, {"status", "ok"}};
     uint16_t reply_port = msg.value("peer_port", 0);
     {
@@ -516,6 +562,7 @@ void ControlPlane::handle(const char * buf, size_t n, const sockaddr_in & from)
       if (streams.empty()) img_subs_.erase(host_id);
       else img_subs_[host_id] = std::move(streams);
       rebuild_img_union_locked();
+      if (has_cap) host_tx_cap_ = cap;
       ack["streams"] = nlohmann::json::array();
       for (const auto & s : img_union_) ack["streams"].push_back(s);
       std::fprintf(stderr, "[RemoteLogger] img_subscribe host=%s union=%zu\n",

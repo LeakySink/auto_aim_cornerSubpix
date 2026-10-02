@@ -54,6 +54,7 @@ class LiveSource:
         self._last_senders = []
         self._img_by_key = {}
         self._last_img_sub = 0.0
+        self._tx_profile = {}
         if self._target:
             self._selected = self._target
 
@@ -75,8 +76,10 @@ class LiveSource:
         self._poller = threading.Thread(target=self.poller, daemon=True)
         self._poller.start()
         self.push_state()
-        print("[watch] host_id %s data:%s peer:%s" % (
-            self.host_id[:8], self.data_port, self.peer_port))
+        print(
+            "[fleet] 本机 host_id=%s 数据口 UDP:%s 对等口:%s（绑车后收 plot）"
+            % (self.host_id[:8], self.data_port, self.peer_port)
+        )
 
     def stop(self):
         self._running = False
@@ -134,6 +137,11 @@ class LiveSource:
             self._img_by_key[key] = list(streams or [])
         self._push_img_subscribe(force=True)
 
+    def set_tx_profile(self, profile):
+        with self._lock:
+            self._tx_profile = dict(profile or {})
+        self._push_img_subscribe(force=True)
+
     def clear_img_key(self, key):
         with self._lock:
             self._img_by_key.pop(key, None)
@@ -147,6 +155,7 @@ class LiveSource:
             streams = self._streams_locked()
             selected = self._target or self._selected
             robots = dict(self.robots)
+            caps = dict(self._tx_profile)
         if not selected:
             return
         info = robots.get(selected)
@@ -154,7 +163,7 @@ class LiveSource:
             return
         if now - info["last"] > BEACON_STALE_S:
             return
-        self.client.img_subscribe(info["ip"], info["control"], streams)
+        self.client.img_subscribe(info["ip"], info["control"], streams, **caps)
         self._last_img_sub = now
 
     def _streams_locked(self):
@@ -171,7 +180,7 @@ class LiveSource:
         with self._lock:
             return self.roles.get(robot) == "head"
 
-    def _on_beacon(self, name, ip, control, _addr, app="normal"):
+    def _on_beacon(self, name, ip, control, _addr, app="normal", feature=""):
         if self._target and name != self._target:
             return
         now = time.monotonic()
@@ -181,12 +190,16 @@ class LiveSource:
             if prev is None or prev["ip"] != ip or prev["control"] != control:
                 changed = True
             self.robots[name] = {
-                "ip": ip, "control": control, "last": now, "app": app or "normal",
+                "ip": ip, "control": control, "last": now,
+                "app": app or "normal", "feature": feature or "",
             }
         if changed:
             self.client.register(ip, control)
             self._last_register[name] = now
-            print("[watch] beacon %s at %s:%s app=%s" % (name, ip, control, app or "normal"))
+            print(
+                "[fleet] 发现车 '%s' %s:控制口%s app=%s feature=%s → 正在 register"
+                % (name, ip, control, app or "normal", feature or "-")
+            )
             self.push_state()
 
     def _on_raw(self, data):
@@ -226,6 +239,7 @@ class LiveSource:
 
     def _become_head(self, robot, queue):
         with self._lock:
+            already = self.roles.get(robot) == "head"
             self.roles[robot] = "head"
             self.queues[robot] = list(queue)
             self.heads[robot] = {
@@ -235,13 +249,18 @@ class LiveSource:
                 "data_port": self.data_port,
             }
         self.peer.unfollow(robot)
-        print("[watch] head of %s" % robot)
+        if not already:
+            print(
+                "[fleet] 本机成为车 '%s' 的队首(head)：车只向本机 UDP %s 发 plot/图像；"
+                "其他调试机会从本机转发" % (robot, self.data_port)
+            )
         info = self.robots.get(robot)
         if info:
             self.client.head_alive(info["ip"], info["control"])
             self._last_alive[robot] = time.monotonic()
-        self._push_img_subscribe(force=True)
-        self.push_state()
+        if not already:
+            self._push_img_subscribe(force=True)
+            self.push_state()
 
     def _follow(self, robot, head, queue):
         if not head or not head.get("ip") or not head.get("peer_port"):
@@ -250,13 +269,21 @@ class LiveSource:
             self._become_head(robot, queue)
             return
         with self._lock:
+            already = (
+                self.roles.get(robot) == "follower"
+                and (self.heads.get(robot) or {}).get("host_id") == head.get("host_id")
+                and (self.heads.get(robot) or {}).get("peer_port") == head.get("peer_port")
+            )
             self.roles[robot] = "follower"
             self.heads[robot] = dict(head)
             self.queues[robot] = list(queue)
         self.peer.subscribe(robot, head["ip"], head["peer_port"])
-        print("[watch] follow %s via %s:%s" % (
-            robot, head.get("ip"), head.get("peer_port")))
-        self.push_state()
+        if not already:
+            print(
+                "[fleet] 本机是车 '%s' 的后入者(follower)：不直接收车数据，"
+                "改为订阅队首 %s:%s 的转发" % (robot, head.get("ip"), head.get("peer_port"))
+            )
+            self.push_state()
 
     def poller(self):
         while self._running:

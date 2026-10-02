@@ -27,4 +27,7 @@ build_ros2/
 .ros2_ws/
 # 本地 ROS2 深度测试包（不入库；由开发者本地生成）
 io/ros2/msg/test_*/
+# 本地联调假源（不入库）
+tests/markers_pub_test.cpp
+tests/tf_pub_fake.py
 
