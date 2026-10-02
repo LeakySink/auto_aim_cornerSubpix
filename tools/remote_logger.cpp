@@ -1,6 +1,7 @@
 #include "remote_logger.hpp"
 
 #include "rdbg/engine.hpp"
+#include "rdbg/tf_auto_pub.hpp"
 
 #include "tools/yaml.hpp"
 
@@ -52,6 +53,10 @@ void RemoteLogger::init(const std::string & config_path)
     cfg.beacon_port = node["beacon_port"].as<uint16_t>();
 
   init(cfg);
+
+  // 外参只发一次；姿态由 io::Gimbal::q 持续发布
+  const std::string resolved = tools::project_path(config_path);
+  tools::rdbg::publish_tf_extrinsics_once(yaml, resolved);
 }
 
 void RemoteLogger::plot(const nlohmann::json & data) { impl_->plot(data); }

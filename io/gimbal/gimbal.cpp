@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "tools/rdbg/tf_auto_pub.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
@@ -70,8 +71,12 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
     auto t_ac = tools::delta_time(t_a, t);
     auto k = t_ac / t_ab;
     Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
-    if (t < t_a) return q_c;
+    if (t < t_a) {
+      tools::rdbg::publish_tf_attitude(q_c);
+      return q_c;
+    }
     if (!(t_a < t && t <= t_b)) continue;
+    tools::rdbg::publish_tf_attitude(q_c);
     return q_c;
   }
 }
