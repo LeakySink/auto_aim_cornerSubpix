@@ -28,8 +28,8 @@ struct Plan
   float pitch;
   float pitch_vel;
   float pitch_acc;
-  double yaw0;        // 新增：MPC 解算前的理想瞄准 yaw
-  double pitch0;      // 新增：MPC 解算前的理想发射 pitch
+  double yaw0;        // MPC 解算前的理想瞄准 yaw
+  double pitch0;      // MPC 解算前的理想发射 pitch
 };
 
 class Planner
@@ -46,6 +46,7 @@ public:
 private:
   double yaw_offset_;
   double pitch_offset_;
+  double drag_coefficient_;  // 空气阻力系数，单位 1/m
   double fire_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
 

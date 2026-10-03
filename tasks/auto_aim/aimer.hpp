@@ -35,6 +35,7 @@ private:
   double yaw_offset_;
   std::optional<double> left_yaw_offset_, right_yaw_offset_;
   double pitch_offset_;
+  double drag_coefficient_;  // 空气阻力系数，单位 1/m
   double comming_angle_;
   double leaving_angle_;
   double lock_id_ = -1;

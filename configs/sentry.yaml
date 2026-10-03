@@ -69,6 +69,7 @@ leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
 high_speed_delay_time: 0.065 # s
 low_speed_delay_time: 0.055 # s planner use this value
+drag_coefficient: 0.02   # 1/m，0=无阻力；17mm 理论初值约 0.015~0.025
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
