@@ -46,7 +46,11 @@ public:
 private:
   double yaw_offset_;
   double pitch_offset_;
-  double drag_coefficient_;  // 空气阻力系数，单位 1/m
+
+  double drag_coefficient_up_;     // h >= boundary
+  double drag_coefficient_down_;   // h <  boundary
+  double drag_height_boundary_;    // 新增：高度分界，单位 m
+
   double fire_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
 

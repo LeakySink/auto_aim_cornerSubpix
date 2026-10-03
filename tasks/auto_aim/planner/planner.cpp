@@ -13,11 +13,23 @@ namespace auto_aim
 Planner::Planner(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
+
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
   pitch_offset_ = tools::read<double>(yaml, "pitch_offset") / 57.3;
 
-  auto drag_node = yaml["drag_coefficient"];
-  drag_coefficient_ = drag_node ? drag_node.as<double>() : 0.0;
+  auto old_node = yaml["drag_coefficient"];
+  auto up_node = yaml["drag_coefficient_up"];
+  auto down_node = yaml["drag_coefficient_down"];
+  auto boundary_node = yaml["drag_height_boundary"];
+
+  drag_coefficient_up_ =
+    up_node ? up_node.as<double>() : (old_node ? old_node.as<double>() : 0.0);
+
+  drag_coefficient_down_ =
+    down_node ? down_node.as<double>() : drag_coefficient_up_;
+
+  drag_height_boundary_ =
+    boundary_node ? boundary_node.as<double>() : 0.0;
 
   fire_thresh_ = tools::read<double>(yaml, "fire_thresh");
   decision_speed_ = tools::read<double>(yaml, "decision_speed");
@@ -46,8 +58,12 @@ Plan Planner::plan(Target target, double bullet_speed)
     }
   }
 
-  auto bullet_traj = tools::Trajectory(
-    bullet_speed, min_dist, xyz.z(), drag_coefficient_);
+  const double k0 =
+  (xyz.z() >= drag_height_boundary_)
+    ? drag_coefficient_up_
+    : drag_coefficient_down_;
+
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z(), k0);
   target.predict(bullet_traj.fly_time);
 
   // 2. Get trajectory
@@ -98,7 +114,8 @@ Plan Planner::plan(Target target, double bullet_speed)
   auto shoot_offset_ = 2;
   plan.fire =
     std::hypot(
-      traj(0, HALF_HORIZON + shoot_offset_) - yaw_solver_->work->x(0, HALF_HORIZON + shoot_offset_),
+      traj(0, HALF_HORIZON + shoot_offset_) -
+        yaw_solver_->work->x(0, HALF_HORIZON + shoot_offset_),
       traj(2, HALF_HORIZON + shoot_offset_) -
         pitch_solver_->work->x(0, HALF_HORIZON + shoot_offset_)) < fire_thresh_;
 
@@ -110,9 +127,11 @@ Plan Planner::plan(std::optional<Target> target, double bullet_speed)
   if (!target.has_value()) return {false};
 
   double delay_time =
-    std::abs(target->ekf_x()[7]) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+    std::abs(target->ekf_x()[7]) > decision_speed_ ? high_speed_delay_time_
+                                                   : low_speed_delay_time_;
 
-  auto future = std::chrono::steady_clock::now() + std::chrono::microseconds(int(delay_time * 1e6));
+  auto future =
+    std::chrono::steady_clock::now() + std::chrono::microseconds(int(delay_time * 1e6));
 
   target->predict(future);
 
@@ -131,7 +150,9 @@ void Planner::setup_yaw_solver(const std::string & config_path)
   Eigen::VectorXd f{{0, 0}};
   Eigen::Matrix<double, 2, 1> Q(Q_yaw.data());
   Eigen::Matrix<double, 1, 1> R(R_yaw.data());
-  tiny_setup(&yaw_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);
+
+  tiny_setup(
+    &yaw_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);
 
   Eigen::MatrixXd x_min = Eigen::MatrixXd::Constant(2, HORIZON, -1e17);
   Eigen::MatrixXd x_max = Eigen::MatrixXd::Constant(2, HORIZON, 1e17);
@@ -154,7 +175,9 @@ void Planner::setup_pitch_solver(const std::string & config_path)
   Eigen::VectorXd f{{0, 0}};
   Eigen::Matrix<double, 2, 1> Q(Q_pitch.data());
   Eigen::Matrix<double, 1, 1> R(R_pitch.data());
-  tiny_setup(&pitch_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);
+
+  tiny_setup(
+    &pitch_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);
 
   Eigen::MatrixXd x_min = Eigen::MatrixXd::Constant(2, HORIZON, -1e17);
   Eigen::MatrixXd x_max = Eigen::MatrixXd::Constant(2, HORIZON, 1e17);
@@ -179,12 +202,21 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
       yaw = xyza[3];
     }
   }
+
   debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
 
   auto azim = std::atan2(xyz.y(), xyz.x());
-  auto bullet_traj = tools::Trajectory(
-    bullet_speed, min_dist, xyz.z(), drag_coefficient_);
-  if (bullet_traj.unsolvable) throw std::runtime_error("Unsolvable bullet trajectory!");
+
+  const double k =
+  (xyz.z() >= drag_height_boundary_)
+    ? drag_coefficient_up_
+    : drag_coefficient_down_;
+
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z(), k);
+
+  if (bullet_traj.unsolvable) {
+    throw std::runtime_error("Unsolvable bullet trajectory!");
+  }
 
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};
 }
@@ -203,10 +235,12 @@ Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_s
     target.predict(DT);
     auto yaw_pitch_next = aim(target, bullet_speed);
 
-    auto yaw_vel = tools::limit_rad(yaw_pitch_next(0) - yaw_pitch_last(0)) / (2 * DT);
+    auto yaw_vel =
+      tools::limit_rad(yaw_pitch_next(0) - yaw_pitch_last(0)) / (2 * DT);
     auto pitch_vel = (yaw_pitch_next(1) - yaw_pitch_last(1)) / (2 * DT);
 
-    traj.col(i) << tools::limit_rad(yaw_pitch(0) - yaw0), yaw_vel, yaw_pitch(1), pitch_vel;
+    traj.col(i) << tools::limit_rad(yaw_pitch(0) - yaw0), yaw_vel, yaw_pitch(1),
+      pitch_vel;
 
     yaw_pitch_last = yaw_pitch;
     yaw_pitch = yaw_pitch_next;

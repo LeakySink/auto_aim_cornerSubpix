@@ -23,6 +23,7 @@ class Aimer
 public:
   AimPoint debug_aim_point;
   explicit Aimer(const std::string & config_path);
+
   io::Command aim(
     std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
     bool to_now = true);
@@ -35,7 +36,11 @@ private:
   double yaw_offset_;
   std::optional<double> left_yaw_offset_, right_yaw_offset_;
   double pitch_offset_;
-  double drag_coefficient_;  // 空气阻力系数，单位 1/m
+
+  double drag_coefficient_up_;     // h >= boundary
+  double drag_coefficient_down_;   // h <  boundary
+  double drag_height_boundary_;    // 新增：高度分界，单位 m
+
   double comming_angle_;
   double leaving_angle_;
   double lock_id_ = -1;
