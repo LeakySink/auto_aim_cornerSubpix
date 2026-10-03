@@ -21,6 +21,9 @@ public:
 
   bool detect(Armor & armor, const cv::Mat & bgr_img);
 
+  // 对装甲板四个角点做 OpenCV 亚像素精化
+  void refine_corners_subpix(const cv::Mat & bgr_img, std::list<Armor> & armors) const;
+
   friend class YOLOV8;
 
 private:

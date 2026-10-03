@@ -86,8 +86,8 @@ Plan Planner::plan(Target target, double bullet_speed)
 
   plan.pitch = pitch_solver_->work->x(0, HALF_HORIZON);
   plan.pitch = -plan.pitch;
-  plan.pitch_vel = pitch_solver_->work->x(1, HALF_HORIZON);
-  plan.pitch_acc = pitch_solver_->work->u(0, HALF_HORIZON);
+  plan.pitch_vel = -pitch_solver_->work->x(1, HALF_HORIZON);
+  plan.pitch_acc = -pitch_solver_->work->u(0, HALF_HORIZON);
 
   auto shoot_offset_ = 2;
   plan.fire =

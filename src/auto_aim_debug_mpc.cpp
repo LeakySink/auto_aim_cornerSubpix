@@ -19,7 +19,6 @@
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/thread_safe_queue.hpp"
-
 using namespace std::chrono_literals;
 
 const std::string keys =
@@ -63,7 +62,7 @@ int main(int argc, char * argv[])
       const auto yaw_err = tools::limit_rad(plan.yaw0 - gs.yaw);
       const auto pitch_err = plan.pitch0 + gs.pitch;
       const auto yp_error=std::hypot(yaw_err, pitch_err);
-      const bool fire =std::hypot(yaw_err, pitch_err)< planner.fire_thresh();
+      const bool fire = std::hypot(yaw_err, pitch_err) < planner.fire_thresh();
       if (plan.control) {
         gimbal.send(
        plan.control, fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
@@ -80,9 +79,6 @@ int main(int argc, char * argv[])
       data["gimbal_pitch"] = gs.pitch;
       data["gimbal_pitch_vel"] = gs.pitch_vel;
 
-      //data["target_yaw"] = plan.target_yaw;
-      //data["target_pitch"] = plan.target_pitch;
-
       data["plan_yaw"] = plan.yaw;
       data["plan_yaw_vel"] = plan.yaw_vel;
       data["plan_yaw_acc"] = plan.yaw_acc;
@@ -91,14 +87,17 @@ int main(int argc, char * argv[])
       data["plan_pitch_vel"] = plan.pitch_vel;
       data["plan_pitch_acc"] = plan.pitch_acc;
 
-      data["plan_pitch0"] = plan.pitch0;
-      data["plan_yaw0"] = plan.yaw0;
-      data["111111111111111"]=yp_error;
+      // data["plan_pitch0"] = plan.pitch0;
+      // data["plan_yaw0"] = plan.yaw0;
+      data["yaw_error"] = yaw_err;
+      data["pitch_error"] = pitch_err;
+      data["yp_error"]=yp_error;
 
       data["fire"] = fire ? 1 : 0;
-      data["fired"] = fired ? 1 : 0;
+      // data["fired"] = fired ? 1 : 0;
 
       if (target.has_value()) {
+        const auto & e = target->ekf();
         data["target_x"] = target->ekf_x()[0];   //z
         data["target_vx"] = target->ekf_x()[1];
         data["target_y"] = target->ekf_x()[2];   //z
@@ -106,7 +105,7 @@ int main(int argc, char * argv[])
         data["target_z"] = target->ekf_x()[4];   //z
         data["target_vz"] = target->ekf_x()[5];  //vz
         data["target_yaw"] = target->ekf_x()[6];
-        data["target_yaw_vel"] = target->ekf_x()[7];
+        data["armor_id"] = target->last_id;      // last_id 是 public
       }
       if (target.has_value() && !armors.empty()) {
         for (const auto & a : armors) {

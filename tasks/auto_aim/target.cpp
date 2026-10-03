@@ -137,51 +137,60 @@ void Target::predict(double dt)
 
 void Target::update(const Armor & armor)
 {
-  // 装甲板匹配
-  int id;
-  auto min_angle_error = 1e10;
-  const std::vector<Eigen::Vector4d> & xyza_list = armor_xyza_list();
+  const auto xyza_list = armor_xyza_list();
 
-  std::vector<std::pair<Eigen::Vector4d, int>> xyza_i_list;
-  for (int i = 0; i < armor_num_; i++) {
-    xyza_i_list.push_back({xyza_list[i], i});
-  }
+  int id = -1;
+  double min_cost = 1e10;
+  bool flip_yaw = false;
 
-  std::sort(
-    xyza_i_list.begin(), xyza_i_list.end(),
-    [](const std::pair<Eigen::Vector4d, int> & a, const std::pair<Eigen::Vector4d, int> & b) {
-      Eigen::Vector3d ypd1 = tools::xyz2ypd(a.first.head(3));
-      Eigen::Vector3d ypd2 = tools::xyz2ypd(b.first.head(3));
-      return ypd1[2] < ypd2[2];
-    });
+  const double obs_yaw  = armor.ypr_in_world[0];
+  const double obs_los  = armor.ypd_in_world[0];
+  const double obs_dist = armor.ypd_in_world[2];
 
-  // 取前3个distance最小的装甲板
-  for (int i = 0; i < 3; i++) {
-    const auto & xyza = xyza_i_list[i].first;
-    Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head(3));
-    auto angle_error = std::abs(tools::limit_rad(armor.ypr_in_world[0] - xyza[3])) +
-                       std::abs(tools::limit_rad(armor.ypd_in_world[0] - ypd[0]));
+  for (int i = 0; i < armor_num_; ++i) {
+    const auto & xyza = xyza_list[i];
+    const Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head<3>());
 
-    if (std::abs(angle_error) < std::abs(min_angle_error)) {
-      id = xyza_i_list[i].second;
-      min_angle_error = angle_error;
+    // 观测 yaw 与预测装甲板 yaw，允许 PnP 的 ±π 二义性
+    const double yaw_err      = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
+    const double yaw_err_flip = std::abs(tools::limit_rad(obs_yaw + CV_PI - xyza[3]));
+    const double yaw_cost     = std::min(yaw_err, yaw_err_flip);
+
+    const double los_cost  = std::abs(tools::limit_rad(obs_los - ypd[0]));
+    const double dist_cost = std::abs(obs_dist - ypd[2]);
+
+    double cost = yaw_cost + 0.5 * los_cost + 0.2 * dist_cost;
+
+    // 低速时优先保持上一帧 id，抑制抖动
+    // |w| 阈值可根据实际调，例如 2.0 ~ 3.0 rad/s
+    if (update_count_ > 0 && i != last_id && std::abs(ekf_.x[7]) < 4.0) {
+      cost += 0.35;  // 约 20° 的切换惩罚，需要根据数据调
+    }
+
+    if (cost < min_cost) {
+      min_cost = cost;
+      id = i;
+      flip_yaw = yaw_err_flip < yaw_err;
     }
   }
 
+  if (id < 0) id = 0;
+
   if (id != 0) jumped = true;
 
-  if (id != last_id) {
-    is_switch_ = true;
-  } else {
-    is_switch_ = false;
-  }
-
+  is_switch_ = (update_count_ > 0 && id != last_id);
   if (is_switch_) switch_count_++;
 
   last_id = id;
   update_count_++;
 
-  update_ypda(armor, id);
+  // 如果是 PnP yaw 翻转，先把观测 yaw 翻回来再送 EKF
+  Armor corrected = armor;
+  if (flip_yaw) {
+    corrected.ypr_in_world[0] = tools::limit_rad(obs_yaw + CV_PI);
+  }
+
+  update_ypda(corrected, id);
 }
 
 void Target::update_ypda(const Armor & armor, int id)

@@ -3,7 +3,9 @@
 #include <fmt/chrono.h>
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <filesystem>
+#include <utility>
 
 #include "tools/img_tools.hpp"
 #include "tools/remote_logger.hpp"
@@ -114,6 +116,8 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 
   armors.remove_if([&](const Armor & a) { return a.duplicated; });
 
+  refine_corners_subpix(bgr_img, armors);
+
   if (debug_) show_result(binary_img, bgr_img, lightbars, armors, frame_count);
 
   return armors;
@@ -208,7 +212,7 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
     }
   }
 
-  // tools::RemoteLogger::instance().log("DEBUG", 
+  // tools::logger()->debug(
   // "min_distance_br_tr + min_distance_tl_bl is {}", min_distance_br_tr + min_distance_tl_bl);
   // std::vector<cv::Point2f> points2f{
   //   closest_left_lightbar->top, closest_left_lightbar->bottom, closest_right_lightbar->bottom,
@@ -228,6 +232,52 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
   }
 
   return false;
+}
+
+void Detector::refine_corners_subpix(const cv::Mat & bgr_img, std::list<Armor> & armors) const
+{
+  if (bgr_img.empty() || armors.empty()) return;
+
+  cv::Mat gray_img;
+  cv::cvtColor(bgr_img, gray_img, cv::COLOR_BGR2GRAY);
+
+  const cv::Size win_size(5, 5);
+  const cv::TermCriteria criteria(
+    cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 30, 0.01);
+
+  for (auto & armor : armors) {
+    if (armor.points.size() != 4) continue;
+
+    // cornerSubPix 需要局部邻域在图像内，越界的点直接跳过
+    bool inside = true;
+    for (const auto & point : armor.points) {
+      if (
+        point.x < win_size.width || point.y < win_size.height ||
+        point.x >= gray_img.cols - win_size.width || point.y >= gray_img.rows - win_size.height) {
+        inside = false;
+        break;
+      }
+    }
+    if (!inside) continue;
+
+    std::vector<cv::Point2f> refined = armor.points;
+    cv::cornerSubPix(gray_img, refined, win_size, cv::Size(-1, -1), criteria);
+
+    bool valid = true;
+    for (const auto & point : refined) {
+      if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid) continue;
+
+    armor.points = std::move(refined);
+
+    // 角点更新后同步修正中心点，供后续排序/ROI使用
+    armor.center =
+      (armor.points[0] + armor.points[1] + armor.points[2] + armor.points[3]) / 4.0f;
+  }
 }
 
 bool Detector::check_geometry(const Lightbar & lightbar) const
@@ -268,8 +318,8 @@ bool Detector::check_type(const Armor & armor) const
 
   // 保存异常的图案，用于分类器的迭代
   if (!name_ok) {
-    tools::RemoteLogger::instance().log("DEBUG", 
-      "see strange armor: {} {}", ARMOR_TYPES[armor.type], ARMOR_NAMES[armor.name]);
+    tools::RemoteLogger::instance().log(
+      "DEBUG", "see strange armor: {} {}", ARMOR_TYPES[armor.type], ARMOR_NAMES[armor.name]);
     save(armor);
   }
 
@@ -314,18 +364,18 @@ ArmorType Detector::get_type(const Armor & armor)
   /// TODO: 25赛季是否还需要根据比例判断大小装甲？能否根据图案直接判断？
 
   if (armor.ratio > 3.0) {
-    // tools::RemoteLogger::instance().log("DEBUG", 
+    // tools::logger()->debug(
     //   "[Detector] get armor type by ratio: BIG {} {:.2f}", ARMOR_NAMES[armor.name], armor.ratio);
     return ArmorType::big;
   }
 
   if (armor.ratio < 2.5) {
-    // tools::RemoteLogger::instance().log("DEBUG", 
+    // tools::logger()->debug(
     //   "[Detector] get armor type by ratio: SMALL {} {:.2f}", ARMOR_NAMES[armor.name], armor.ratio);
     return ArmorType::small;
   }
 
-  // tools::RemoteLogger::instance().log("DEBUG", "[Detector] get armor type by name: {}", ARMOR_NAMES[armor.name]);
+  // tools::logger()->debug("[Detector] get armor type by name: {}", ARMOR_NAMES[armor.name]);
 
   // 英雄、基地只能是大装甲板
   if (armor.name == ArmorName::one || armor.name == ArmorName::base) {
