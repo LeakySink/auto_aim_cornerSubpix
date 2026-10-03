@@ -63,12 +63,12 @@ ekf:
 
 #####-----aimer参数-----#####
 yaw_offset: -2 # degree -2.5
-pitch_offset: 1.43 # degree 2
+pitch_offset: 1.72 # degree 2
 comming_angle: 55 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
-high_speed_delay_time: 0.055 # s
-low_speed_delay_time: 0.04 # s planner use this value
+high_speed_delay_time: 0.065 # s
+low_speed_delay_time: 0.055 # s planner use this value
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree

@@ -108,7 +108,7 @@ int main(int argc, char * argv[])
         data["armor_id"] = target->last_id;      // last_id 是 public
       }
       if (target.has_value() && !armors.empty()) {
-        for (const auto & a : armors) {
+        for (const auto & a   : armors) {
           if (a.name == target->name && a.type == target->armor_type) {
             data["obs_yaw"] = a.ypd_in_world[0];       // z[0]
             data["obs_pitch"] = a.ypd_in_world[1];     // z[1]
@@ -124,10 +124,10 @@ int main(int argc, char * argv[])
       } else {
         data["w"] = 0.0;
       }
-      if (!armors.empty()) {
-        auto armor = armors.front();
-        data["measure_yaw"] = armor.yaw_raw;
-      }
+      // if (!armors.empty()) {
+      //   auto armor = armors.front();
+      //   data["measure_yaw"] = armor.yaw_raw;
+      // }
       tools::RemoteLogger::instance().plot(data);
 
       std::this_thread::sleep_for(10ms);
