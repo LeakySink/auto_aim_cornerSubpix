@@ -1,0 +1,2 @@
+# Optional host deps (dump → video). watch/replay stay stdlib-only.
+opencv-python-headless>=4.5

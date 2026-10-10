@@ -1,0 +1,148 @@
+
+#enemy_color: "red"
+enemy_color: "blue"
+
+#####-----神经网络参数-----#####
+yolo_name: tup
+classify_model: assets/tiny_resnet.onnx
+yolo11_model_path: assets/yolo11.xml
+yolov8_model_path: assets/yolov8.xml
+yolov5_model_path: assets/yolov5.xml
+tup_model_path: assets/opt-1208-001.xml
+device: CPU
+min_confidence: 0.8
+use_traditional: true
+
+#####-----ROI-----#####
+roi:
+  x: 420
+  y: 50
+  width: 600
+  height: 600
+
+use_roi: false
+
+#####-----传统方法参数-----#####
+threshold: 150
+max_angle_error: 45 # degree
+min_lightbar_ratio: 1.5
+max_lightbar_ratio: 20
+min_lightbar_length: 8
+min_armor_ratio: 1
+max_armor_ratio: 5
+max_side_ratio: 1.5
+max_rectangular_error: 25 # degree
+
+#####-----tracker参数-----#####
+min_detect_count: 5
+max_temp_lost_count: 15
+outpost_max_temp_lost_count: 75
+
+#####-----EKF参数-----#####
+ekf:
+  q_xyz_acc_var: 70.0   # 位置/速度加速度方差
+  q_yaw_acc_var: 100.0    # 角加速度方差
+  r_yaw: 5e-3          # yaw 观测噪声
+  r_pitch: 2e-3        # pitch 观测噪声
+  r_dist_base: 2e-1    # 距离观测噪声基础值
+
+  outpost:
+    radius: 0.2765
+    armor_num: 3
+    p0: [1, 64, 1, 64, 1, 81, 0.4, 100, 1.0e-4, 0, 0]
+
+  base:
+    radius: 0.3205
+    armor_num: 3
+    p0: [1, 64, 1, 64, 1, 64, 0.4, 100, 1.0e-4, 0, 0]
+
+  normal:
+    radius: 0.2
+    armor_num: 4
+    p0: [1, 64, 1, 64, 1, 64, 0.4, 400, 1.0e-5, 0.3, 0.3]
+
+#####-----aimer参数-----#####
+yaw_offset: -2 # degree -2.5
+pitch_offset: 1.72 # degree 2
+comming_angle: 55 # degree
+leaving_angle: 20 # degree
+decision_speed: 7 # rad/s
+high_speed_delay_time: 0.065 # s
+low_speed_delay_time: 0.055 # s planner use this value
+drag_coefficient_up: 0.2415      # h > ，低打高/平打
+drag_coefficient_down: 0.00    # h <= ，高打低先设
+drag_height_boundary: -0.3
+
+#####-----shooter参数-----#####
+first_tolerance: 3 # 近距离射击容差，degree
+second_tolerance: 2 # 远距离射击容差，degree
+judge_distance: 2 #距离判断阈值
+auto_fire: true # 是否由自瞄控制射击
+
+camera_name: "hikrobot"
+exposure_ms: 10
+gain: 16
+vid_pid: "2bdf:0001"
+
+#  1  0  0
+#  0  1  0
+#  0  0  1
+#####-----工业相机标定参数-----#####
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+calibrated_at: "2026-10-01"
+# 重投影误差: 0.4466px
+camera_matrix: [1817.806292,0.000000,704.048819,0.000000,1819.072108,545.80138,0.000000,0.000000,1.000000]
+distort_coeffs: [-0.068754,0.162100,-0.001822,-0.001524,0.000000]
+
+# 相机同理想情况的偏角: yaw-1.11 pitch0.01 roll-0.06 degree
+# 标定板到世界坐标系原点的水平距离: 1.20 m
+# 标定板同竖直摆放时的偏角: yaw123.89 pitch14.05 roll-0.86 degree
+R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0]
+t_camera2gimbal: [0.1600, 0.04525, 0.003]
+
+#####-----cboard参数-----#####
+quaternion_canid: 0x100
+bullet_speed_canid: 0x101
+send_canid: 0xff
+can_interface: "can0"
+
+#####-----gimbal参数-----#####
+com_port: "/dev/ttyACM0"
+yaw_kp: 0
+yaw_kd: 0
+pitch_kp: 0
+pitch_kd: 0
+
+#####-----planner-----#####
+fire_thresh: 0.15
+
+max_yaw_acc: 50
+Q_yaw: [9e6, 0]
+R_yaw: [1]
+
+max_pitch_acc: 100
+Q_pitch: [9e6, 0]
+R_pitch: [1]
+
+#####-----buff_detector参数-----#####
+model: "assets/yolo11_buff_int8.xml"
+
+#####-----buff_aimer参数-----#####
+fire_gap_time: 0.700   # s
+predict_time: 0.120     # s
+
+#####-----remote_logger-----#####
+remote_logger:
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500
+  sender_name: "bingbing"
+  beacon_interval_ms: 1000
+  head_timeout_ms: 2000

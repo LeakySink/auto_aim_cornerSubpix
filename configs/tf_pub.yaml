@@ -1,0 +1,28 @@
+# 默认配置：Host TF Viz 本机拉起 tf_pub_test 时使用。
+# 可用 RDBG_TF_PUB_CONFIG 或 open(config_path=...) 覆盖。
+
+#####-----云台串口-----#####
+com_port: "/dev/ttyACM0"
+
+#####-----外参（占位，可按实车标定替换）-----#####
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+# camera optical → gimbal：常见安装近似（光轴向前）
+R_camera2gimbal: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+t_camera2gimbal: [0.1, 0, 0.05]
+
+#####-----remote_logger-----#####
+remote_logger:
+  control_port: 15000
+  enable_remote: true
+  enable_local: true
+  log_dir: "./logs"
+  var_buffer_size: 1024
+  img_buffer_size: 10
+  img_width: 640
+  img_quality: 50
+  heartbeat_interval_ms: 500
+  sender_name: "tf_pub"
+  # app 由 tf_pub_test 强制为 tfviz，此处可写可不写
+  app: "tfviz"
+  beacon_interval_ms: 1000
+  head_timeout_ms: 2000
