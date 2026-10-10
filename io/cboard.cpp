@@ -1,5 +1,7 @@
 #include "cboard.hpp"
 
+#include <algorithm>
+
 #include "tools/math_tools.hpp"
 #include "tools/rdbg/tf_auto_pub.hpp"
 #include "tools/yaml.hpp"
@@ -38,8 +40,14 @@ Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestam
   std::chrono::duration<double> t_ab = t_b - t_a;
   std::chrono::duration<double> t_ac = t_c - t_a;
 
-  // 四元数插值
-  auto k = t_ac / t_ab;
+  // 相邻两帧 IMU 时间戳相同会导致除零产生 NaN 四元数，此时直接使用最新帧
+  if (t_ab.count() <= 0) {
+    tools::rdbg::publish_tf_attitude(q_b);
+    return q_b;
+  }
+
+  // 四元数插值（k 限幅到 [0, 1]，避免时间戳轻微乱序时外插）
+  auto k = std::clamp(t_ac / t_ab, 0.0, 1.0);
   Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
   tools::rdbg::publish_tf_attitude(q_c);
   return q_c;

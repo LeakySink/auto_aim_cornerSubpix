@@ -21,8 +21,8 @@ public:
 
   bool detect(Armor & armor, const cv::Mat & bgr_img);
 
-  // 对装甲板四个角点做 OpenCV 亚像素精化
-  void refine_corners_subpix(const cv::Mat & bgr_img, std::list<Armor> & armors) const;
+  // 对装甲板四个角点做 OpenCV 亚像素精化（gray_img 须为与角点同坐标系的单通道灰度图）
+  void refine_corners_subpix(const cv::Mat & gray_img, std::list<Armor> & armors) const;
 
   friend class YOLOV8;
 
@@ -39,7 +39,11 @@ private:
   double max_rectangular_error_;
 
   bool debug_;
+  bool use_corner_subpix_ = false;  // 是否在 ROI 二次检测后做亚像素精化（yaml: use_corner_subpix）
   std::string save_path_;
+
+  // 单块装甲板的 cornerSubPix 精化，仅更新 armor.points；成功返回 true，失败保留原角点
+  bool refine_armor_subpix(const cv::Mat & gray_img, Armor & armor) const;
 
   // 利用PCA回归角点，参考自https://github.com/CSU-FYT-Vision/FYT2024_vision
   void lightbar_points_corrector(Lightbar & lightbar, const cv::Mat & gray_img) const;

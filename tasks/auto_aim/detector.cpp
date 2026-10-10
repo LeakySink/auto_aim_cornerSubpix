@@ -28,6 +28,10 @@ Detector::Detector(const std::string & config_path, bool debug)
   min_confidence_ = yaml["min_confidence"].as<double>();
   max_rectangular_error_ = yaml["max_rectangular_error"].as<double>() / 57.3;  // degree to rad
 
+  // 可选：YOLO + ROI 二次检测后是否做 cornerSubPix 亚像素精化（默认关闭，保持原行为）
+  if (yaml["use_corner_subpix"].IsDefined())
+    use_corner_subpix_ = yaml["use_corner_subpix"].as<bool>();
+
   save_path_ = "patterns";
   std::filesystem::create_directory(save_path_);
 }
@@ -41,7 +45,7 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
   // 进行二值化
   cv::Mat binary_img;
   cv::threshold(gray_img, binary_img, threshold_, 255, cv::THRESH_BINARY);
-  cv::imshow("binary_img", binary_img);
+  if (debug_) cv::imshow("binary_img", binary_img);
 
   // 获取轮廓点
   std::vector<std::vector<cv::Point>> contours;
@@ -116,7 +120,8 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 
   armors.remove_if([&](const Armor & a) { return a.duplicated; });
 
-  refine_corners_subpix(bgr_img, armors);
+  // 复用本函数已生成的灰度图，避免 refine 内部重复全帧 cvtColor
+  refine_corners_subpix(gray_img, armors);
 
   if (debug_) show_result(binary_img, bgr_img, lightbars, armors, frame_count);
 
@@ -143,8 +148,8 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
   auto tr2 = (tl1 + tr) / 2 + 0.75 * tl2tr;
   auto bl2 = (bl1 + br) / 2 - 0.75 * bl2br;
   auto br2 = (bl1 + br) / 2 + 0.75 * bl2br;
-  // 构造新的四个角点
-  std::vector<cv::Point> points = {tl2, tr2, br2, bl2};
+  // 构造新的四个角点（保留浮点精度，避免截断为整像素损失亚像素信息）
+  std::vector<cv::Point2f> points = {tl2, tr2, br2, bl2};
   auto armor_rotaterect = cv::minAreaRect(points);
   cv::Rect boundingBox = armor_rotaterect.boundingRect();
   // 检查boundingBox是否超出图像边界
@@ -223,60 +228,77 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
   if (
     closest_left_lightbar && closest_right_lightbar &&
     min_distance_br_tr + min_distance_tl_bl < 15) {
+    // 先在 armor_roi 坐标系下回写四个角点
+    armor.points[0] = closest_left_lightbar->top;
+    armor.points[1] = closest_right_lightbar->top;
+    armor.points[2] = closest_right_lightbar->bottom;
+    armor.points[3] = closest_left_lightbar->bottom;
+
+    // 可选：在 ROI 灰度图上做亚像素精化（失败则保留原角点）
+    if (use_corner_subpix_) refine_armor_subpix(gray_img, armor);
+
     // 将四个点从armor_roi坐标系转换到原始图像坐标系
-    armor.points[0] = closest_left_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[1] = closest_right_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[2] = closest_right_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[3] = closest_left_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y);
+    const cv::Point2f roi_offset(boundingBox.x, boundingBox.y);
+    for (auto & point : armor.points) point += roi_offset;
     return true;
   }
 
   return false;
 }
 
-void Detector::refine_corners_subpix(const cv::Mat & bgr_img, std::list<Armor> & armors) const
+bool Detector::refine_armor_subpix(const cv::Mat & gray_img, Armor & armor) const
 {
-  if (bgr_img.empty() || armors.empty()) return;
-
-  cv::Mat gray_img;
-  cv::cvtColor(bgr_img, gray_img, cv::COLOR_BGR2GRAY);
+  if (gray_img.empty() || gray_img.channels() != 1 || armor.points.size() != 4) return false;
 
   const cv::Size win_size(5, 5);
   const cv::TermCriteria criteria(
     cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 30, 0.01);
+  // 输入角点是灯条边中点而非真正的鞍点角，cornerSubPix 存在沿边缘/亮区漂移的风险；
+  // 正常亚像素修正幅度在 1px 量级，超过该阈值视为漂移，拒绝本次精化
+  constexpr float MAX_SHIFT = 3.0f;
+
+  // cornerSubPix 需要局部邻域在图像内，越界的点直接跳过
+  for (const auto & point : armor.points) {
+    if (
+      point.x < win_size.width || point.y < win_size.height ||
+      point.x >= gray_img.cols - win_size.width || point.y >= gray_img.rows - win_size.height) {
+      return false;
+    }
+  }
+
+  std::vector<cv::Point2f> refined = armor.points;
+  cv::cornerSubPix(gray_img, refined, win_size, cv::Size(-1, -1), criteria);
+
+  for (std::size_t i = 0; i < refined.size(); i++) {
+    if (!std::isfinite(refined[i].x) || !std::isfinite(refined[i].y)) return false;
+    if (cv::norm(refined[i] - armor.points[i]) > MAX_SHIFT) return false;
+  }
+
+  armor.points = std::move(refined);
+  return true;
+}
+
+void Detector::refine_corners_subpix(const cv::Mat & gray_img, std::list<Armor> & armors) const
+{
+  if (gray_img.empty() || armors.empty()) return;
 
   for (auto & armor : armors) {
-    if (armor.points.size() != 4) continue;
-
-    // cornerSubPix 需要局部邻域在图像内，越界的点直接跳过
-    bool inside = true;
-    for (const auto & point : armor.points) {
-      if (
-        point.x < win_size.width || point.y < win_size.height ||
-        point.x >= gray_img.cols - win_size.width || point.y >= gray_img.rows - win_size.height) {
-        inside = false;
-        break;
-      }
-    }
-    if (!inside) continue;
-
-    std::vector<cv::Point2f> refined = armor.points;
-    cv::cornerSubPix(gray_img, refined, win_size, cv::Size(-1, -1), criteria);
-
-    bool valid = true;
-    for (const auto & point : refined) {
-      if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
-        valid = false;
-        break;
-      }
-    }
-    if (!valid) continue;
-
-    armor.points = std::move(refined);
+    if (!refine_armor_subpix(gray_img, armor)) continue;
 
     // 角点更新后同步修正中心点，供后续排序/ROI使用
     armor.center =
       (armor.points[0] + armor.points[1] + armor.points[2] + armor.points[3]) / 4.0f;
+
+    // 同步灯条端点，保持 left/right 灯条与精化角点一致
+    // points 顺序为 {left.top, right.top, right.bottom, left.bottom}
+    armor.left.top = armor.points[0];
+    armor.right.top = armor.points[1];
+    armor.right.bottom = armor.points[2];
+    armor.left.bottom = armor.points[3];
+    armor.left.top2bottom = armor.left.bottom - armor.left.top;
+    armor.right.top2bottom = armor.right.bottom - armor.right.top;
+    armor.left.points = {armor.left.top, armor.left.bottom};
+    armor.right.points = {armor.right.top, armor.right.bottom};
   }
 }
 

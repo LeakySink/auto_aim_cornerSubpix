@@ -102,9 +102,13 @@ io::Command Aimer::aim(
   bool converged = false;
   double prev_fly_time = trajectory0.fly_time;
   tools::Trajectory current_traj = trajectory0;
-  std::vector<Target> iteration_target(10, target);  // 10个目标副本用于迭代预测
+  // 按需构造目标副本：通常 2~3 次即可收敛，避免每帧固定 10 次 Target 深拷贝
+  std::vector<Target> iteration_target;
+  iteration_target.reserve(10);
 
   for (int iter = 0; iter < 10; ++iter) {
+    iteration_target.emplace_back(target);
+
     // 预测目标在 future + prev_fly_time 时刻的位置
     auto predict_time =
       future + std::chrono::microseconds(static_cast<int>(prev_fly_time * 1e6));
@@ -146,9 +150,15 @@ io::Command Aimer::aim(
     prev_fly_time = current_traj.fly_time;
   }
 
+  if (!converged) {
+    tools::RemoteLogger::instance().log(
+      "DEBUG", "[Aimer] fly_time iteration not converged in 10 steps, use last result");
+  }
+
   // 计算最终角度
   Eigen::Vector3d final_xyz = debug_aim_point.xyza.head(3);
-  double yaw = std::atan2(final_xyz.y(), final_xyz.x()) + yaw_offset_;
+  // 限幅到 [-pi, pi]，防止 |yaw| > 3.2767 rad 时 CAN int16 打包溢出
+  double yaw = tools::limit_rad(std::atan2(final_xyz.y(), final_xyz.x()) + yaw_offset_);
   double pitch = -(current_traj.pitch + pitch_offset_);  // 世界坐标系下pitch向上为负
 
   return {true, false, yaw, pitch};
@@ -168,7 +178,7 @@ io::Command Aimer::aim(
   }
 
   auto command = aim(targets, timestamp, bullet_speed, to_now);
-  command.yaw = command.yaw - yaw_offset_ + yaw_offset;
+  command.yaw = tools::limit_rad(command.yaw - yaw_offset_ + yaw_offset);
 
   return command;
 }
