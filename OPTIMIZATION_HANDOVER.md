@@ -31,14 +31,29 @@
 
 ```cpp
 // 原：注释写"自由度=4，取置信水平95%"，实际取 0.711
-constexpr double nis_threshold = 0.711;   // 实为自由度4的 50% 分位数
+constexpr double nis_threshold = 0.711;   // 实为自由度4的 5% 分位数（2026-10-18 复核更正：不是 50% 分位数）
 constexpr double nees_threshold = 0.711;
 // 现：
-constexpr double nis_threshold = 9.488;   // NIS：自由度=观测维数4，95%
-constexpr double nees_threshold = 19.675; // NEES：自由度=状态维数11，95%
+constexpr double nis_threshold = 9.488;   // NIS：χ²(4) 的 95% 分位数，误报率 5%
+constexpr double nees_threshold = 19.675; // 保守上限（该 NEES 非卡方统计量，见下）
 ```
 
-影响链路：`nis_fail` → `recent_nis_failures` → `tracker.cpp:104-110` 失败率 >40% → 判 "Bad Converge" → **重置目标为 lost**。旧阈值下约一半更新会被误判为失败，存在把正常目标误丢的风险。
+**2026-10-18 复核补记（重要）**
+
+- 0.711 是 χ²(4) 的 **5% 分位数**（χ²(4) 的 50% 分位数是 3.3567），即**约 95% 的正常更新都会被判失败**，不是"约一半"。
+  真实模型蒙特卡洛实测单帧误报率 **92.6%~94.3%**，且**必然在第 4208~4324 帧（中位 4265）触发 "Bad Converge"**
+  （tracker 判据：最近 10000 帧失败数 ≥ 4000；60 fps 约 71 秒），随后目标被重置为 lost 并周而复始。
+- 只改阈值还不够：原实现在 `x`/`P` 更新**之后**才用后验 `P⁺` 算残差与 `S`，得到的不是标准 NIS
+  （实测期望 3.58 而非 4，误报率只有 3.2%，且对目标跳变不敏感）。
+  因此同时把卡方检验**移到状态更新之前**（先验新息 + 先验 `S`）：
+  `K*innovation` 与原实现数学等价，**状态/协方差逐帧完全一致**（实测 max|x|差 2.6e-11、max|P|差 7.8e-11）。
+  修正后实测 **E[NIS]=4.0021、P(NIS>9.488)=5.05%**，与 χ²(4) 理论（4 和 5%）吻合，9.488 从此具有严格的 5% 显著性含义。
+- `residual_yaw/pitch/distance/angle` 现在是**新息**（先验残差），比原来的后验残差更有诊断价值。
+- NEES 不是卡方统计量：标准 NEES 需要真值，代码只能用 `(x⁺−x⁻)ᵀP⁺⁻¹(x⁺−x⁻)`，实测中位数 0.22、
+  99.9% 的爆表帧源于 yaw 跨越 ±π 时 `x_add` 的回绕。19.675 只是惰性上限（误触发 <1%），
+  `nees_fail` 仅进日志、不参与逻辑。详见 `REVIEW_OPTIMIZATION_20261018.md` §0-B。
+
+影响链路（原描述，仍成立）：`nis_fail` → `recent_nis_failures` → `tracker.cpp:104-110` 失败率 >40% → 判 "Bad Converge" → **重置目标为 lost**。旧阈值下这条链路会被稳定、确定性地触发。
 
 **② 三次显式求逆 → LDLT 求解（原 L50, L62-63）→ 现 L49-52, L64-65**
 
@@ -104,7 +119,8 @@ cornerSubPix 参数完全未变（winSize 5×5、zeroZone (-1,-1)、TermCriteria
 
 | 改动 | 验证方式 | 结果 |
 |---|---|---|
-| EKF（含阈值与 LDLT） | MinGW g++ + Eigen 3.4 编译并运行 `tests/algo/ekf_update_check.cpp` | **通过**：`\|x_new-x_ref\|=1.1e-16`、`\|P_new-P_ref\|=1.2e-15`，`nis=8.99e-05`、`nees=0.615`、`nis_fail=0` |
+| EKF（含阈值与 LDLT） | MinGW g++ + Eigen 3.4 编译并运行 `tests/algo/ekf_update_check.cpp` | **通过**：`\|x_new-x_ref\|=1.1e-16`、`\|P_new-P_ref\|=1.2e-15` |
+| **EKF 卡方阈值（2026-10-18 补）** | 精确 χ² 分位数计算 + 真实 11 维模型蒙特卡洛 + 新旧 EKF 逐帧比对（程序见 `verification/chi2_threshold/`） | **通过**：新 NIS 的 E=4.0021、P(>9.488)=5.05%（理论 4 / 5%）；旧阈值 0.711 误报率 92.6%~94.3% 且第 4208~4324 帧必触发重置；新旧状态/协方差差 ≤ 7.8e-11 |
 | EKF 独立语法检查 | `g++ -std=c++17 -fsyntax-only` | 通过 |
 | detector / aimer / cboard / yaml | **本机无 OpenCV（依赖 Ubuntu/OpenVINO 环境）未能编译** | 需在目标机执行 `cmake -B build && make -C build -j$(nproc)` 验证；所用 OpenCV API（`cornerSubPix`/`minAreaRect(Point2f)`/`cv::norm(Point2f)`）与改动前一致 |
 
