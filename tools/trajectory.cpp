@@ -188,18 +188,37 @@ Trajectory::Trajectory(
   fly_time = 0.0;
   pitch = 0.0;
 
-  if (v0 <= 0.0 || d <= 0.0) {
+  // 判据写成 `!(isfinite(x) && x > 0)`，一次覆盖两类非法输入：
+  //   - NaN：x > 0 为 false，且 isfinite 为 false -> 拦截。
+  //     （原写法 `x <= 0` 对 NaN 是 false，**放行**，是本次要修的核心问题）
+  //   - +inf：x > 0 为 true，但 isfinite 为 false -> 拦截。
+  //     （只写 `!(x > 0)` 拦不住 +inf，会漏进求解器算出一堆 NaN）
+  //
+  // 原写法之所以致命：NaN 一路穿过 solve_no_drag（那里的 `delta < 0.0`
+  // 对 NaN 同样是 false），得到 NaN 的 pitch / fly_time 且 unsolvable
+  // 仍为 false。下游 aimer.cpp 的 static_cast<int>(fly_time * 1e6) 对 NaN
+  // 是 UB（x86 上得 INT_MIN），时间戳被回拨约 35 分钟 -> 下一帧 dt 变成
+  // 巨大值 -> EKF 的 dt^4 项爆炸 -> 状态推成 inf -> limit_rad(inf) 死循环。
+  if (
+    !(std::isfinite(v0) && v0 > 0.0) || !(std::isfinite(d) && d > 0.0) ||
+    !std::isfinite(h) || !std::isfinite(drag_coefficient)) {
     unsolvable = true;
     return;
   }
 
   if (drag_coefficient <= 1e-9) {
     if (!solve_no_drag(v0, d, h, pitch, fly_time)) unsolvable = true;
-    return;
+  } else if (!solve_drag(v0, d, h, drag_coefficient, pitch, fly_time)) {
+    unsolvable = true;
   }
 
-  if (!solve_drag(v0, d, h, drag_coefficient, pitch, fly_time)) {
+  // 最后一道闸：无论走哪条分支，结果只要不是有限值就判为无解，
+  // 并把输出清零。仅置 unsolvable 不够 —— 结构体里的 fly_time / pitch
+  // 仍会是 NaN，一旦有调用方忘了先查 unsolvable 就直接用，仍是 UB。
+  if (!std::isfinite(pitch) || !std::isfinite(fly_time)) {
     unsolvable = true;
+    pitch = 0.0;
+    fly_time = 0.0;
   }
 }
 
