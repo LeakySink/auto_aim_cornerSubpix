@@ -1,5 +1,6 @@
 #include "yolo11_buff.hpp"
 
+#include "tools/ov_tensor_utils.hpp"
 #include "tools/yaml.hpp"
 
 const double ConfidenceThreshold = 0.7f;
@@ -55,12 +56,12 @@ std::vector<YOLO11_BUFF::Object> YOLO11_BUFF::get_multicandidateboxes(cv::Mat & 
 
   /// 处理推理计算结果
   const ov::Tensor output = infer_request.get_output_tensor();  // 获得推理结果
-  const ov::Shape output_shape = output.get_shape();
-  const float * output_buffer = output.data<const float>();
-  const int out_rows = output_shape[1];  // 获得"output"节点的rows 15
-  const int out_cols = output_shape[2];  // 获得"output"节点的cols 8400
-  const cv::Mat det_output(
-    out_rows, out_cols, CV_32F, (float *)output_buffer);  // output_buff类型转换
+  // 用 tools::to_mat_f32 包一层：先校验 rank==3 且元素类型为 f32 再构造 cv::Mat。
+  // 原先直接取 output_shape[1]/[2] 并调用 data()，若模型输出维度/精度与假设不符
+  // （换模型、或走 GPU/NPU 插件），operator[] 越界、或按 float 访问 f16 缓冲区
+  // （只有一半大小）都会变成裸越界访问。校验失败返回空 Mat，本帧按"无检测结果"处理。
+  const cv::Mat det_output = tools::to_mat_f32(output);
+  if (det_output.empty()) return {};
   std::vector<cv::Rect> boxes;                            // 目标框
   std::vector<float> confidences;                         // 置信度
   std::vector<std::vector<float>> objects_keypoints;      // 关键点
@@ -160,12 +161,9 @@ std::vector<YOLO11_BUFF::Object> YOLO11_BUFF::get_onecandidatebox(cv::Mat & imag
   /// 处理推理计算结果  output 输出格式是[17,8400], 每列代表一个框(即最多有8400个框), 前面4行分别是[cx, cy, ow, oh], 中间score, 最后6*2关键点
 
   const ov::Tensor output = infer_request.get_output_tensor();  // 获得推理结果
-  const ov::Shape output_shape = output.get_shape();
-  const float * output_buffer = output.data<const float>();
-  const int out_rows = output_shape[1];  // 获得"output"节点的rows 17
-  const int out_cols = output_shape[2];  // 获得"output"节点的cols 8400
-  const cv::Mat det_output(
-    out_rows, out_cols, CV_32F, (float *)output_buffer);  // output_buff类型转换
+  // 用 tools::to_mat_f32 包一层：先校验 rank==3 且元素类型为 f32 再构造 cv::Mat
+  const cv::Mat det_output = tools::to_mat_f32(output);
+  if (det_output.empty()) return {};
 
   /// 寻找置信度最大的框
 

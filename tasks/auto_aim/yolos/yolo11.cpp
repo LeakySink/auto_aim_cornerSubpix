@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "tools/img_tools.hpp"
+#include "tools/ov_tensor_utils.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/yaml.hpp"
 
@@ -92,9 +93,14 @@ std::list<Armor> YOLO11::detect(const cv::Mat & raw_img, int frame_count)
   infer_request.infer();
 
   // postprocess
+  // 用 tools::to_mat_f32 包一层：它会先校验 rank==3 且元素类型为 f32 再构造
+  // cv::Mat。原先直接取 output_shape[1]/[2] 并调用 data()，若模型输出维度/精度
+  // 与假设不符（换模型、或走 GPU/NPU 插件），operator[] 越界、或按 float 访问
+  // f16 缓冲区（只有一半大小）都会变成裸越界访问。校验失败返回空 Mat，
+  // parse() 遇到 rows==0 直接返回空 list，等价于"本帧无检测结果"。
   auto output_tensor = infer_request.get_output_tensor();
-  auto output_shape = output_tensor.get_shape();
-  cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
+  cv::Mat output = tools::to_mat_f32(output_tensor);
+  if (output.empty()) return {};
 
   return parse(scale, output, raw_img, frame_count);
 }

@@ -2,6 +2,7 @@
 
 #include <cstring>  // std::memcpy
 
+#include "tools/ov_tensor_utils.hpp"
 #include "tools/yaml.hpp"
 
 namespace auto_aim
@@ -92,9 +93,13 @@ std::tuple<std::list<Armor>, std::chrono::steady_clock::time_point> MultiThreadD
   infer_request.wait();
 
   // postprocess
+  // 用 tools::to_mat_f32 包一层：先校验 rank==3 且元素类型为 f32 再构造 cv::Mat。
+  // 原先直接取 output_shape[1]/[2] 并调用 data()，若模型输出维度/精度与假设不符
+  // （换模型、或走 GPU/NPU 插件），operator[] 越界、或按 float 访问 f16 缓冲区
+  // （只有一半大小）都会变成裸越界访问。校验失败返回空 Mat，本帧按"无检测结果"处理。
   auto output_tensor = infer_request.get_output_tensor();
-  auto output_shape = output_tensor.get_shape();
-  cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
+  cv::Mat output = tools::to_mat_f32(output_tensor);
+  if (output.empty()) return {std::list<Armor>{}, t};
   auto x_scale = static_cast<double>(640) / img.rows;
   auto y_scale = static_cast<double>(640) / img.cols;
   auto scale = std::min(x_scale, y_scale);
@@ -110,9 +115,10 @@ MultiThreadDetector::debug_pop()
   infer_request.wait();
 
   // postprocess
+  // 同上：先校验输出张量的 rank 与元素类型，避免裸越界访问
   auto output_tensor = infer_request.get_output_tensor();
-  auto output_shape = output_tensor.get_shape();
-  cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
+  cv::Mat output = tools::to_mat_f32(output_tensor);
+  if (output.empty()) return {img, std::list<Armor>{}, t};
   auto x_scale = static_cast<double>(640) / img.rows;
   auto y_scale = static_cast<double>(640) / img.cols;
   auto scale = std::min(x_scale, y_scale);
