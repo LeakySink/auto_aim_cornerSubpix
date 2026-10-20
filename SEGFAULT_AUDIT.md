@@ -1,9 +1,40 @@
 # 段错误 / 崩溃风险审计（auto_aim_cornerSubpix-main）
 
-- 日期：2026-10-19
+- 日期：2026-10-19（审计） / 2026-10-20（修复）
 - 范围：自有源码 ~18k 行（tasks/、io/、tools/、src/、calibration/），**排除**第三方（io/serial、io/hikrobot/include、io/mindvision/include）
 - 方法：分三路并行静态审查 + 对全部高危条目回到源码逐行复核；另从 `assets/*.xml` 解析了各模型的**真实输出维度**用来校验后处理解析
-- 状态：**只做分析，未修改任何代码**
+- 状态：**审计完成，P0 全部 + P1 主要项已修复**（见下方 §0.0）；挂死类与需要架构调整的项仍待处理
+
+## 0.0 修复记录（2026-10-20）
+
+逐项一次提交，可用 `git show <hash>` 单独回看。汇总：`git diff d5b53ed..HEAD` = 25 文件 / +805 −66。
+
+| # | 条目 | commit | 本机验证 |
+|---|---|---|---|
+| 1 | `limit_rad(±inf)` 死循环 + `buff_target` 发散分支漏置 `unsolvable_` | `a8d8913` | ✅ 编译+运行 `tests/algo/limit_rad_check.cpp` |
+| 2 | `Perceptron` 按引用捕获构造形参 → 悬垂引用 | `8f733a7` | ✅ 编译+运行 `tests/algo/lambda_capture_check.cpp` |
+| 3 | OpenVINO 异步推理持有已释放 `cv::Mat`（UAF） | `2957d98` | ⚠️ 需目标机（无 OpenVINO） |
+| 4 | CAN 帧长与枚举未校验 → `MODES[mode]` 越界 | `911fbcb` | ⚠️ 需目标机（无 fmt/nlohmann/OpenCV） |
+| 5 | 7 处模型输出 rank/dtype 未校验 | `749af73` | ⚠️ 需目标机（无 OpenVINO/OpenCV） |
+| 6 | `armor_xyza_list[0]` 空容器索引；`detect(Armor&)` 入口未校验 `points` | `cf0141b` | ⚠️ 需目标机 |
+| 7 | `decider` 空 list `front()`；`hikrobot` 野句柄/句柄泄漏/像素格式异常；`mindvision` 句柄未重置/`CameraGetCapability` 未检查 | `d3037f6` | ⚠️ 需目标机（无相机 SDK） |
+| 8 | `Trajectory` NaN/inf 穿透 → `static_cast<int>(NaN)` UB | `e74667d` | ✅ 编译+运行 `tests/algo/trajectory_nan_check.cpp` |
+| 9 | `Target::diverged()` 对空 `ekf_.x` 取 `[8]`；`yolo11_buff` `rowRange` 错位越界 | `104ec02` | ⚠️ 需目标机 |
+| 10 | `SocketCAN::close()` 不重置 fd → 重复 close / 关错 fd | `d5904c7` | ⚠️ 需目标机（无 `linux/can.h`） |
+| 11 | MPC 入口共享 `json` / `armor list` 无锁并发 | `4c0768c` | ⚠️ 需目标机（建议补 `-fsanitize=thread`） |
+
+**本机可执行的回归测试**（4 个，全部通过）：
+
+```
+tests/algo/ekf_update_check.cpp        # EKF 与显式求逆参考实现一致性
+tests/algo/limit_rad_check.cpp         # limit_rad 语义等价 + 非有限值安全
+tests/algo/lambda_capture_check.cpp    # lambda 捕获生命周期
+tests/algo/trajectory_nan_check.cpp    # 弹道 NaN/inf 拦截 + 正常弹道未变
+```
+
+**明确未改**：`armor.cpp` 6 个构造函数无条件索引 `armor_keypoints[0..3]` —— 那是构造契约（调用方必须传 4 点），当前 YOLO 后处理保证满足；要修须改动 6 处构造函数的初始化列表语义，风险大于收益。
+
+**仍待处理**（挂死类 / 需架构调整，见 §4）：`thread_safe_queue` 无 close 语义、`usbcamera` 持锁阻塞、`exiter` 信号标志非 `sig_atomic_t`、`commandgener` 忙等、`gimbal` 串口读写锁不对称、`dm_imu` packed 对齐。
 
 ## 前置事实（决定了下面严重度的判定）
 
