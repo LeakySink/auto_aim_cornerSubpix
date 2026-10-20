@@ -1,6 +1,7 @@
 #include "cboard.hpp"
 
 #include <algorithm>
+#include <cstddef>
 
 #include "tools/math_tools.hpp"
 #include "tools/rdbg/tf_auto_pub.hpp"
@@ -93,9 +94,34 @@ void CBoard::callback(const can_frame & frame)
   }
 
   else if (frame.can_id == bullet_speed_canid_) {
+    // data 是下位机发来的**原始字节**，可能是脏数据：版本不匹配、总线噪声、
+    // 或者短帧（can_dlc < 6）时复用到了上一次的残留字节。
+    //
+    // 不校验的后果：Mode(data[2]) 会得到一个不在枚举定义内的值，
+    // 紧接着 MODES[mode] 越过 vector 末尾 —— 而 std::vector::operator[]
+    // 在 Release（-DNDEBUG）下**不做边界检查**，于是把越界内存当成
+    // std::string 解释，fmt 格式化时会拷贝这个"字符串"，从内部野指针
+    // memcpy -> SIGSEGV。SHOOT_MODES 同理。
+    //
+    // 在入口统一挡住，保证 mode / shoot_mode 成员只可能被赋成合法枚举值，
+    // 从而下游全部 5 处索引（cboard.cpp:108 与 4 个主循环日志）都不可能越界。
+    if (frame.can_dlc < 6) {
+      tools::RemoteLogger::instance().log(
+        "WARN", "[CBoard] short bullet_speed frame, dlc={}", static_cast<int>(frame.can_dlc));
+      return;
+    }
+    const std::size_t raw_mode = frame.data[2];
+    const std::size_t raw_shoot_mode = frame.data[3];
+    if (raw_mode >= MODES.size() || raw_shoot_mode >= SHOOT_MODES.size()) {
+      tools::RemoteLogger::instance().log(
+        "WARN", "[CBoard] invalid mode={} shoot_mode={}, frame dropped", raw_mode,
+        raw_shoot_mode);
+      return;
+    }
+
     bullet_speed = (int16_t)(frame.data[0] << 8 | frame.data[1]) / 1e2;
-    mode = Mode(frame.data[2]);
-    shoot_mode = ShootMode(frame.data[3]);
+    mode = Mode(raw_mode);
+    shoot_mode = ShootMode(raw_shoot_mode);
     ft_angle = (int16_t)(frame.data[4] << 8 | frame.data[5]) / 1e4;
 
     // 限制日志输出频率为1Hz
