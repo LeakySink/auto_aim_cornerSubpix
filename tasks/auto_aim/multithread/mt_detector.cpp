@@ -1,5 +1,7 @@
 #include "mt_detector.hpp"
 
+#include <cstring>  // std::memcpy
+
 #include "tools/yaml.hpp"
 
 namespace auto_aim
@@ -55,9 +57,31 @@ void MultiThreadDetector::push(cv::Mat img, std::chrono::steady_clock::time_poin
 
   auto input_port = compiled_model_.input();
   auto infer_request = compiled_model_.create_infer_request();
-  ov::Tensor input_tensor(ov::element::u8, {1, 640, 640, 3}, input.data);
 
-  infer_request.set_input_tensor(input_tensor);
+  // 不能再用 ov::Tensor(type, shape, void*) 把 input.data 直接包成输入张量：
+  // 这个重载**不接管**缓冲区所有权，只是借用指针。push() 返回后局部 input 析构、
+  // 缓冲区释放，而 start_async() 的推理通常还没读完输入 —— OpenVINO 的工作线程
+  // 会继续读已释放内存，构成跨线程 use-after-free。
+  // 崩溃点在 OV 内部线程，core 里看不到本项目栈帧，极难定位。
+  //
+  // 改为拷进 infer_request 自有的输入张量：该张量与 infer_request 同生命周期，
+  // 会一直存活到 wait() 返回之后，异步读取安全。
+  auto input_tensor = infer_request.get_input_tensor();
+  if (input_tensor.get_element_type() != ov::element::u8 || input_tensor.get_shape().size() != 4) {
+    tools::RemoteLogger::instance().log(
+      "ERROR", "[MultiThreadDetector] unexpected input tensor type/rank");
+    return;
+  }
+  const auto & in_shape = input_tensor.get_shape();  // NHWC = [1,640,640,3]
+  const size_t in_bytes = in_shape[1] * in_shape[2] * in_shape[3];
+  const size_t src_bytes = static_cast<size_t>(input.total()) * input.elemSize();
+  if (src_bytes != in_bytes) {
+    tools::RemoteLogger::instance().log(
+      "ERROR", "[MultiThreadDetector] input size mismatch {} vs {}", src_bytes, in_bytes);
+    return;
+  }
+  std::memcpy(input_tensor.data<uint8_t>(), input.data, in_bytes);
+
   infer_request.start_async();
   queue_.push({img.clone(), t, std::move(infer_request)});
 }
