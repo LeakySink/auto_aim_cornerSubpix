@@ -161,7 +161,19 @@ void HikRobot::capture_start()
         {PixelType_Gvsp_BayerRG8, cv::COLOR_BayerRG2RGB},
         {PixelType_Gvsp_BayerGB8, cv::COLOR_BayerGB2RGB},
         {PixelType_Gvsp_BayerBG8, cv::COLOR_BayerBG2RGB}};
-      cv::cvtColor(img, dst_image, type_map.at(pixel_type));
+      // 不能用 type_map.at()：相机被配成 Mono8 / RGB8 / Bayer10 等不在表里的
+      // 格式时它会抛 std::out_of_range，而这是**采集线程的线程函数体**，
+      // 异常逃出 std::thread 入口 -> std::terminate -> 整个进程 SIGABRT。
+      // 改为 find()，遇到未知格式记一次日志并丢弃该帧（仍要释放图像缓冲）。
+      auto it = type_map.find(pixel_type);
+      if (it == type_map.end()) {
+        tools::RemoteLogger::instance().log(
+          "WARN", "HikRobot: unsupported pixel type {:#x}, frame dropped",
+          static_cast<unsigned int>(pixel_type));
+        MV_CC_FreeImageBuffer(handle_, &raw);
+        continue;
+      }
+      cv::cvtColor(img, dst_image, it->second);
       img = dst_image;
 
       queue_.push({img, timestamp});
@@ -183,25 +195,34 @@ void HikRobot::capture_stop()
   capture_quit_ = true;
   if (capture_thread_.joinable()) capture_thread_.join();
 
+  // 句柄可能从未创建成功：相机不存在 / 枚举失败 / CreateHandle 失败时
+  // capture_start() 会直接返回，handle_ 保持 nullptr。此时若继续调用
+  // MVS SDK 就是把空指针（旧代码里甚至是未初始化的栈垃圾）传给闭源库。
+  if (!handle_) return;
+
   unsigned int ret;
 
+  // 三个清理调用必须**依次全部执行**，不能"失败就 return"：
+  // 早期返回会跳过 CloseDevice / DestroyHandle，造成句柄泄漏；
+  // 守护线程随后又会 capture_start() 重新 CreateHandle，长期运行会累积。
   ret = MV_CC_StopGrabbing(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_StopGrabbing failed: {:#x}", ret);
-    return;
   }
 
   ret = MV_CC_CloseDevice(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_CloseDevice failed: {:#x}", ret);
-    return;
   }
 
   ret = MV_CC_DestroyHandle(handle_);
   if (ret != MV_OK) {
     tools::RemoteLogger::instance().log("WARN", "MV_CC_DestroyHandle failed: {:#x}", ret);
-    return;
   }
+
+  // 销毁后必须置空，否则下一轮 capture_stop()（或析构路径）会对已释放的
+  // 句柄重复调用 StopGrabbing / DestroyHandle。
+  handle_ = nullptr;
 }
 
 void HikRobot::set_float_value(const std::string & name, double value)

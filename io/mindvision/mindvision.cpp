@@ -72,7 +72,14 @@ void MindVision::open()
   if (CameraInit(&camera_info_list, -1, -1, &handle_) != CAMERA_STATUS_SUCCESS)
     throw std::runtime_error("Failed to init camera!");
 
-  CameraGetCapability(handle_, &camera_capbility);
+  // 必须先检查返回值再读成员：失败时 camera_capbility 仍是未初始化的栈内存，
+  // width_/height_ 会拿到垃圾值，随后采集线程按这个尺寸构造 cv::Mat
+  // -> 越界读写。抛异常前先 close()，避免已成功 CameraInit 的句柄泄漏
+  // （调用方 try_open() 会捕获并记日志，守护线程下一轮重试）。
+  if (CameraGetCapability(handle_, &camera_capbility) != CAMERA_STATUS_SUCCESS) {
+    close();
+    throw std::runtime_error("Failed to get camera capability!");
+  }
   width_ = camera_capbility.sResolutionRange.iWidthMax;
   height_ = camera_capbility.sResolutionRange.iHeightMax;
 
@@ -128,6 +135,10 @@ void MindVision::close()
 {
   if (handle_ == -1) return;
   CameraUnInit(handle_);
+  // 必须重置：否则重复 close()（析构 + 显式调用、或重连路径）会对已被
+  // CameraUnInit 释放的句柄再次 UnInit。原代码只靠 `handle_ == -1` 做幂等，
+  // 但从不把它设回 -1，这个守卫形同虚设。
+  handle_ = -1;
 }
 
 void MindVision::set_vid_pid(const std::string & vid_pid)

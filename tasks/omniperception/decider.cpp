@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <opencv2/opencv.hpp>
 
@@ -179,6 +180,19 @@ void Decider::sort(std::vector<DetectionResult> & detection_queue)
     dr.armors.sort(
       [](const auto_aim::Armor & a, const auto_aim::Armor & b) { return a.priority < b.priority; });
   }
+
+  // armor_filter() 内部有 4 个 remove_if（非敌方 / 5 号 / 前哨站 / 无敌），
+  // 可能把某个 DetectionResult 的 armors **整个清空**，而它返回的
+  // `armors.empty()` 在上面的循环里被忽略了。下面的比较器要读
+  // a.armors.front()，空 list 上 front() 是解引用 end() -> UB。
+  // 先把空结果剔除，保证被排序的每一项都非空。
+  detection_queue.erase(
+    std::remove_if(
+      detection_queue.begin(), detection_queue.end(),
+      [](const DetectionResult & dr) { return dr.armors.empty(); }),
+    detection_queue.end());
+
+  if (detection_queue.empty()) return;
 
   // 根据优先级对 DetectionResult 进行排序
   std::sort(
