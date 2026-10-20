@@ -23,10 +23,17 @@ Perceptron::Perceptron(
 
   std::this_thread::sleep_for(std::chrono::seconds(2));
   // 创建四个线程进行并行推理
-  threads_.emplace_back([&] { parallel_infer(usbcam1, yolo_parallel1_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam2, yolo_parallel2_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam3, yolo_parallel3_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam4, yolo_parallel4_); });
+  //
+  // 注意捕获方式：usbcam1..4 是本构造函数的**形参**（栈上变量）。
+  // 原写法用 [&] 捕获的是这些形参变量本身的引用，构造函数一返回形参即销毁，
+  // 而线程完全可能在那之后才被调度执行 —— lambda 展开 parallel_infer(usbcam1, ...)
+  // 时会从一个已销毁的栈槽读指针值，拿到垃圾指针后 cam->read(...) 直接 SIGSEGV
+  // （相机对象本身份命周期长于 Perceptron，但救不了"引用已销毁形参"这个错误）。
+  // 改为按值捕获指针：指针值在 lambda 生成时就拷贝进闭包，与形参生命周期解耦。
+  threads_.emplace_back([this, usbcam1] { parallel_infer(usbcam1, yolo_parallel1_); });
+  threads_.emplace_back([this, usbcam2] { parallel_infer(usbcam2, yolo_parallel2_); });
+  threads_.emplace_back([this, usbcam3] { parallel_infer(usbcam3, yolo_parallel3_); });
+  threads_.emplace_back([this, usbcam4] { parallel_infer(usbcam4, yolo_parallel4_); });
 
   tools::RemoteLogger::instance().log("INFO", "Perceptron initialized.");
 }
