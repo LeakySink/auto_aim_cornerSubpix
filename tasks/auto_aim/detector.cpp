@@ -130,6 +130,11 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 
 bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
 {
+  // 调用方（YOLO 后处理 / ROI 二次检测）必须保证给出 4 个角点，
+  // 这里兜底拦截：空 vector 上 operator[](0) 是解引用 nullptr。
+  // 与 refine_armor_subpix 中已有的 `points.size() != 4` 检查同一前提。
+  if (armor.points.size() != 4) return false;
+
   // 取得四个角点
   auto tl = armor.points[0];
   auto tr = armor.points[1];

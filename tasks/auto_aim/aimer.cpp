@@ -185,8 +185,19 @@ io::Command Aimer::aim(
 
 AimPoint Aimer::choose_aim_point(const Target & target)
 {
-  Eigen::VectorXd ekf_x = target.ekf_x();
   std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
+
+  // Target::armor_xyza_list() 是 `for (i = 0; i < armor_num_; ++i)` 构造的，
+  // 当 armor_num_ <= 0 时返回**空 vector**（data() == nullptr）。下面 3 处
+  // armor_xyza_list[0] / [lock_id_] / [id_list[0]] 都在无条件取下标，
+  // 空容器上 operator[](0) 即解引用 nullptr -> SIGSEGV。
+  //
+  // 当前 configs/*.yaml 的 armor_num 只有 3 和 4，故现在不可达；
+  // 但这是每帧每个目标都走的热路径，一旦配置写错（新增机器人类型漏填、
+  // 脚本生成配置默认值）立刻崩。这里在入口挡住，向下返回"无解"。
+  if (armor_xyza_list.empty()) return {false, Eigen::Vector4d::Zero()};
+
+  Eigen::VectorXd ekf_x = target.ekf_x();
   auto armor_num = armor_xyza_list.size();
 
   // 如果装甲板未发生过跳变，则只有当前装甲板的位置已知
