@@ -395,6 +395,9 @@ void BigTarget::get_target(
     ekf_.x[7] > 1.045 * 1.5 || ekf_.x[7] < 0.78 / 1.5 || ekf_.x[8] > 2.0 * 1.5 ||
     ekf_.x[8] < 1.884 / 1.5) {
     tools::RemoteLogger::instance().log("DEBUG", "[Target] 大符角度发散a: {:.2f}b:{:.2f}", ekf_.x[7], ekf_.x[8]);
+    // 必须置回 unsolvable_：否则本帧虽然按"丢失"处理，predict() 仍会拿已发散的
+    // 状态继续算，a/w 在 w→0 时得到 ±inf，再喂进 limit_rad 就会死循环。
+    unsolvable_ = true;
     first_in_ = true;
     return;
   }

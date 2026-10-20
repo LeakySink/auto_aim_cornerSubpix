@@ -7,9 +7,17 @@ namespace tools
 {
 double limit_rad(double angle)
 {
-  while (angle > CV_PI) angle -= 2 * CV_PI;
-  while (angle <= -CV_PI) angle += 2 * CV_PI;
-  return angle;
+  // 原实现用 while 循环反复加减 2π 折算。当 angle 为 ±inf 时循环条件恒真
+  // （inf - 2π 仍是 inf），会让调用线程 100% CPU 空转、整条流水线停摆；
+  // NaN 反而安全（两个比较对 NaN 均为 false，直接返回）。
+  // EKF 发散把 yaw 推成 inf，或 buff_target 里 a/w 在 w→0 时出 ±inf，都会命中。
+  // 这里先挡掉非有限值降级为 0，再用 fmod 做 O(1) 折算，
+  // 保持与原实现一致的取值区间 (-PI, PI]（且不再累积多次减法的舍入误差）。
+  if (!std::isfinite(angle)) return 0.0;
+
+  angle = std::fmod(angle + CV_PI, 2 * CV_PI);
+  if (angle <= 0) angle += 2 * CV_PI;
+  return angle - CV_PI;
 }
 
 Eigen::Vector3d eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic)
