@@ -91,7 +91,9 @@ private:
     addr.can_family = AF_CAN;
     addr.can_ifindex = ifr.ifr_ifindex;
     if (bind(socket_fd_, (sockaddr *)&addr, sizeof(sockaddr_can)) < 0) {
-      ::close(socket_fd_);
+      // 走 close() 而不是裸 ::close()：后者不会把 socket_fd_ 置回 -1，
+      // 守护线程紧接着的 close() 会对同一个已关闭 fd 再关一次。
+      close();
       throw std::runtime_error("Error binding socket to interface!");
     }
 
@@ -148,9 +150,27 @@ private:
   void close()
   {
     if (socket_fd_ == -1) return;
-    epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, socket_fd_, NULL);
-    ::close(epoll_fd_);
-    ::close(socket_fd_);
+
+    // 先把成员置为无效值，再真正 close。
+    // 原因：close(fd) 之后这个 fd 号会被系统立刻复用给别的文件描述符，
+    // 若成员仍留着旧值，后续任何读到它的路径（如另一线程的 write()，
+    // 或守护线程再次 close()）都会作用到一个**无关的 fd** 上 —— 关掉
+    // 别人的 socket，或者把 CAN 帧写到不相干的设备。原实现从不重置
+    // socket_fd_，因此幂等守卫 `if (socket_fd_ == -1) return` 形同虚设，
+    // 析构 + 重连会把同一 fd 关两次。
+    //
+    // 注意：这只是消除"重复 close / 关错 fd"，**不能**消除 write() 与
+    // 守护线程重连之间的竞态（那需要给 fd 加锁或改成状态机），此处不扩大改动。
+    const int fd = socket_fd_;
+    const int epfd = epoll_fd_;
+    socket_fd_ = -1;
+    epoll_fd_ = -1;
+
+    if (epfd != -1) {
+      epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+      ::close(epfd);
+    }
+    if (fd != -1) ::close(fd);
   }
 };
 
