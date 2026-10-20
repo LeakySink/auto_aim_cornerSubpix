@@ -87,8 +87,13 @@ std::vector<YOLO11_BUFF::Object> YOLO11_BUFF::get_multicandidateboxes(cv::Mat & 
       confidences.push_back(score);
 
       // 获取关键点
+      // 输出布局为 [4 box + 1 conf + NUM_POINTS*2 kpt]，故关键点从**第 5 行**开始、
+      // 共 NUM_POINTS*2 = 12 行。原写法 rowRange(NUM_POINTS, 15) 起点错成 6
+      // （所有点错位一行，把上一个点的 y 当成下一个点的 x），长度只有 9 行
+      // 而循环会访问 index 0..11，越界读 3 行。
+      // 同文件的 get_onecandidatebox（:196）用的就是正确写法，两处不一致。
       std::vector<float> keypoints;
-      cv::Mat kpts = det_output.col(i).rowRange(NUM_POINTS, 15);
+      cv::Mat kpts = det_output.col(i).rowRange(5, 5 + NUM_POINTS * 2);
       for (int j = 0; j < NUM_POINTS; ++j) {
         const float x = kpts.at<float>(j * 2 + 0, 0) * factor;
         const float y = kpts.at<float>(j * 2 + 1, 0) * factor;

@@ -256,6 +256,15 @@ std::vector<Eigen::Vector4d> Target::armor_xyza_list() const
 
 bool Target::diverged() const
 {
+  // ekf_.x 的维度恒为 11（x,y,z,vx,vy,vz,yaw,w,r,l,h）。默认构造的 Target
+  // 其 ekf_.x 是空向量（data() == nullptr），此处直接取 [8]/[9] 等于解引用
+  // 地址 64 -> SIGSEGV。
+  // 当前靠状态机不变量保命（state_ 只在 set_target 之后才离开 "lost"，
+  // 而 set_target 必然赋值 target_），但一改状态机就会崩。
+  // kalman_markers.cpp:43 已写了 `if (x.size() < 11)`，说明 codebase 里
+  // 确实预期过短 x 的存在。这里同样按"维度不足即视为发散"处理。
+  if (ekf_.x.size() < 11) return true;
+
   auto r_ok = ekf_.x[8] > 0.05 && ekf_.x[8] < 0.5;
   auto l_ok = ekf_.x[8] + ekf_.x[9] > 0.05 && ekf_.x[8] + ekf_.x[9] < 0.5;
 
