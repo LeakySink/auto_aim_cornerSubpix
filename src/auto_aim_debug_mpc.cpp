@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
@@ -49,7 +50,13 @@ int main(int argc, char * argv[])
 
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
+  // armors 被两个线程共享：主线程 `armors = yolo.detect(img)` 整体赋值
+  // （会销毁旧节点），plan 线程同时 `for (const auto & a : armors)` 遍历。
+  // 两者重叠时 plan 线程的迭代器指向已释放节点 -> UAF / 段错误。
+  // 用互斥量保护：主线程先在局部变量里算完 new_armors（含 tracker.track 的
+  // 修改），再在锁内整体替换；plan 线程的遍历也在锁内。
   std::list<auto_aim::Armor> armors;
+  std::mutex armors_mutex;
   std::atomic<bool> quit = false;
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
@@ -107,14 +114,18 @@ int main(int argc, char * argv[])
         data["target_yaw"] = target->ekf_x()[6];
         data["armor_id"] = target->last_id;      // last_id 是 public
       }
-      if (target.has_value() && !armors.empty()) {
-        for (const auto & a   : armors) {
-          if (a.name == target->name && a.type == target->armor_type) {
-            data["obs_yaw"] = a.ypd_in_world[0];       // z[0]
-            data["obs_pitch"] = a.ypd_in_world[1];     // z[1]
-            data["obs_dist"] = a.ypd_in_world[2];      // z[2]
-            data["obs_armor_yaw"] = a.ypr_in_world[0]; // z[3]
-            break;
+      {
+        // 遍历必须持锁：主线程随时可能把 armors 整体替换掉
+        std::lock_guard<std::mutex> lock(armors_mutex);
+        if (target.has_value() && !armors.empty()) {
+          for (const auto & a : armors) {
+            if (a.name == target->name && a.type == target->armor_type) {
+              data["obs_yaw"] = a.ypd_in_world[0];       // z[0]
+              data["obs_pitch"] = a.ypd_in_world[1];     // z[1]
+              data["obs_dist"] = a.ypd_in_world[2];      // z[2]
+              data["obs_armor_yaw"] = a.ypr_in_world[0]; // z[3]
+              break;
+            }
           }
         }
       }
@@ -141,8 +152,15 @@ int main(int argc, char * argv[])
     camera.read(img, t);
     auto q = gimbal.q(t);
     solver.set_R_gimbal2world(q);
-    armors = yolo.detect(img);
-    auto targets = tracker.track(armors, t);
+    // 先在局部变量里完成检测与跟踪（tracker.track 会就地修改 armors），
+    // 再在锁内整体替换共享列表 —— 锁持有时间只是一次 list move，很短，
+    // 不会阻塞 plan 线程的遍历。
+    auto new_armors = yolo.detect(img);
+    auto targets = tracker.track(new_armors, t);
+    {
+      std::lock_guard<std::mutex> lock(armors_mutex);
+      armors = std::move(new_armors);
+    }
     if (!targets.empty())
       target_queue.push(targets.front());
     else

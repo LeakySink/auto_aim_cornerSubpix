@@ -1,4 +1,5 @@
 #include <chrono>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
@@ -67,7 +68,13 @@ int main(int argc, char * argv[])
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
 
+  // data 是主线程栈上的 json，被下面的 plan_thread 以 [&] 捕获引用后
+  // **两个线程都会写**（plan 线程写 plan_yaw/plan_pitch/markers，
+  // 主线程写 yaw）。nlohmann::json 是树形结构，并发修改不同 key 也会
+  // 触及共享的 object 内部表，属数据竞争 —— 轻则丢字段，重则堆损坏 / UAF。
+  // 用一把互斥量保护所有写入；plot() 传快照，避免持锁做网络 IO。
   nlohmann::json data;
+  std::mutex data_mutex;
 
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
@@ -80,15 +87,22 @@ int main(int argc, char * argv[])
 
         auto plan = planner.plan(target, gs.bullet_speed);
 
-        data["plan_yaw"] = plan.yaw;
-        data["plan_pitch"] = plan.pitch;
-        if (target.has_value()) {
-          data["markers"] = tools::viz::kalman_markers(*target);
+        // 写入与下面 plot 的快照拷贝都在锁内完成；plot 本身（UDP/落盘）
+        // 放到锁外，避免持锁做 IO 拖慢主线程。
+        nlohmann::json snapshot;
+        {
+          std::lock_guard<std::mutex> lock(data_mutex);
+          data["plan_yaw"] = plan.yaw;
+          data["plan_pitch"] = plan.pitch;
+          if (target.has_value()) {
+            data["markers"] = tools::viz::kalman_markers(*target);
+          }
+          snapshot = data;
         }
         gimbal.send(
           plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);
-        tools::RemoteLogger::instance().plot(data);
+        tools::RemoteLogger::instance().plot(snapshot);
         std::this_thread::sleep_for(10ms);
       } else
         std::this_thread::sleep_for(200ms);
@@ -116,7 +130,10 @@ int main(int argc, char * argv[])
       if (!targets.empty()) {
         target_queue.push(targets.front());
         Eigen::VectorXd x = targets.front().ekf_x();
-        data["yaw"] = x[6];
+        {
+          std::lock_guard<std::mutex> lock(data_mutex);
+          data["yaw"] = x[6];
+        }
       }
       else
         target_queue.push(std::nullopt);
