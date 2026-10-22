@@ -82,21 +82,29 @@ struct Armor
   Color color;
   Lightbar left, right;     //used to be const
   cv::Point2f center;       // 不是对角线交点，不能作为实际中心！
-  cv::Point2f center_norm;  // 归一化坐标
+  // 归一化坐标（0~1）。Tracker 用它挑"最靠画面中心"的板，所以必须有确定的值：
+  // cv::Point2f 的默认构造并不清零，未赋值时是栈上垃圾。给 (0,0) 表示"离中心最远"，
+  // 排序时自然落到最后（正常情况下 4 个 YOLO 与传统 Detector 都会填它）。
+  cv::Point2f center_norm{0.0f, 0.0f};
   std::vector<cv::Point2f> points;
 
   double ratio;              // 两灯条的中点连线与长灯条的长度之比
-  double side_ratio;         // 长灯条与短灯条的长度之比
+  double side_ratio = 1.0;   // 长灯条与短灯条的长度之比（只有传统方法会算，给默认值）
   double rectangular_error;  // 灯条和中点连线所成夹角与π/2的差值
 
-  ArmorType type;
-  ArmorName name;
-  ArmorPriority priority;
+  ArmorType type = ArmorType::small;
+  ArmorName name = ArmorName::not_armor;
+  // priority 必须有默认值：Tracker::track() 每次都会对整张 armors 列表按 priority 排序
+  // （tracker.cpp 两处 std::list::sort），而 7 个自瞄入口（standard / uav / mt_standard /
+  // mt_auto_aim_debug / standard_mpc / uav_debug / auto_aim_debug_mpc）从不给 priority
+  // 赋值（只有走 Decider::set_priority 的 sentry 那几个入口会赋值）。读未初始化的枚举
+  // 值是 UB，而且比较器会退化成不满足严格弱序 —— armors.front() 选中哪块板不确定。
+  ArmorPriority priority = ArmorPriority::third;
   int class_id;
   cv::Rect box;
   cv::Mat pattern;
   double confidence;
-  bool duplicated;
+  bool duplicated = false;
 
   Eigen::Vector3d xyz_in_gimbal;  // 单位：m
   Eigen::Vector3d xyz_in_world;   // 单位：m
@@ -104,7 +112,7 @@ struct Armor
   Eigen::Vector3d ypr_in_world;   // 单位：rad
   Eigen::Vector3d ypd_in_world;   // 球坐标系
 
-  double yaw_raw;  // rad
+  double yaw_raw = 0.0;  // rad；只在 Solver::solve() 里赋值，调试输出可能早于它
 
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(
