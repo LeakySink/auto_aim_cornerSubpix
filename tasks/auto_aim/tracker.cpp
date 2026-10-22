@@ -69,11 +69,14 @@ std::list<Target> Tracker::track(
   //            solver_.oupost_reprojection_error(a, -15 * CV_PI / 180.0);
   // });
 
-  // 优先选择靠近图像中心的装甲板
+  // 优先选择靠近图像中心的装甲板。
+  // 原先硬编码 (1440/2, 1080/2)（带 TODO）—— 换相机/换分辨率后这条判据就失效。
+  // 改用检测阶段算好的归一化中心 center_norm（4 个 YOLO 与传统 Detector 都会填），
+  // 与分辨率无关；未填时默认为 (0,0)，排序时自然落到最后。
   armors.sort([](const Armor & a, const Armor & b) {
-    cv::Point2f img_center(1440 / 2, 1080 / 2);  // TODO
-    auto distance_1 = cv::norm(a.center - img_center);
-    auto distance_2 = cv::norm(b.center - img_center);
+    const cv::Point2f img_center(0.5f, 0.5f);
+    const auto distance_1 = cv::norm(a.center_norm - img_center);
+    const auto distance_2 = cv::norm(b.center_norm - img_center);
     return distance_1 < distance_2;
   });
 
@@ -134,11 +137,14 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     state_ = "lost";
   }
 
-  // 优先选择靠近图像中心的装甲板
+  // 优先选择靠近图像中心的装甲板。
+  // 原先硬编码 (1440/2, 1080/2)（带 TODO）—— 换相机/换分辨率后这条判据就失效。
+  // 改用检测阶段算好的归一化中心 center_norm（4 个 YOLO 与传统 Detector 都会填），
+  // 与分辨率无关；未填时默认为 (0,0)，排序时自然落到最后。
   armors.sort([](const Armor & a, const Armor & b) {
-    cv::Point2f img_center(1440 / 2, 1080 / 2);  // TODO
-    auto distance_1 = cv::norm(a.center - img_center);
-    auto distance_2 = cv::norm(b.center - img_center);
+    const cv::Point2f img_center(0.5f, 0.5f);
+    const auto distance_1 = cv::norm(a.center_norm - img_center);
+    const auto distance_2 = cv::norm(b.center_norm - img_center);
     return distance_1 < distance_2;
   });
 
