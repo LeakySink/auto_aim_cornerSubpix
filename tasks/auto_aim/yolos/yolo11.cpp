@@ -3,6 +3,7 @@
 #include <fmt/chrono.h>
 
 #include <filesystem>
+#include <limits>
 
 #include "tools/img_tools.hpp"
 #include "tools/ov_tensor_utils.hpp"
@@ -20,6 +21,9 @@ YOLO11::YOLO11(const std::string & config_path, bool debug)
   device_ = yaml["device"].as<std::string>();
   binary_threshold_ = yaml["threshold"].as<double>();
   min_confidence_ = yaml["min_confidence"].as<double>();
+  // 可选键：不写就维持 0（关闭）。注意不能用 tools::read —— 它对缺键会直接
+  // log ERROR 并 exit(1)，加个新键就等于让所有旧 yaml 启动失败。
+  if (yaml["min_class_margin"]) min_class_margin_ = yaml["min_class_margin"].as<double>();
   int x = 0, y = 0, width = 0, height = 0;
   x = yaml["roi"]["x"].as<int>();
   y = yaml["roi"]["y"].as<int>();
@@ -121,11 +125,37 @@ std::list<Armor> YOLO11::parse(
 
     std::vector<cv::Point2f> armor_key_points;
 
-    double score;
-    cv::Point max_point;
-    cv::minMaxLoc(scores, nullptr, &score, nullptr, &max_point);
+    // 分类取 argmax，同时算 top-1 / top-2 的间隔（margin）。
+    // 这里不用 cv::minMaxLoc + cv::sort：scores 是 output 某一行的子视图，
+    // 内存不连续，cv::sort(SORT_EVERY_ROW) 对不连续 Mat 并不安全；
+    // 直接扫 38 列既能拿到 argmax 也能拿到次大值，语义与原实现一致。
+    double score = -std::numeric_limits<double>::infinity();
+    double second_score = -std::numeric_limits<double>::infinity();
+    cv::Point max_point(-1, 0);
+    for (int c = 0; c < scores.cols; ++c) {
+      const double v = static_cast<double>(scores.at<float>(0, c));
+      if (v > score) {
+        second_score = score;
+        score = v;
+        max_point.x = c;
+      } else if (v > second_score) {
+        second_score = v;
+      }
+    }
 
     if (score < score_threshold_) continue;
+
+    // margin 门槛：top-1 与 top-2 贴得很近时说明网络在两类之间"犹豫"
+    // （典型场景就是旋转中的步兵被判成前哨站），这种帧不该直接拿去锁目标。
+    // min_class_margin 默认 0 = 关闭、行为与改动前完全一致；实测定出阈值后
+    // 在 yaml 里加 min_class_margin: 0.1 这样的值即可生效。
+    const double margin = score - second_score;
+    if (margin < min_class_margin_) {
+      tools::RemoteLogger::instance().log(
+        "DEBUG", "[YOLO11] drop low-margin detection: class={} score={:.3f} margin={:.3f} < {:.3f}",
+        max_point.x, score, margin, min_class_margin_);
+      continue;
+    }
 
     auto x = xywh.at<float>(0);
     auto y = xywh.at<float>(1);

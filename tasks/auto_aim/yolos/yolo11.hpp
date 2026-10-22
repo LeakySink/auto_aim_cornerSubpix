@@ -32,6 +32,9 @@ private:
   const float nms_threshold_ = 0.3;
   const float score_threshold_ = 0.7;
   double min_confidence_, binary_threshold_;
+  // 分类 top-1 / top-2 的间隔门槛（yaml 可选键 min_class_margin）。
+  // 默认 0 = 不启用，保持原有行为；需要压"网络在两类之间犹豫"的误判时再开。
+  double min_class_margin_ = 0.0;
 
   ov::Core core_;
   ov::CompiledModel compiled_model_;
