@@ -110,8 +110,6 @@ queue_.push({img.clone(), t, std::move(infer_request)});      // 没存 input
 | `mindvision.cpp close()`      | 判 `handle_ == -1` 却从不设回 -1，幂等守卫形同虚设                                                                             | 补 `handle_ = -1`                      |
 | `mindvision.cpp open()`       | 未检查 `CameraGetCapability` 返回值就读 `sResolutionRange`，失败时是未初始化栈内存 → `width_`/`height_` 垃圾 → 采集线程按此构造 `cv::Mat` 越界  | 检查返回值，失败先 `close()` 再抛                |
 
-
-
 > `hikrobot` 那两项在赛场上很常见（相机没插/没认到），是本次**实际收益最高**的一组。
 
 ### 2.8 `tools/trajectory.cpp` — NaN 穿透 ★P0 链条上游
@@ -153,6 +151,8 @@ if (delta < 0.0) return false;                              // 对 NaN 也是 fa
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `standard_mpc.cpp`       | `nlohmann::json data` 是主线程栈对象，被 `plan_thread` 以 `[&]` 捕获；plan 线程写 `plan_yaw/plan_pitch/markers` 并 `plot(data)`，主线程写 `data["yaw"]`。json 是树形结构，并发改**不同 key** 也会触及共享 object 内部表 | 加 `data_mutex`；`plot()` 传锁内拷贝的 snapshot（持锁不做 IO）                                                                      |
 | `auto_aim_debug_mpc.cpp` | 主线程 `armors = yolo.detect(img)` 整体赋值销毁旧节点，plan 线程同时 `for (const auto & a : armors)` 遍历 → 迭代器悬垂                                                                               | 加 `armors_mutex`；主线程在局部 `new_armors` 上完成 detect + `tracker.track`（接收非 const 引用会就地改），再在锁内 `std::move` 替换；plan 线程遍历整体进锁 |
+
+
 
 ---
 
@@ -205,6 +205,7 @@ git reset --hard d5b53ed
 # 只回滚某一项（例如相机改动）
 git revert --no-commit d3037f6 && git commit
 ```
+
 
 改动前另有一份文件级备份：`D:/my/ckyf_vision/segfix_backup_20261020_1641`（18 个待改文件的原版）。
 
