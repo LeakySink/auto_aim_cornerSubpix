@@ -7,9 +7,9 @@
 // 新实现先用 isfinite 挡掉非有限值（降级为 0），再用 fmod 做 O(1) 折算，
 // 取值区间应保持与原实现一致的 (-PI, PI]。
 //
-// 编译（本仓库根目录）：
-//   g++ -std=c++17 -O2 -I. -Itools tests/algo/limit_rad_check.cpp \
-//       tools/math_tools.cpp -o /tmp/limit_rad_check $(pkg-config --cflags --libs opencv4)
+// 编译（本仓库根目录；行尾不要留反斜杠，否则触发 -Wcomment）：
+//   g++ -std=c++17 -O2 -I. tests/algo/limit_rad_check.cpp tools/math_tools.cpp
+//       -o /tmp/limit_rad_check $(pkg-config --cflags --libs opencv4)
 //   /tmp/limit_rad_check
 
 #include <cmath>
@@ -20,7 +20,7 @@
 
 #include <opencv2/core.hpp>  // CV_PI
 
-#include "math_tools.hpp"
+#include "tools/math_tools.hpp"
 
 namespace
 {

@@ -13,9 +13,9 @@
 // 修复后：构造函数用 !(x > 0) 拦 NaN，并额外要求 h 与 k 有限；
 // 收尾再统一校验 pitch / fly_time 是否有限。
 //
-// 编译（本仓库根目录）：
-//   g++ -std=c++17 -O2 -I. -Itools tests/algo/trajectory_nan_check.cpp \
-//       tools/trajectory.cpp -o /tmp/trajectory_nan_check
+// 编译（本仓库根目录；行尾不要留反斜杠，否则触发 -Wcomment）：
+//   g++ -std=c++17 -O2 -I. tests/algo/trajectory_nan_check.cpp tools/trajectory.cpp
+//       -o /tmp/trajectory_nan_check
 //   /tmp/trajectory_nan_check
 
 #include <cmath>
@@ -23,7 +23,7 @@
 #include <limits>
 #include <string>
 
-#include "trajectory.hpp"
+#include "tools/trajectory.hpp"
 
 namespace
 {
