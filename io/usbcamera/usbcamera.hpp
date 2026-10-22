@@ -1,6 +1,7 @@
 #ifndef IO__USBCamera_HPP
 #define IO__USBCamera_HPP
 
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <opencv2/opencv.hpp>
@@ -34,7 +35,9 @@ private:
   int open_count_;
   double image_width_, image_height_;
   int usb_gamma_, usb_gain_;
-  bool quit_, ok_;
+  // quit_ / ok_ 被主线程、守护线程、采集线程同时读写，普通 bool 属于数据竞争
+  // （编译器可以把它一直放在寄存器里，退出请求可能永远传不到采集线程）。
+  std::atomic<bool> quit_{false}, ok_{false};
   std::thread capture_thread_;
   std::thread daemon_thread_;
   tools::ThreadSafeQueue<CameraData> queue_;

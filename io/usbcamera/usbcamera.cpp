@@ -48,6 +48,9 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
 
       if (capture_thread_.joinable()) capture_thread_.join();
 
+      // 上面 join 期间可能收到退出请求；这里再判一次，避免退出流程里又打开一次相机
+      if (quit_) break;
+
       {
         std::lock_guard<std::mutex> lock(cap_mutex_);
         close();
@@ -60,13 +63,17 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
 
 USBCamera::~USBCamera()
 {
+  // 顺序很重要：先置退出标志 → join 两个线程 → 最后才关相机。
+  // 旧顺序（先关相机再 join）会撞上"守护线程刚好走到 try_open()"的窗口：
+  // 析构函数关掉之后守护线程又把它打开一次，而析构函数已经不再管它，
+  // 于是退出后相机设备仍被占用（守护线程只在循环开头判 quit_）。
   quit_ = true;
+  if (daemon_thread_.joinable()) daemon_thread_.join();
+  if (capture_thread_.joinable()) capture_thread_.join();
   {
     std::lock_guard<std::mutex> lock(cap_mutex_);
     close();
   }
-  if (daemon_thread_.joinable()) daemon_thread_.join();
-  if (capture_thread_.joinable()) capture_thread_.join();
   tools::RemoteLogger::instance().log("INFO", "USBCamera destructed.");
 }
 
