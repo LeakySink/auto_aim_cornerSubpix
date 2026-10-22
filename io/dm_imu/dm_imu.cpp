@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -16,6 +17,19 @@
 
 namespace io
 {
+namespace
+{
+// 原先写作 *((float *)&frame.accx_u32)：packed 结构体的成员没有对齐保证，
+// 把 uint32_t 的地址当 float* 解引用既违反严格别名规则，也可能产生未对齐访问
+// （x86 上"看起来能用"，移到 ARM 上直接崩）。按位 memcpy 是等价且安全的写法。
+inline float bits_to_float(std::uint32_t bits)
+{
+  float value;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+}  // namespace
+
 DM_IMU::DM_IMU() : queue_(5000)
 {
   init_serial();
@@ -76,19 +90,19 @@ void DM_IMU::get_imu_data_thread()
       serial_.read((uint8_t *)(&receive_data.accx_u32), 57 - 4);
 
       if (tools::get_crc16((uint8_t *)(&receive_data.FrameHeader1), 16) == receive_data.crc1) {
-        data.accx = *((float *)(&receive_data.accx_u32));
-        data.accy = *((float *)(&receive_data.accy_u32));
-        data.accz = *((float *)(&receive_data.accz_u32));
+        data.accx = bits_to_float(receive_data.accx_u32);
+        data.accy = bits_to_float(receive_data.accy_u32);
+        data.accz = bits_to_float(receive_data.accz_u32);
       }
       if (tools::get_crc16((uint8_t *)(&receive_data.FrameHeader2), 16) == receive_data.crc2) {
-        data.gyrox = *((float *)(&receive_data.gyrox_u32));
-        data.gyroy = *((float *)(&receive_data.gyroy_u32));
-        data.gyroz = *((float *)(&receive_data.gyroz_u32));
+        data.gyrox = bits_to_float(receive_data.gyrox_u32);
+        data.gyroy = bits_to_float(receive_data.gyroy_u32);
+        data.gyroz = bits_to_float(receive_data.gyroz_u32);
       }
       if (tools::get_crc16((uint8_t *)(&receive_data.FrameHeader3), 16) == receive_data.crc3) {
-        data.roll = *((float *)(&receive_data.roll_u32));
-        data.pitch = *((float *)(&receive_data.pitch_u32));
-        data.yaw = *((float *)(&receive_data.yaw_u32));
+        data.roll = bits_to_float(receive_data.roll_u32);
+        data.pitch = bits_to_float(receive_data.pitch_u32);
+        data.yaw = bits_to_float(receive_data.yaw_u32);
         // tools::RemoteLogger::instance().log("DEBUG", 
         //   "yaw: {:.2f}, pitch: {:.2f}, roll: {:.2f}", static_cast<double>(data.yaw),
         //   static_cast<double>(data.pitch), static_cast<double>(data.roll));
