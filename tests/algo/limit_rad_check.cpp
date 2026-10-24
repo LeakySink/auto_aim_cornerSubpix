@@ -75,9 +75,9 @@ void check_against_reference(double x, const std::string & label)
   double got = tools::limit_rad(x);
   long double g = static_cast<long double>(got);
   // ±PI 处真值可能以 2PI 环绕的等价形式出现，两个方向都要接受
-  double d0 = static_cast<double>(std::fabsl(g - ref));
-  double d1 = static_cast<double>(std::fabsl(g - (ref + TWO_PI_L)));
-  double d2 = static_cast<double>(std::fabsl(g - (ref - TWO_PI_L)));
+  double d0 = static_cast<double>(std::fabs(g - ref));
+  double d1 = static_cast<double>(std::fabs(g - (ref + TWO_PI_L)));
+  double d2 = static_cast<double>(std::fabs(g - (ref - TWO_PI_L)));
   double diff = d0 < d1 ? d0 : d1;
   diff = diff < d2 ? diff : d2;
   // 容差按量级缩放：|x|=1e6 时 double 的 ulp 已达 ~1.16e-10，
@@ -171,8 +171,8 @@ int main()
   for (double big : {12345.6789, 1e6, -98765.4321}) {
     long double ref = ref_limit_rad(static_cast<long double>(big));
     double o = old_limit_rad(big), n = tools::limit_rad(big);
-    double eo = static_cast<double>(std::fabsl(static_cast<long double>(o) - ref));
-    double en = static_cast<double>(std::fabsl(static_cast<long double>(n) - ref));
+    double eo = static_cast<double>(std::fabs(static_cast<long double>(o) - ref));
+    double en = static_cast<double>(std::fabs(static_cast<long double>(n) - ref));
     std::printf("  x=%-12g old_err=%.3g  new_err=%.3g\n", big, eo, en);
     expect(en <= eo + 1e-15, "新实现误差不大于旧实现");
     expect(n > -PI - 1e-9 && n <= PI + 1e-9, "新实现结果仍在 (-PI,PI] 内");
