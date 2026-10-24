@@ -40,7 +40,10 @@ public:
 
   std::map<std::string, double> data;  //卡方检验数据
   std::deque<int> recent_nis_failures{0};
-  size_t window_size = 10000;
+  // NIS 失败窗口长度（样本数）。曾经是 10000：按 60fps 算约 166s，配合 Tracker 里
+  // "比例 >= 40%" 的判据意味着一个跑飞的目标要两分多钟后才可能被丢。改成 100
+  // （约 1.7s）让看门狗对发散反应得动，又不至于被单帧噪声触发。
+  size_t window_size = 100;
   double last_nis;
 
 private:

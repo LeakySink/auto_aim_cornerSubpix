@@ -2,6 +2,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <numeric>
 #include <tuple>
 
 #include "tools/remote_logger.hpp"
@@ -102,14 +106,23 @@ std::list<Target> Tracker::track(
     return {};
   }
 
-  // 收敛效果检测：
-  if (
-    std::accumulate(
-      target_.ekf().recent_nis_failures.begin(), target_.ekf().recent_nis_failures.end(), 0) >=
-    (0.4 * target_.ekf().window_size)) {
-    tools::RemoteLogger::instance().log("DEBUG", "[Target] Bad Converge Found!");
-    state_ = "lost";
-    return {};
+  // 收敛效果检测：窗口内 NIS 失败**比例** >= 40% 就丢目标。
+  // 原实现写的是 `accumulate(...) >= 0.4 * window_size`，即"失败条数 >= 4000"，
+  // 而窗口长度就等于更新次数 —— 前 4000 次更新（60fps 约 66s）内该判据数学上
+  // 永远不成立，跑飞的目标根本不会被丢。这里改成按当前窗口的样本数求比例，
+  // 并要求至少 30 个样本（避免刚锁定时的少量噪声直接判死）。
+  {
+    const auto & nis_fails = target_.ekf().recent_nis_failures;
+    if (nis_fails.size() >= 30) {
+      const int n_fail = std::accumulate(nis_fails.begin(), nis_fails.end(), 0);
+      if (n_fail >= 0.4 * static_cast<double>(nis_fails.size())) {
+        tools::RemoteLogger::instance().log(
+          "DEBUG", "[Target] Bad Converge Found!（最近 {}/{} 次更新 NIS 失败）", n_fail,
+          nis_fails.size());
+        state_ = "lost";
+        return {};
+      }
+    }
   }
 
   if (state_ == "lost") return {};
@@ -289,6 +302,13 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   if (found_count == 0) return false;
 
+  // 空间门控的基准：本帧预测的 N 块装甲板位置（必须在任何 update 之前取）
+  const auto predicted = target_.armor_xyza_list();
+  const double pred_dist = predicted.empty() ? 0.0 : predicted.front().head<2>().norm();
+  // 容差随距离放宽：3m 处 ≈1.6m，8m 处 ≈2.6m —— 既容得下旋转/预测误差，
+  // 又能把"另一台同类号敌车"（通常相距数米）挡在外面。
+  const double gate = 1.0 + 0.2 * pred_dist;
+
   int updated = 0;
   for (auto & armor : armors) {
     if (
@@ -299,6 +319,22 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
     // 位姿被 Solver 判定为不可信 -> 本帧不拿它更新 EKF（空转一帧优于注入脏观测）
     if (!solver_.solve(armor)) continue;
+
+    // 空间门控（2026-10 加固）：只接受落在"预测装甲板附近"的观测。
+    // 原来只按 (name, type) 匹配，视野里一旦出现同类号同类型的第二块板（第二台敌车、
+    // 误框、远近两个目标），就会把它的观测喂进同一个 EKF —— 现场 obs_dist 在 3~9m
+    // 之间跳就是这种"串目标"的指纹，结果是位置状态被拉跑，armor_xyza_list() 会预测
+    // 出 0.3m 的幽灵板，Planner 取最近的板去解弹道 -> 对着地面打近场。
+    double d_armor2pred = std::numeric_limits<double>::infinity();
+    for (const auto & p : predicted) {
+      d_armor2pred = std::min(d_armor2pred, (armor.xyz_in_world - p.head<3>()).norm());
+    }
+    if (!(d_armor2pred < gate)) {
+      tools::RemoteLogger::instance().log(
+        "DEBUG", "[Tracker] 丢弃远离预测的观测：观测距离={:.2f}m 与预测最近距离={:.2f}m（门限 {:.2f}m）",
+        armor.xyz_in_world.norm(), d_armor2pred, gate);
+      continue;
+    }
 
     target_.update(armor);
     ++updated;
