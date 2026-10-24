@@ -751,4 +751,17 @@ primal_state = max|x − v|,  dual_state = ρ·max|v − v_prev|
 
 ---
 
+### C.14 脏数据护栏（2026-10 加固）
+
+背景：远距离低置信度框只有几个像素，4 个角点的噪声会让 IPPE 解出几十米甚至 NaN 的位姿；`r/l/h` 在 `Q` 里又没有过程噪声（C.5），一旦被污染很难自恢复，最终表现为「弹道无解 → 云台不受控」。因此在**进入 EKF 之前**加了三道闸，外加 planner 的 UB 修复：
+
+| 位置 | 加固 | 解决什么 |
+| --- | --- | --- |
+| `Solver::solve()` → 改为返回 `bool` | 校验相机系深度 `z > 0`、位姿全部有限、距离 ∈ `[min_valid_dist, max_valid_dist]`（yaml 可选键，缺省 0.2 / 50 m）；不合格则**清零** `xyz_*/ypr_*/ypd_*` 并记一条 WARN | 离谱 PnP 不再进入滤波与可视化；返回 false 让调用方显式丢弃 |
+| `Tracker::set_target()` / `update_target()` | `solve()` 失败即丢弃该装甲板；本帧全部被拒时按"未找到"处理（交给状态机计数） | 不用脏观测**初始化**（P0 很小，初始值错了拉不回来）或**更新** EKF |
+| `Target::update()` 入口 | `allFinite()` 守卫，任何 NaN/inf 观测直接跳过本帧 | 所有更新路径（两个 `track` 重载、全向感知、多线程）的共同收口，防御纵深 |
+| `Planner::aim()` / `plan()` | `xyz` / `yaw` / `min_dist` 显式初始化；循环里跳过非有限装甲板；无可用板时 `plan()` 早退、`aim()` 抛 `no valid armor`；catch 里**限流 2 s** 并带上原因与弹速 | 消除读未初始化内存的 UB；`Unsolvable target` 不再每 10 ms 刷屏（原来日志会掩盖真正的问题） |
+
+> 注意：`Solver::solve()` 变成 `bool` 后，**忽略返回值的调用点会静默退化**（`src/mt_auto_aim_debug.cpp`、`sentry_debug.cpp`、`uav_debug.cpp` 里用于调试可视化的那 3 处仍忽略返回值）—— 那些位置在失败时会画出 0/0/0，这本身就是"该检测被拒绝"的信号。新增调用点请检查返回值。
+
 > **复现校验建议**：附录 C 里的每条公式都能用纯 Eigen 写 10~30 行小实验独立验证（弹道解代入能量守恒、EKF 的 `H` 用有限差分对比、PnP 变换链用一组已知点做往返）。`tests/algo/` 下已有 `trajectory_nan_check.cpp`、`limit_rad_check.cpp`、`ekf_update_check.cpp` 三个先例可照抄结构。
