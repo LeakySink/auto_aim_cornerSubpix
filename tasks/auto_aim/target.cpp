@@ -1,5 +1,6 @@
 #include "target.hpp"
 
+#include <cmath>
 #include <numeric>
 
 #include "tools/remote_logger.hpp"
@@ -274,6 +275,16 @@ bool Target::diverged() const
   // kalman_markers.cpp:43 已写了 `if (x.size() < 11)`，说明 codebase 里
   // 确实预期过短 x 的存在。这里同样按"维度不足即视为发散"处理。
   if (ekf_.x.size() < 11) return true;
+
+  // 旋转中心离云台太近同样是发散的表现：正常交战不会有 0.5 m 以内的目标，
+  // 出现这种状态几乎都是脏框被 PnP 解成"贴脸"（现场日志里 d=0.30 m 那类）。
+  // 不进这条判据的话，状态会带着一个假位置一直算下去（r/l 的口径拦不住它）。
+  const double center_dist = std::hypot(ekf_.x[0], ekf_.x[2]);
+  if (!std::isfinite(center_dist) || center_dist < 0.5) {
+    tools::RemoteLogger::instance().log(
+      "DEBUG", "[Target] 旋转中心过近（d={:.3f} m），判为发散", center_dist);
+    return true;
+  }
 
   auto r_ok = ekf_.x[8] > 0.05 && ekf_.x[8] < 0.5;
   auto l_ok = ekf_.x[8] + ekf_.x[9] > 0.05 && ekf_.x[8] + ekf_.x[9] < 0.5;

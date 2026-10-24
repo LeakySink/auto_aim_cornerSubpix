@@ -40,8 +40,10 @@ private:
   Eigen::Vector3d t_camera2gimbal_;
   Eigen::Matrix3d R_gimbal2world_;
 
-  // 位姿合理性门限（yaml 可选键 min_valid_dist / max_valid_dist，缺省 0.2 / 50 m）
-  double min_valid_dist_ = 0.2;
+  // 位姿合理性门限（yaml 可选键 min_valid_dist / max_valid_dist）。
+  // 下限取 0.5 m：与弹道拟合表的覆盖下限一致，且 0.5 m 以内的"敌人"物理上不存在
+  // ——现场出现过 d=0.30 m 的脏解（虚假框被 IPPE 解成"贴脸"），0.2 m 拦不住。
+  double min_valid_dist_ = 0.5;
   double max_valid_dist_ = 50.0;
 
   void optimize_yaw(Armor & armor) const;
