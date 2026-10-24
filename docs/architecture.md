@@ -761,6 +761,10 @@ primal_state = max|x − v|,  dual_state = ρ·max|v − v_prev|
 | `Tracker::set_target()` / `update_target()` | `solve()` 失败即丢弃该装甲板；本帧全部被拒时按"未找到"处理（交给状态机计数） | 不用脏观测**初始化**（P0 很小，初始值错了拉不回来）或**更新** EKF |
 | `Target::update()` 入口 | `allFinite()` 守卫，任何 NaN/inf 观测直接跳过本帧 | 所有更新路径（两个 `track` 重载、全向感知、多线程）的共同收口，防御纵深 |
 | `Planner::aim()` / `plan()` | `xyz` / `yaw` / `min_dist` 显式初始化；循环里跳过非有限装甲板；无可用板时 `plan()` 早退、`aim()` 抛 `no valid armor`；catch 里**限流 2 s** 并带上原因与弹速 | 消除读未初始化内存的 UB；`Unsolvable target` 不再每 10 ms 刷屏（原来日志会掩盖真正的问题） |
+| `Tracker::update_target()` | **关联空间门控**：观测的装甲板位置必须落在"本帧预测的 N 块板"附近（容差 `1.0 + 0.2·dist`，3 m≈1.6 m、8 m≈2.6 m） | 原来只按 `(name, type)` 匹配，视野里出现同类号同类型的第二块板时会把它的观测喂进同一个 EKF（现场 `obs_dist` 在 3~9 m 之间跳就是这种**串目标**的指纹） |
+| `Tracker::track()` 的 Bad Converge 判据 | 由"失败**条数** ≥ `0.4 × window_size`"改为"失败**比例** ≥ 40%（样本 ≥ 30）" | **原判据几乎永不触发**：`window_size = 10000` → 需要 4000 次失败，而窗口长度就是更新次数 → 前 4000 次更新（60 fps ≈ 66 s）内数学上不可能成立，跑飞的目标不会被丢。EKF 自己算的是 ratio（`recent_rate`），说明原意就是比例 |
+| `ExtendedKalmanFilter::window_size` | `10000 → 100`（约 1.7 s @60 fps） | 让"失败比例"反映近期行为，看门狗对发散反应得动 |
+| `Planner::aim()` / `plan()` 的预测板过滤 | 丢弃 `dist < min_valid_dist`（缺省 0.5 m，与 Solver 同名 yaml 键）的预测装甲板 | EKF 状态被带跑时 `armor_xyza_list()` 会算出**离云台很近的幽灵板**，而这两处取的正是"最近的板" → 0.30 m 的幽灵会劫持弹道、把枪口压向地面（现场 `d=0.3033` 那条日志） |
 
 > 注意：`Solver::solve()` 变成 `bool` 后，**忽略返回值的调用点会静默退化**（`src/mt_auto_aim_debug.cpp`、`sentry_debug.cpp`、`uav_debug.cpp` 里用于调试可视化的那 3 处仍忽略返回值）—— 那些位置在失败时会画出 0/0/0，这本身就是"该检测被拒绝"的信号。新增调用点请检查返回值。
 
