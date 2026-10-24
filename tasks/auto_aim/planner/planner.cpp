@@ -1,5 +1,9 @@
 #include "planner.hpp"
 
+#include <chrono>
+#include <limits>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "tools/ballistics_poly.hpp"
@@ -11,6 +15,21 @@ using namespace std::chrono_literals;
 
 namespace auto_aim
 {
+namespace
+{
+// 降级日志限流：plan() 是 10ms 周期的热路径，"无解"每帧都可能发生，
+// 原来每帧一条 WARN 会把日志刷爆、也掩盖真正的问题。
+void log_degraded(const std::string & msg)
+{
+  static std::chrono::steady_clock::time_point last{};
+  static bool inited = false;
+  const auto now = std::chrono::steady_clock::now();
+  if (inited && now - last < std::chrono::seconds(2)) return;
+  inited = true;
+  last = now;
+  tools::RemoteLogger::instance().log("WARN", "{}", msg);
+}
+}  // namespace
 Planner::Planner(const std::string & config_path)
 {
   // 弹道模型：配置里 ballistics_model: poly 时装载 ballistic-main 的离线拟合表，
@@ -54,14 +73,24 @@ Plan Planner::plan(Target target, double bullet_speed)
   }
 
   // 1. Predict fly_time
-  Eigen::Vector3d xyz;
-  auto min_dist = 1e10;
+  //    xyz / min_dist 必须显式初始化：armor_xyza_list() 为空、或里面全是非有限值
+  //    （EKF 被脏观测污染后的表现）时下面的循环一次都不会进，读未初始化的 Eigen
+  //    向量是 UB，而且 d = 1e10 必然让弹道无解。
+  Eigen::Vector3d xyz = Eigen::Vector3d::Zero();
+  auto min_dist = std::numeric_limits<double>::infinity();
   for (auto & xyza : target.armor_xyza_list()) {
+    if (!xyza.allFinite()) continue;  // 跳过被污染的装甲板
     auto dist = xyza.head<2>().norm();
     if (dist < min_dist) {
       min_dist = dist;
       xyz = xyza.head<3>();
     }
+  }
+
+  // 没有任何可用装甲板：本帧直接放弃控制，不再往下算弹道与 MPC
+  if (!std::isfinite(min_dist) || min_dist <= 0.0) {
+    log_degraded("[Planner] 无可用装甲板（armor_xyza_list 为空或全为非有限值），本帧不控制");
+    return {false};
   }
 
   const double k0 =
@@ -81,7 +110,11 @@ Plan Planner::plan(Target target, double bullet_speed)
     pitch0 = aim_ref(1);
     traj = get_trajectory(target, yaw0, bullet_speed);
   } catch (const std::exception & e) {
-    tools::RemoteLogger::instance().log("WARN", "Unsolvable target {:.2f}", bullet_speed);
+    // 保留原来"弹速"这个关键信息，但改成限流 + 带上原因：无解有两个来源 ——
+    // 找不到可用装甲板（no valid armor）/ 本帧弹道无解（Unsolvable bullet trajectory）
+    log_degraded(
+      std::string("[Planner] 弹道/目标无解，本帧不控制：") + e.what() +
+      "（bullet_speed=" + std::to_string(bullet_speed) + "）");
     return {false};
   }
 
@@ -196,17 +229,23 @@ void Planner::setup_pitch_solver(const std::string & config_path)
 
 Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_speed)
 {
-  Eigen::Vector3d xyz;
-  double yaw;
-  auto min_dist = 1e10;
+  // 与 plan() 同样：显式初始化 + 跳过被污染的装甲板（读未初始化内存是 UB）
+  Eigen::Vector3d xyz = Eigen::Vector3d::Zero();
+  double yaw = 0.0;
+  auto min_dist = std::numeric_limits<double>::infinity();
 
   for (auto & xyza : target.armor_xyza_list()) {
+    if (!xyza.allFinite()) continue;
     auto dist = xyza.head<2>().norm();
     if (dist < min_dist) {
       min_dist = dist;
       xyz = xyza.head<3>();
       yaw = xyza[3];
     }
+  }
+
+  if (!std::isfinite(min_dist) || min_dist <= 0.0) {
+    throw std::runtime_error("no valid armor");
   }
 
   debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
