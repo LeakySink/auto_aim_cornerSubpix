@@ -42,6 +42,11 @@ Planner::Planner(const std::string & config_path)
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
   pitch_offset_ = tools::read<double>(yaml, "pitch_offset") / 57.3;
 
+  // 可选键，与 Solver 用同一个名字（缺省 0.5 m）
+  if (yaml["min_valid_dist"] && yaml["min_valid_dist"].IsDefined()) {
+    min_valid_dist_ = yaml["min_valid_dist"].as<double>();
+  }
+
   auto old_node = yaml["drag_coefficient"];
   auto up_node = yaml["drag_coefficient_up"];
   auto down_node = yaml["drag_coefficient_down"];
@@ -81,6 +86,9 @@ Plan Planner::plan(Target target, double bullet_speed)
   for (auto & xyza : target.armor_xyza_list()) {
     if (!xyza.allFinite()) continue;  // 跳过被污染的装甲板
     auto dist = xyza.head<2>().norm();
+    // 幽灵板过滤：EKF 状态被带跑时，armor_xyza_list() 会给出离云台很近的假位置，
+    // 而下面取的是**最近**的板，正好会被它劫持（现场 d=0.30m 就是这么来的）。
+    if (dist < min_valid_dist_) continue;
     if (dist < min_dist) {
       min_dist = dist;
       xyz = xyza.head<3>();
@@ -237,6 +245,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   for (auto & xyza : target.armor_xyza_list()) {
     if (!xyza.allFinite()) continue;
     auto dist = xyza.head<2>().norm();
+    if (dist < min_valid_dist_) continue;  // 幽灵板过滤，同上
     if (dist < min_dist) {
       min_dist = dist;
       xyz = xyza.head<3>();

@@ -53,6 +53,9 @@ private:
 
   double fire_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
+  // 与 Solver::min_valid_dist 同名的可选键：过滤掉预测位置离云台过近的"幽灵装甲板"。
+  // 正常交战中不会有 0.5m 以内的目标；出现即说明 EKF 状态被带跑（见 tracker 的空间门控）。
+  double min_valid_dist_ = 0.5;
 
   TinySolver * yaw_solver_;
   TinySolver * pitch_solver_;
