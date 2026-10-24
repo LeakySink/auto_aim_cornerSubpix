@@ -279,6 +279,26 @@ sequenceDiagram
 
 ---
 
+## A.5 远程看检测结果：tup 的两路图（2026-10 新增）
+
+在另一台机器上 `./host/start.sh`（hub portal），浏览器 Watch 页绑定车名后，图像流列表里会出现下面两路（名字由 `publish_image_name` 决定，缺省 `tup_detect`）：
+
+| 话题 | 内容 | 用来回答 |
+| --- | --- | --- |
+| `tup_detect` | 原图 + **全部候选框（黄，标注 `分数 类别 拒因`）** + 保留框（绿，含 4 个关键点与 `置信度 颜色 名称 类型`）+ 头部 `raw/kept/score>/conf>/scale` | 模型提出了哪些框？8 m 的板有没有检出？是被哪一道门槛杀的？ |
+| `tup_detect_input` | 416×416 网络输入画布（含灰边 letterbox）+ 映射后的同一批框 | "模型看到的装甲板只有几个像素" —— 直接量出板在输入里的尺寸 |
+
+拒因三种：`drop:score`（低于 `score_threshold`）、`drop:conf`（低于 `min_confidence`）、`KEEP`；TUP 只有这两道 NN 侧门槛（它没有 `check_type`，见 C.2 的对照）。
+
+开关（`configs/sentry.yaml`，缺省关闭）：
+
+```yaml
+publish_detections: true
+publish_image_name: "tup_detect"
+```
+
+实现落点：`tasks/auto_aim/detector_publish.hpp`（header-only：`RawCand` + `publish_detections()` / `publish_input_view()`）+ `YOLOTUP::parse()` 收集原始候选。话题名首次 `plot_image` 时登记进 `known_streams_`，由 `Engine::maybe_send_catalog()` 周期上报 host，因此**新增话题无需改 host 侧代码**。其它检测器（yolov5 / yolo11 / yolov8）要加同样的图，只需在各自 `parse()` 里收集 `RawCand` 再调这两个函数。
+
 # 附录 B：`RemoteLogger::plot(data)` 字段字典
 
 > 对象：`auto_aim_debug_mpc.cpp:81-137` 组出来的 `nlohmann::json`（`mt_auto_aim_debug` / `uav_debug` / `sentry_debug` 字段略有不同，见末尾）。
