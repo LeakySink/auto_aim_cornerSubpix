@@ -72,6 +72,11 @@ low_speed_delay_time: 0.04 # s planner use this value
 
 # 空气阻力系数（二次阻力模型 a = -k·|v|·v），按弹种/弹道表标定；
 # 缺省时静默回退为 0（纯重力抛物线）。参考：sentry.yaml 使用 up=0.2415, down=0.0, boundary=-0.3
+# 说明：这两项只在"多项式表覆盖不到、需要回退 RK4"时才用到（见 docs/architecture.md 附录 C.6）。
+# 若要用 ballistic-main 的离线拟合表（推荐，按弹速插值），加三行即可：
+#   ballistics_model: poly
+#   ballistics_csv: assets/ballistic/small.csv
+#   ballistics_x_range: [0.5, 15.0]   # 与 ballistic-main/g.py 的网格一致；超出即回退 RK4
 drag_coefficient_up: 0.0
 drag_coefficient_down: 0.0
 drag_height_boundary: 0.0
