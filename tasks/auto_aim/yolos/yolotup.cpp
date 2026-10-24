@@ -1,7 +1,10 @@
 #include "yolotup.hpp"
 
+#include <algorithm>
+
 #include <fmt/format.h>
 
+#include "tasks/auto_aim/detector_publish.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/ov_tensor_utils.hpp"
 #include "tools/remote_logger.hpp"
@@ -34,6 +37,14 @@ YOLOTUP::YOLOTUP(const std::string & config_path, bool debug)
   model_path_ = tools::read_path(yaml, "tup_model_path");
   device_ = yaml["device"].as<std::string>();
   min_confidence_ = yaml["min_confidence"].as<double>();
+
+  // 可选：把检测结果发布到图片（host Watch 页选流查看）。缺省关闭，不影响现有行为。
+  if (yaml["publish_detections"] && yaml["publish_detections"].IsDefined()) {
+    publish_ = yaml["publish_detections"].as<bool>();
+  }
+  if (yaml["publish_image_name"] && yaml["publish_image_name"].IsDefined()) {
+    publish_name_ = yaml["publish_image_name"].as<std::string>();
+  }
   int x = 0, y = 0, width = 0, height = 0;
   x = yaml["roi"]["x"].as<int>();
   y = yaml["roi"]["y"].as<int>();
@@ -97,6 +108,7 @@ std::list<Armor> YOLOTUP::detect(const cv::Mat & raw_img, int frame_count)
   auto input = cv::Mat(input_size_, input_size_, CV_8UC3, cv::Scalar(114, 114, 114));
   auto roi = cv::Rect(left, top, resize_w, resize_h);
   cv::resize(bgr_img, input(roi), {resize_w, resize_h});
+  tmp_input_ = input;  // 浅拷贝（cv::Mat 引用计数），供 <name>_input 话题画框图
   ov::Tensor input_tensor(ov::element::u8, {1, input_size_, input_size_, 3}, input.data);
 
   // infer
@@ -127,14 +139,21 @@ std::list<Armor> YOLOTUP::parse(
   std::vector<ArmorName> names;
   std::vector<std::vector<cv::Point2f>> armors_key_points;
 
+  // 调试发布用：低于 score 阈值、但高于这个地板的候选也解码出来画框图，
+  // 用来回答"是模型没检出，还是被 score/置信度门槛杀了"。
+  constexpr float kRawCandFloor = 0.05f;
+  std::vector<RawCand> raw_cands;
+
   auto to_img = [&](double net_x, double net_y) {
     return cv::Point2f((net_x - left) / scale, (net_y - top) / scale);
   };
 
   for (int r = 0; r < output.rows; r++) {
-    double score = output.at<float>(r, 8);  // 已过 sigmoid
+    const double score = output.at<float>(r, 8);  // 已过 sigmoid
+    const bool above_threshold = (score >= score_threshold_);
 
-    if (score < score_threshold_) continue;
+    // 发布开启时，低于阈值但高于地板的候选也要走完解码（只用于画图）
+    if (!above_threshold && !(publish_ && score >= kRawCandFloor)) continue;
 
     int idx = r, stride = STRIDES[0], grid_size = GRID_SIZES[0];
     if (r >= GRID_OFFSETS[1]) {
@@ -183,6 +202,16 @@ std::list<Armor> YOLOTUP::parse(
 
     cv::Rect rect(min_x, min_y, max_x - min_x, max_y - min_y);
 
+    if (publish_ && score >= kRawCandFloor) {
+      RawCand cand;
+      cand.box = rect;
+      cand.score = static_cast<float>(score);
+      cand.cls = class_id.x;
+      cand.col = color_id.x;
+      raw_cands.push_back(cand);
+    }
+    if (!above_threshold) continue;  // 低于阈值的候选只用于画图，不进 NMS/装甲板列表
+
     confidences.emplace_back(score);
     boxes.emplace_back(rect);
     colors.emplace_back(TUP_COLORS[color_id.x]);
@@ -214,6 +243,42 @@ std::list<Armor> YOLOTUP::parse(
 
     it->center_norm = get_center_norm(bgr_img, it->center);
     ++it;
+  }
+
+  // ---- 调试发布：把全部候选 + 保留框画到图上（host Watch 页）----
+  // 注意：即使一个候选都没有也要发（帧上只有头部文字），否则"没检出"和"发布坏了"
+  // 在现场看起来是一样的 —— raw=0 本身就是关键信息。
+  if (publish_) {
+    // 标记哪些候选最终被保留（Armor::box 与候选框是同一个 rect，可直接比较）
+    for (auto & c : raw_cands) {
+      for (const auto & a : armors) {
+        if (c.box == a.box) {
+          c.kept = true;
+          break;
+        }
+      }
+    }
+    // 只画分数最高的若干条，避免远距离小目标把画面刷满
+    std::sort(raw_cands.begin(), raw_cands.end(), [](const RawCand & a, const RawCand & b) {
+      return a.score > b.score;
+    });
+    if (raw_cands.size() > 16) raw_cands.resize(16);
+
+    const std::string header = fmt::format(
+      "tup[{}] raw={} kept={} score>={:.2f} conf>{:.2f} scale={:.3f} {}x{}", frame_count,
+      raw_cands.size(), armors.size(), score_threshold_, min_confidence_, scale, bgr_img.cols,
+      bgr_img.rows);
+    publish_detections(
+      bgr_img, raw_cands, armors, publish_name_, header, score_threshold_, min_confidence_);
+
+    if (!tmp_input_.empty()) {
+      publish_input_view(
+        tmp_input_, raw_cands, armors, scale, left, top, publish_name_ + "_input",
+        fmt::format(
+          "net {}x{} scale={:.3f} left={} top={}", tmp_input_.cols, tmp_input_.rows, scale, left,
+          top),
+        score_threshold_, min_confidence_);
+    }
   }
 
   if (debug_) draw_detections(bgr_img, armors, frame_count);

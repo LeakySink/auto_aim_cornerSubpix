@@ -30,6 +30,12 @@ private:
   std::string device_, model_path_;
   bool debug_, use_roi_, use_traditional_;
 
+  // 调试发布：把检测结果画到图上、经 RemoteLogger 发到 host（Watch 页按 name 选流）。
+  // 由 yaml 的 publish_detections / publish_image_name 控制，缺省关闭。
+  bool publish_ = false;
+  std::string publish_name_ = "tup_detect";
+  cv::Mat tmp_input_;  ///< 当帧 416×416 网络输入画布（<name>_input 话题用）
+
   static constexpr int input_size_ = 416;
   const float nms_threshold_ = 0.35;
   const float score_threshold_ = 0.2;

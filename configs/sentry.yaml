@@ -11,6 +11,15 @@ yolov5_model_path: assets/yolov5.xml
 tup_model_path: assets/opt-1208-001.xml
 device: CPU
 min_confidence: 0.8
+
+#####-----检测结果发布（调试）-----#####
+# 把 tup 的检测结果画到图上、经 RemoteLogger 发布到 host；在另一台机器上跑
+# ./host/start.sh 打开 Watch 页，图像流里就能选到下面两路（话题名可改）：
+#   <publish_image_name>        原图 + 全部候选框(黄，标"分数 类别 拒因") + 保留框(绿，含关键点)
+#   <publish_image_name>_input  416x416 网络输入画布 + 映射后的同一批框（看板在输入里有多少像素）
+# 缺省 false（关）：打开会多编码两张 JPEG，不影响检测本身
+publish_detections: true
+publish_image_name: "tup_detect"
 use_traditional: true
 
 #####-----ROI-----#####
