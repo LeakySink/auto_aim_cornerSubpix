@@ -1,6 +1,8 @@
 #ifndef TOOLS__YAML_HPP
 #define TOOLS__YAML_HPP
 
+#include <cstddef>
+#include <fstream>
 #include <string>
 #include <yaml-cpp/yaml.h>
 
@@ -28,6 +30,29 @@ inline std::string project_path(const std::string & path)
   return project_root() + "/" + rel;
 }
 
+/// 打印解析出错位置前后各一行并标出列（yaml-cpp 的 line/column 都是 0 基）。
+/// 目的：车端只看到一句 "error at line 14, column 15" 时无从下手，这里直接把
+/// 文件路径与原文打出来。注意列号按**字节**算，含中文的行光标会偏移。
+inline void log_yaml_error_context(const std::string & file, std::size_t line0, std::size_t col0)
+{
+  std::ifstream ifs(file);
+  if (!ifs) return;
+  const std::size_t target = line0 + 1;  // 1 基行号
+  std::string line;
+  std::size_t no = 0;
+  while (std::getline(ifs, line)) {
+    ++no;
+    if (no + 1 < target) continue;
+    if (no > target + 1) break;
+    tools::RemoteLogger::instance().log("ERROR", "[YAML] {:>4} | {}", no, line);
+    if (no == target) {
+      tools::RemoteLogger::instance().log(
+        "ERROR", "[YAML]      | {}^  ← 第 {} 行第 {} 列（按字节）", std::string(col0, ' '), target,
+        col0 + 1);
+    }
+  }
+}
+
 inline YAML::Node load(const std::string & path)
 {
   const auto resolved = project_path(path);
@@ -38,7 +63,10 @@ inline YAML::Node load(const std::string & path)
       "ERROR", "[YAML] Failed to load file: {} ({})", resolved, e.what());
     exit(1);
   } catch (const YAML::ParserException & e) {
-    tools::RemoteLogger::instance().log("ERROR", "[YAML] Parser error: {}", e.what());
+    // 带上文件路径：原来只打 e.what()，现场根本不知道是哪个 yaml 坏了
+    tools::RemoteLogger::instance().log(
+      "ERROR", "[YAML] {} 解析失败：{}", resolved, e.what());
+    log_yaml_error_context(resolved, e.mark.line, e.mark.column);
     exit(1);
   }
 }
