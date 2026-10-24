@@ -226,7 +226,7 @@ Trajectory::Trajectory(
       used_poly = true;
       return;  // solve() 已把 pitch 从"度"转成弧度，且抬头为正，与本结构体约定一致
     }
-    ballistics_log("[Ballistics] poly 模型不可用，回退 RK4：" + note);
+    ballistics_log("Ballistics:poly 回退 RK4", note);
   }
 
   if (drag_coefficient <= 1e-9) {

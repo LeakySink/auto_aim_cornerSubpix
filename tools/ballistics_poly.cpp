@@ -6,6 +6,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <unordered_map>
 
 namespace tools
 {
@@ -15,8 +16,7 @@ std::shared_ptr<const BallisticsPoly> g_model;
 
 std::mutex g_log_mutex;
 std::function<void(const std::string &)> g_logger;
-std::string g_last_msg;
-std::chrono::steady_clock::time_point g_last_time;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_last_time_by_category;
 
 std::string num(double v)
 {
@@ -248,15 +248,15 @@ void set_ballistics_logger(std::function<void(const std::string &)> logger)
   g_logger = std::move(logger);
 }
 
-void ballistics_log(const std::string & msg)
+void ballistics_log(const std::string & category, const std::string & msg)
 {
   std::lock_guard<std::mutex> lock(g_log_mutex);
   const auto now = std::chrono::steady_clock::now();
-  // 同一句话 2s 内只出一次：回退 RK4 是每帧都会发生的事，不能刷屏
-  if (msg == g_last_msg && now - g_last_time < std::chrono::seconds(2)) return;
-  g_last_msg = msg;
-  g_last_time = now;
-  if (g_logger) g_logger(msg);
+  // 按"类别"限流：回退日志里的 d/h 数值每帧都在变，按整条消息去重等于没限流
+  auto it = g_last_time_by_category.find(category);
+  if (it != g_last_time_by_category.end() && now - it->second < std::chrono::seconds(2)) return;
+  g_last_time_by_category[category] = now;
+  if (g_logger) g_logger("[" + category + "] " + msg);
 }
 
 }  // namespace tools

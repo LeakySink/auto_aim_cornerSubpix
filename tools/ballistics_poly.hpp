@@ -86,8 +86,10 @@ std::shared_ptr<const BallisticsPoly> ballistics_model();
 /// 日志出口（默认静默）。装到 RemoteLogger 后，车上能看到"多项式生效/回退 RK4"的原因。
 void set_ballistics_logger(std::function<void(const std::string &)> logger);
 
-/// 内部用：带限流（同一消息 2s 内只打一次）的日志
-void ballistics_log(const std::string & msg);
+/// 内部用：按**类别**限流的日志（同类 2s 内只打一次）。
+/// 注意必须按类别而不是按整条消息去重：回退日志里的 d/h 每帧都在变，
+/// 按整条消息去重等于没限流（现场实测每帧刷好几行）。
+void ballistics_log(const std::string & category, const std::string & msg);
 
 /// 从 yaml 读配置并安装模型（实现在 ballistics_config.cpp，依赖 yaml-cpp）。
 /// 支持的键（全部可选，缺省 = 完全保持原行为）：
