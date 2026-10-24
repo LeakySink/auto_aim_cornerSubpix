@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+
+#include "ballistics_poly.hpp"  // 可选的"多项式弹道"模型（ballistics-main 离线拟合）
 
 namespace tools
 {
@@ -187,6 +190,7 @@ Trajectory::Trajectory(
   unsolvable = false;
   fly_time = 0.0;
   pitch = 0.0;
+  used_poly = false;
 
   // 判据写成 `!(isfinite(x) && x > 0)`，一次覆盖两类非法输入：
   //   - NaN：x > 0 为 false，且 isfinite 为 false -> 拦截。
@@ -204,6 +208,25 @@ Trajectory::Trajectory(
     !std::isfinite(h) || !std::isfinite(drag_coefficient)) {
     unsolvable = true;
     return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 弹道模型选择（2026-10 新增）：
+  //   1) 若配置里装了 ballistics-main 的离线拟合多项式（ballistics_model: poly），
+  //      优先用它 —— 它是用真实气动参数（Cd/S/m/ρ）积分后拟合的 (x,y)->(pitch,time)，
+  //      比这里的单标量 k 更接近实弹；
+  //   2) 多项式覆盖不到（d/h 超出拟合网格、表为空、结果非法）时，**回退**本文件
+  //      原有的解析解 + RK4，行为与改动前完全一致；
+  //   3) 未配置（缺省）时直接走 RK4，等于没改。
+  // 回退原因带 2s 限流记一次日志，避免每帧刷屏。
+  // ---------------------------------------------------------------------------
+  if (auto model = ballistics_model(); model && !model->empty()) {
+    std::string note;
+    if (model->solve(v0, d, h, pitch, fly_time, &note)) {
+      used_poly = true;
+      return;  // solve() 已把 pitch 从"度"转成弧度，且抬头为正，与本结构体约定一致
+    }
+    ballistics_log("[Ballistics] poly 模型不可用，回退 RK4：" + note);
   }
 
   if (drag_coefficient <= 1e-9) {

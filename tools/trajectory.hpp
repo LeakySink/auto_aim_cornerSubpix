@@ -7,7 +7,8 @@ struct Trajectory
 {
   bool unsolvable;
   double fly_time;
-  double pitch;  // 抬头为正
+  double pitch;      // 抬头为正
+  bool used_poly = false;  // true = 本次走的是 ballistics-main 拟合多项式；false = 内置 RK4/解析解
 
   // v0  : 子弹初速度大小，单位：m/s
   // d   : 目标水平距离，单位：m

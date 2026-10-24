@@ -5,6 +5,7 @@
 #include <cmath>
 #include <vector>
 
+#include "tools/ballistics_poly.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/trajectory.hpp"
@@ -14,6 +15,9 @@ namespace auto_aim
 Aimer::Aimer(const std::string & config_path)
 : left_yaw_offset_(std::nullopt), right_yaw_offset_(std::nullopt)
 {
+  // 同 Planner：按配置装载弹道模型（poly / 内置 RK4），幂等
+  tools::install_ballistics_from_config(config_path);
+
   auto yaml = YAML::LoadFile(config_path);
 
   yaw_offset_ = yaml["yaw_offset"].as<double>() / 57.3;      // degree to rad

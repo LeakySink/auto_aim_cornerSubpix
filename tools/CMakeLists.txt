@@ -17,6 +17,8 @@ add_library(tools OBJECT
     rdbg/engine.cpp
     rdbg/tf_auto_pub.cpp
     trajectory.cpp
+    ballistics_poly.cpp
+    ballistics_config.cpp
     pid.cpp
     crc.cpp
 )

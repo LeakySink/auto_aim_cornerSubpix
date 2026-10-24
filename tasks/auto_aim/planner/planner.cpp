@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "tools/ballistics_poly.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/trajectory.hpp"
 #include "tools/yaml.hpp"
@@ -12,6 +13,11 @@ namespace auto_aim
 {
 Planner::Planner(const std::string & config_path)
 {
+  // 弹道模型：配置里 ballistics_model: poly 时装载 ballistic-main 的离线拟合表，
+  // 否则（缺省）保持内置解析解+RK4。tup/yolov5 等入口都通过 Planner/Aimer 构造，
+  // 所以在这里装一次即可全局生效（幂等）。
+  tools::install_ballistics_from_config(config_path);
+
   auto yaml = tools::load(config_path);
 
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
