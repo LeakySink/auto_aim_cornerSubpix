@@ -3,7 +3,6 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <numeric>
 #include <tuple>
@@ -292,12 +291,11 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 {
   target_.predict(t);
 
+  // 只统计"同类号同类型"的板是否存在；空间门控在下面按预测位置单独做
   int found_count = 0;
-  double min_x = 1e10;  // 画面最左侧
   for (const auto & armor : armors) {
     if (armor.name != target_.name || armor.type != target_.armor_type) continue;
-    found_count++;
-    min_x = armor.center.x < min_x ? armor.center.x : min_x;
+    ++found_count;
   }
 
   if (found_count == 0) return false;
@@ -311,11 +309,7 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   int updated = 0;
   for (auto & armor : armors) {
-    if (
-      armor.name != target_.name || armor.type != target_.armor_type
-      //  || armor.center.x != min_x
-    )
-      continue;
+    if (armor.name != target_.name || armor.type != target_.armor_type) continue;
 
     // 位姿被 Solver 判定为不可信 -> 本帧不拿它更新 EKF（空转一帧优于注入脏观测）
     if (!solver_.solve(armor)) continue;

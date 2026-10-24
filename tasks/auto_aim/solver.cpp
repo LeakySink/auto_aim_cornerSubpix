@@ -78,16 +78,20 @@ bool Solver::solve(Armor & armor) const
   // 4 个角点的噪声会让 IPPE 解出几十米甚至 NaN 的位姿；这种观测一旦进 EKF，
   // 11 维状态会被污染（r/l/h 又没有过程噪声，很难自己恢复），下游 planner
   // 便报"弹道无解"、云台不受控。这里统一在"进 EKF 之前"拦掉。
-  auto reject = [&](const char * why) {
-    tools::RemoteLogger::instance().log(
-      "WARN", "[Solver] 丢弃不可信位姿（{}）：cam_z={:.3f} conf={:.2f}", why,
-      xyz_in_camera[2], armor.confidence);
-    // 清零而不是留 NaN：万一调用方忘了检查返回值，也不会把 NaN 带进滤波/可视化
+  // 清零而不是留 NaN：万一调用方忘了检查返回值，也不会把 NaN 带进滤波/可视化
+  auto clear_pose = [&armor]() {
     armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
     armor.xyz_in_world = Eigen::Vector3d::Zero();
     armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
     armor.ypr_in_world = Eigen::Vector3d::Zero();
     armor.ypd_in_world = Eigen::Vector3d::Zero();
+  };
+
+  auto reject = [&](const char * why) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "[Solver] 丢弃不可信位姿（{}）：cam_z={:.3f} conf={:.2f}", why, xyz_in_camera[2],
+      armor.confidence);
+    clear_pose();
     return false;
   };
 
@@ -121,11 +125,7 @@ bool Solver::solve(Armor & armor) const
     tools::RemoteLogger::instance().log(
       "WARN", "[Solver] 丢弃距离越界位姿：dist={:.2f} m（允许 {:.2f}~{:.2f}） conf={:.2f}", dist,
       min_valid_dist_, max_valid_dist_, armor.confidence);
-    armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
-    armor.xyz_in_world = Eigen::Vector3d::Zero();
-    armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
-    armor.ypr_in_world = Eigen::Vector3d::Zero();
-    armor.ypd_in_world = Eigen::Vector3d::Zero();
+    clear_pose();
     return false;
   }
 
