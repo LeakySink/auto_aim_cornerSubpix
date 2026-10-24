@@ -41,6 +41,15 @@ Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3
   Eigen::Matrix<double, 1, 5> distort_coeffs(distort_coeffs_data.data());
   cv::eigen2cv(camera_matrix, camera_matrix_);
   cv::eigen2cv(distort_coeffs, distort_coeffs_);
+
+  // 可选门限：位姿解算结果的合理距离范围（缺省 0.2 ~ 50 m）。
+  // 注意用 IsDefined() 判断，不能用 tools::read —— 它对缺键会直接 exit(1)。
+  if (yaml["min_valid_dist"] && yaml["min_valid_dist"].IsDefined()) {
+    min_valid_dist_ = yaml["min_valid_dist"].as<double>();
+  }
+  if (yaml["max_valid_dist"] && yaml["max_valid_dist"].IsDefined()) {
+    max_valid_dist_ = yaml["max_valid_dist"].as<double>();
+  }
 }
 
 Eigen::Matrix3d Solver::R_gimbal2world() const { return R_gimbal2world_; }
@@ -52,7 +61,7 @@ void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
 }
 
 //solvePnP（获得姿态）
-void Solver::solve(Armor & armor) const
+bool Solver::solve(Armor & armor) const
 {
   const auto & object_points =
     (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
@@ -64,6 +73,29 @@ void Solver::solve(Armor & armor) const
 
   Eigen::Vector3d xyz_in_camera;
   cv::cv2eigen(tvec, xyz_in_camera);
+
+  // 位姿可信度校验（2026-10 加固）。动机：远距离低置信度框只有几个像素，
+  // 4 个角点的噪声会让 IPPE 解出几十米甚至 NaN 的位姿；这种观测一旦进 EKF，
+  // 11 维状态会被污染（r/l/h 又没有过程噪声，很难自己恢复），下游 planner
+  // 便报"弹道无解"、云台不受控。这里统一在"进 EKF 之前"拦掉。
+  auto reject = [&](const char * why) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "[Solver] 丢弃不可信位姿（{}）：cam_z={:.3f} conf={:.2f}", why,
+      xyz_in_camera[2], armor.confidence);
+    // 清零而不是留 NaN：万一调用方忘了检查返回值，也不会把 NaN 带进滤波/可视化
+    armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
+    armor.xyz_in_world = Eigen::Vector3d::Zero();
+    armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
+    armor.ypr_in_world = Eigen::Vector3d::Zero();
+    armor.ypd_in_world = Eigen::Vector3d::Zero();
+    return false;
+  };
+
+  // 相机系 z 必须为正（目标在相机前方），且位姿必须有限
+  if (!xyz_in_camera.allFinite() || !(xyz_in_camera[2] > 0.0)) {
+    return reject("相机系深度非法/非有限");
+  }
+
   armor.xyz_in_gimbal = R_camera2gimbal_ * xyz_in_camera + t_camera2gimbal_;
   armor.xyz_in_world = R_gimbal2world_ * armor.xyz_in_gimbal;
 
@@ -78,13 +110,33 @@ void Solver::solve(Armor & armor) const
 
   armor.ypd_in_world = tools::xyz2ypd(armor.xyz_in_world);
 
+  // 世界系结果必须有限，且距离落在合理窗口内（缺省 0.2 ~ 50 m，可用 yaml 覆盖）
+  if (
+    !armor.xyz_in_world.allFinite() || !armor.ypr_in_world.allFinite() ||
+    !armor.ypd_in_world.allFinite()) {
+    return reject("世界系结果非有限");
+  }
+  const double dist = armor.xyz_in_world.norm();
+  if (dist < min_valid_dist_ || dist > max_valid_dist_) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "[Solver] 丢弃距离越界位姿：dist={:.2f} m（允许 {:.2f}~{:.2f}） conf={:.2f}", dist,
+      min_valid_dist_, max_valid_dist_, armor.confidence);
+    armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
+    armor.xyz_in_world = Eigen::Vector3d::Zero();
+    armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
+    armor.ypr_in_world = Eigen::Vector3d::Zero();
+    armor.ypd_in_world = Eigen::Vector3d::Zero();
+    return false;
+  }
+
   // 平衡不做yaw优化，因为pitch假设不成立
   auto is_balance = (armor.type == ArmorType::big) &&
                     (armor.name == ArmorName::three || armor.name == ArmorName::four ||
                      armor.name == ArmorName::five);
-  if (is_balance) return;
+  if (is_balance) return true;
 
   // optimize_yaw(armor);
+  return true;
 }
 
 std::vector<cv::Point2f> Solver::reproject_armor(

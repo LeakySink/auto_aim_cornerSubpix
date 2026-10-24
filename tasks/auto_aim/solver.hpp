@@ -18,7 +18,12 @@ public:
 
   void set_R_gimbal2world(const Eigen::Quaterniond & q);
 
-  void solve(Armor & armor) const;
+  /// 解算装甲板位姿（PnP + 坐标变换）。
+  /// 返回 false 表示本次位姿被判定为不可信（非有限值 / 相机系深度非法 / 距离越界），
+  /// 此时 armor 上的 xyz_* / ypr_* / ypd_* 会被清零；调用方应当丢弃这块装甲板
+  /// （Tracker 已按此处理）。不可信的来源主要是远距离低置信度框 —— 角点噪声会让
+  /// PnP 解出几十米甚至 NaN 的位姿，一旦进 EKF 就会污染 11 维状态。
+  bool solve(Armor & armor) const;
 
   std::vector<cv::Point2f> reproject_armor(
     const Eigen::Vector3d & xyz_in_world, double yaw, ArmorType type, ArmorName name) const;
@@ -34,6 +39,10 @@ private:
   Eigen::Matrix3d R_camera2gimbal_;
   Eigen::Vector3d t_camera2gimbal_;
   Eigen::Matrix3d R_gimbal2world_;
+
+  // 位姿合理性门限（yaml 可选键 min_valid_dist / max_valid_dist，缺省 0.2 / 50 m）
+  double min_valid_dist_ = 0.2;
+  double max_valid_dist_ = 50.0;
 
   void optimize_yaw(Armor & armor) const;
 

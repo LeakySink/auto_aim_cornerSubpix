@@ -260,7 +260,10 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   if (armors.empty()) return false;
 
   auto & armor = armors.front();
-  solver_.solve(armor);
+  // 位姿不可信（远距离低置信度框的典型表现）时不建立目标：让状态机继续停在
+  // lost/detecting，而不是用脏观测去初始化 EKF（Target 的 P0 很小，初始值错了
+  // 后面很难拉回来）。
+  if (!solver_.solve(armor)) return false;
 
   const RobotConfig * cfg;
   if (armor.name == ArmorName::outpost)   cfg = &outpost_cfg_;
@@ -286,6 +289,7 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   if (found_count == 0) return false;
 
+  int updated = 0;
   for (auto & armor : armors) {
     if (
       armor.name != target_.name || armor.type != target_.armor_type
@@ -293,12 +297,15 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
     )
       continue;
 
-    solver_.solve(armor);
+    // 位姿被 Solver 判定为不可信 -> 本帧不拿它更新 EKF（空转一帧优于注入脏观测）
+    if (!solver_.solve(armor)) continue;
 
     target_.update(armor);
+    ++updated;
   }
 
-  return true;
+  // 全部被拒时按"没找到"处理，交给状态机计数（否则会在 target_ 上假装找到了）
+  return updated > 0;
 }
 
 }  // namespace auto_aim

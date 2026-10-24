@@ -137,6 +137,16 @@ void Target::predict(double dt)
 
 void Target::update(const Armor & armor)
 {
+  // 观测有限性守卫（防御纵深）：即便上游漏检，NaN / inf 观测也不许进 EKF ——
+  // 状态一旦被污染成 NaN，planner/aimer 会连带失效（弹道无解、云台不受控）。
+  // 这里是所有更新路径（track 两个重载、全向感知、多线程）的共同收口。
+  if (
+    !armor.ypd_in_world.allFinite() || !armor.ypr_in_world.allFinite() ||
+    !armor.xyz_in_world.allFinite()) {
+    tools::RemoteLogger::instance().log("DEBUG", "[Target] 丢弃非有限观测，跳过本帧 EKF 更新");
+    return;
+  }
+
   const auto xyza_list = armor_xyza_list();
 
   int id = -1;
