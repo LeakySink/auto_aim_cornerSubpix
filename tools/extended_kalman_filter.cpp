@@ -18,6 +18,9 @@ ExtendedKalmanFilter::ExtendedKalmanFilter(
   data["nis_fail"] = 0.0;
   data["nees_fail"] = 0.0;
   data["recent_nis_failures"] = 0.0;
+  // 两个卡方阈值也发布出去：调试界面才能把 nis/nees 和参考线画在一起
+  data["nis_threshold"] = kNisThreshold;
+  data["nees_threshold"] = kNeesThreshold;
 }
 
 Eigen::VectorXd ExtendedKalmanFilter::predict(const Eigen::MatrixXd & F, const Eigen::MatrixXd & Q)
@@ -75,19 +78,14 @@ Eigen::VectorXd ExtendedKalmanFilter::update(
   //   因此 19.675 只能算保守上限；nees_fail 仅用于日志，不参与任何逻辑判断。
   double nees = ((x - x_prior).transpose() * P.ldlt().solve(x - x_prior)).value();
 
-  // 卡方检验阈值（显著性水平 5%，即名义误报率 5%）
-  // NIS：自由度 = 观测维数 4，χ²(4) 的 95% 分位数 = 9.4877。
-  //      （原值 0.711 是 χ²(4) 的 5% 分位数，即 95% 的正常更新都会被判失败，必然触发误重置）
-  // NEES：见上方说明，19.675 为保守上限，无严格统计含义。
-  constexpr double nis_threshold = 9.488;
-  constexpr double nees_threshold = 19.675;
+  // 卡方检验阈值见 ExtendedKalmanFilter::kNisThreshold / kNeesThreshold（同时发布到 data）。
+  // NIS 自由度 = 观测维数 4，9.488 是 χ²(4) 的 95% 分位数；旧值 0.711 是 5% 分位数，
+  // 等于把 95% 的正常更新判成失败。NEES 见上方说明，19.675 只是保守上限。
+  // nis_fail / nees_fail 每帧都写 0/1 —— 旧实现只在失败时置 1、从不复位，曲线会一直挂 1。
+  data["nis_fail"] = (nis > kNisThreshold) ? 1.0 : 0.0;
+  data["nees_fail"] = (nees > kNeesThreshold) ? 1.0 : 0.0;
 
-  if (nis > nis_threshold) nis_count_++, data["nis_fail"] = 1;
-  if (nees > nees_threshold) nees_count_++, data["nees_fail"] = 1;
-  total_count_++;
-  last_nis = nis;
-
-  recent_nis_failures.push_back(nis > nis_threshold ? 1 : 0);
+  recent_nis_failures.push_back(nis > kNisThreshold ? 1 : 0);
 
   if (recent_nis_failures.size() > window_size) {
     recent_nis_failures.pop_front();

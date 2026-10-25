@@ -113,6 +113,8 @@ int main(int argc, char * argv[])
         data["target_vz"] = target->ekf_x()[5];  //vz
         data["target_yaw"] = target->ekf_x()[6];
         data["armor_id"] = target->last_id;      // last_id 是 public
+        // 卡方检验数据（含 nis/nees 与两个阈值），Watch 页可与参考线对照
+        for (const auto & kv : e.data) data[kv.first] = kv.second;
       }
       {
         // 遍历必须持锁：主线程随时可能把 armors 整体替换掉

@@ -140,16 +140,9 @@ int main(int argc, char * argv[])
       data["h"] = x[10];
       data["last_id"] = target.last_id;
 
-      // 卡方检验数据
-      data["residual_yaw"] = target.ekf().data.at("residual_yaw");
-      data["residual_pitch"] = target.ekf().data.at("residual_pitch");
-      data["residual_distance"] = target.ekf().data.at("residual_distance");
-      data["residual_angle"] = target.ekf().data.at("residual_angle");
-      data["nis"] = target.ekf().data.at("nis");
-      data["nees"] = target.ekf().data.at("nees");
-      data["nis_fail"] = target.ekf().data.at("nis_fail");
-      data["nees_fail"] = target.ekf().data.at("nees_fail");
-      data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
+      // 卡方检验数据：把 EKF 的诊断量一次并入（含 nis/nees 与两个阈值 nis_threshold /
+      // nees_threshold），以后新增诊断量不用再来这里逐行补
+      for (const auto & kv : target.ekf().data) data[kv.first] = kv.second;
 
       data["markers"] = tools::viz::kalman_markers(target);
     }

@@ -333,6 +333,22 @@ publish_image_name: "tup_detect"
 | `obs_armor_yaw` | `:126` | rad | `armor.ypr_in_world[0]` |
 | `markers` | `:134` | marker_v1 数组 | `tools::viz::kalman_markers(*target)`，Watch 页的 3D 显示（见 `docs/remote_logger.md` 的 3D Markers 一节） |
 
+### B.1 EKF 卡方诊断量（`nis` / `nees` 与两个阈值）
+
+`ExtendedKalmanFilter::data` 里的诊断量会由各入口整体并入 `plot(data)`（2026-10 起统一用一次遍历拷贝，不再逐键抄写）：
+
+| key | 含义 |
+| --- | --- |
+| `residual_yaw` / `residual_pitch` / `residual_distance` / `residual_angle` | 本次更新的**新息**（先验残差）四个分量，已按 yaw 回绕做 `z_subtract` |
+| `nis` | 归一化新息平方 `νᵀ S⁻¹ ν`，**先验**量与协方差，服从 χ²(4) |
+| `nis_threshold` | **9.488** = χ²(4) 的 95% 分位数（`ExtendedKalmanFilter::kNisThreshold`） |
+| `nees` | 状态修正量平方 `(x⁺−x⁻)ᵀ P⁺⁻¹ (x⁺−x⁻)`；**不是**标准 NEES，不服从卡方（yaw 回绕会产生 ~2π 伪跳变） |
+| `nees_threshold` | **19.675** = χ²(11) 的 95% 分位数（`kNeesThreshold`），仅作保守上限参考，**不参与任何逻辑判断** |
+| `nis_fail` / `nees_fail` | 本帧是否越过对应阈值（每帧写 0/1；旧实现只在失败时置 1、从不复位，曲线会一直挂 1） |
+| `recent_nis_failures` | 最近 `window_size`(100) 次更新里 NIS 失败所占**比例**；≥ 40%（样本 ≥ 30）即判 `Bad Converge` |
+
+> 画图时把 `nis` 与 `nis_threshold`、`nees` 与 `nees_threshold` 放同一张图看：`nis` 长期贴着或越过 9.488 说明观测与预测不一致（错配/收敛到错误解）；`nees` 偶发爆表多为 yaw 回绕，不必紧张。
+
 读图时的四个注意点：
 
 - **丢目标那几帧会掉 key**：`target_*` / `obs_*` / `armor_id` / `w` 只在 `target.has_value()` 时写入，曲线会断。
@@ -455,9 +471,9 @@ t_armor2camera = R_camera2gimbalᵀ · (R_gimbal2worldᵀ · t_armor2world − t
 - **时间与失联**：`dt = t − last_t`；`dt > 0.1 s` → 记 `WARN` 并置 `lost`。
 - **过滤与排序**：先剔除非我方颜色；然后**两次稳定排序** —— ① 按 `center_norm` 到 `(0.5, 0.5)` 的距离升序；② 按 `priority` 升序（`ArmorPriority`，数值越小越优先）。
 - **`set_target`**：`solver_.solve(armors.front())` → 依 `name` 选配置 `{radius, armor_num, p0}`（`normal: 0.2/4`、`outpost: 0.2765/3`、`base: 0.3205/3`）→ 构造 `Target`（完成 EKF 初始化）。
-- **`update_target`**：先 `target_.predict(t)`，再按 `(name, armor_type)` 与目标一致过滤，逐块 `solve` + `target_.update(armor)`。
+- **`update_target`**：先 `target_.predict(t)`，按 `(name, armor_type)` 过滤；`solve()` 返回 false（位姿不可信）就丢弃该块；还要过**空间门控**（观测须落在本帧预测的 N 块板附近，容差 `1.0 + 0.2·dist`）才 `target_.update(armor)`。全部被拒时按"未找到"返回 false。
 - **状态机**：`lost → detecting`（需连续 `min_detect_count = 5` 帧）`→ tracking`；`found = false` 时进 `temp_lost`，超过 `max_temp_lost_count = 15`（前哨站 75）转 `lost`。
-- **两个看门狗**：`target_.diverged()` 为真 → `lost`；`accumulate(recent_nis_failures) ≥ 0.4 × window_size` → 打印 `Bad Converge Found!` 并 `lost`。
+- **两个看门狗**：`target_.diverged()` 为真（2026-10 起还包含"旋转中心离枪口 < 0.5 m"与"中心距离非有限"）→ `lost`；`recent_nis_failures` 里 1 的**比例** ≥ 40%（样本 ≥ 30）→ 打印 `Bad Converge Found!` 并 `lost`。~~旧实现写的是 `accumulate(...) ≥ 0.4 × window_size`（= 4000 条），几乎永不触发~~。
 
 ## C.5 Target：11 维 EKF（`target.cpp` + `tools/extended_kalman_filter.cpp`）
 
