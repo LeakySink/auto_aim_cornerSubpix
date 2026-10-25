@@ -1,6 +1,7 @@
 #include "calibrator.hpp"
 
 #include <fmt/core.h>
+#include <filesystem>
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
