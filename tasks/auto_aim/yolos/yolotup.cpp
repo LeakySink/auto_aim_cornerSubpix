@@ -1,6 +1,7 @@
 #include "yolotup.hpp"
 
 #include <algorithm>
+#include <filesystem>
 
 #include <fmt/format.h>
 
@@ -44,6 +45,9 @@ YOLOTUP::YOLOTUP(const std::string & config_path, bool debug)
   }
   if (yaml["publish_image_name"] && yaml["publish_image_name"].IsDefined()) {
     publish_name_ = yaml["publish_image_name"].as<std::string>();
+  }
+  if (yaml["save_detection_frames"] && yaml["save_detection_frames"].IsDefined()) {
+    save_frames_ = yaml["save_detection_frames"].as<int>();
   }
   int x = 0, y = 0, width = 0, height = 0;
   x = yaml["roi"]["x"].as<int>();
@@ -264,12 +268,44 @@ std::list<Armor> YOLOTUP::parse(
     });
     if (raw_cands.size() > 16) raw_cands.resize(16);
 
+    // 拒因统计 + 最大框像素尺寸：不用逐条读标签也能判断卡在哪一环；
+    // 框像素尺寸还能反推距离（d ≈ fx·0.135/w，fx 见 yaml 的 camera_matrix）
+    int n_drop_score = 0, n_drop_conf = 0;
+    int max_w = 0, max_h = 0;
+    for (const auto & c : raw_cands) {
+      if (c.kept) continue;
+      if (c.score < score_threshold_) {
+        ++n_drop_score;
+      } else if (c.score <= min_confidence_) {
+        ++n_drop_conf;
+      }
+    }
+    for (const auto & a : armors) {
+      max_w = std::max(max_w, a.box.width);
+      max_h = std::max(max_h, a.box.height);
+    }
+    for (const auto & c : raw_cands) {
+      max_w = std::max(max_w, c.box.width);
+      max_h = std::max(max_h, c.box.height);
+    }
+
     const std::string header = fmt::format(
-      "tup[{}] raw={} kept={} score>={:.2f} conf>{:.2f} scale={:.3f} {}x{}", frame_count,
-      raw_cands.size(), armors.size(), score_threshold_, min_confidence_, scale, bgr_img.cols,
-      bgr_img.rows);
+      "tup[{}] raw={} kept={} drop[s={} c={}] box={}x{}px score>={:.2f} conf>{:.2f} "
+      "scale={:.3f} {}x{}",
+      frame_count, raw_cands.size(), armors.size(), n_drop_score, n_drop_conf, max_w, max_h,
+      score_threshold_, min_confidence_, scale, bgr_img.cols, bgr_img.rows);
+
+    std::string save_main, save_input;
+    if (save_frames_ > 0 && save_seq_ < save_frames_) {
+      std::error_code ec;
+      std::filesystem::create_directories("imgs", ec);
+      const int seq = save_seq_++;  // 用自己的计数器（上层可能常量传 frame_count=-1）
+      save_main = fmt::format("imgs/tup_{:04d}.png", seq);
+      save_input = fmt::format("imgs/tup_{:04d}_input.png", seq);
+    }
     publish_detections(
-      bgr_img, raw_cands, armors, publish_name_, header, score_threshold_, min_confidence_);
+      bgr_img, raw_cands, armors, publish_name_, header, score_threshold_, min_confidence_,
+      save_main);
 
     if (!tmp_input_.empty()) {
       publish_input_view(
@@ -277,7 +313,7 @@ std::list<Armor> YOLOTUP::parse(
         fmt::format(
           "net {}x{} scale={:.3f} left={} top={}", tmp_input_.cols, tmp_input_.rows, scale, left,
           top),
-        score_threshold_, min_confidence_);
+        score_threshold_, min_confidence_, save_input);
     }
   }
 

@@ -20,6 +20,10 @@ min_confidence: 0.8
 # 缺省 false（关）：打开会多编码两张 JPEG，不影响检测本身
 publish_detections: true
 publish_image_name: "tup_detect"
+# 额外把前 N 帧的**全分辨率**标注图存到 imgs/（tup_0000.png / tup_0000_input.png）：
+# UDP 图会被压到 img_width=640 + JPEG，标签/角点细节看不清，存档用于事后逐像素分析。
+# 0 = 不存。每帧两张 PNG 约 1.5~3 MB，按需设置。
+save_detection_frames: 10
 use_traditional: true
 
 #####-----ROI-----#####

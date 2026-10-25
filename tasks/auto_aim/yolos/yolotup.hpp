@@ -34,6 +34,8 @@ private:
   // 由 yaml 的 publish_detections / publish_image_name 控制，缺省关闭。
   bool publish_ = false;
   std::string publish_name_ = "tup_detect";
+  int save_frames_ = 0;   ///< >0 时把前 N 帧的全分辨率标注图存到 imgs/（调试用）
+  int save_seq_ = 0;      ///< 存图序号（用自己的计数器：上层可能一直传 frame_count=-1）
   cv::Mat tmp_input_;  ///< 当帧 416×416 网络输入画布（<name>_input 话题用）
 
   static constexpr int input_size_ = 416;

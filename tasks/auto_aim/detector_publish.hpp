@@ -79,7 +79,7 @@ inline void put_label(cv::Mat & img, const std::string & text, const cv::Rect & 
 inline void publish_detections(
   const cv::Mat & img, const std::vector<RawCand> & raws, const std::list<Armor> & armors,
   const std::string & topic, const std::string & header, float score_threshold,
-  double min_confidence)
+  double min_confidence, const std::string & save_path = {})
 {
   if (img.empty()) return;
 
@@ -108,6 +108,9 @@ inline void publish_detections(
   }
 
   tools::draw_text(canvas, header, cv::Point(10, 30), cv::Scalar(255, 255, 255), 0.8, 2);
+  // 需要时存一份**全分辨率** PNG：UDP 发布的图会被压到 img_width(640)+JPEG，
+  // 标签和角点细节看不清；本地存档用于事后逐像素分析
+  if (!save_path.empty()) cv::imwrite(save_path, canvas);
   tools::RemoteLogger::instance().plot_image(canvas, {{"name", topic}});
 }
 
@@ -115,7 +118,7 @@ inline void publish_detections(
 inline void publish_input_view(
   const cv::Mat & input, const std::vector<RawCand> & raws, const std::list<Armor> & armors,
   double scale, double left, double top, const std::string & topic, const std::string & header,
-  float score_threshold, double min_confidence)
+  float score_threshold, double min_confidence, const std::string & save_path = {})
 {
   if (input.empty() || !(scale > 0.0)) return;
 
@@ -142,6 +145,7 @@ inline void publish_input_view(
   }
 
   tools::draw_text(canvas, header, cv::Point(6, 20), cv::Scalar(255, 255, 255), 0.6, 2);
+  if (!save_path.empty()) cv::imwrite(save_path, canvas);
   tools::RemoteLogger::instance().plot_image(canvas, {{"name", topic}});
 }
 
