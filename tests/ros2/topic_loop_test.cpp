@@ -28,7 +28,6 @@ int main(int argc, char ** argv)
 
     if (i % 3 == 0) {
       auto x = ros2.subscribe_enemy_status();
-      // tools::RemoteLogger::instance().log("INFO", "invincible enemy ids size is{}", x.size());
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(1));

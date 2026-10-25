@@ -1,6 +1,5 @@
 #include <fmt/core.h>
 
-#include <chrono>
 #include <opencv2/opencv.hpp>
 
 #include "tasks/auto_aim/detector.hpp"
@@ -48,7 +47,6 @@ int main(int argc, char * argv[])
     std::list<auto_aim::Armor> armors;
     video.read(img);
     if (img.empty()) break;
-    // cv::GaussianBlur(img, img, cv::Size(5, 5), 0, 0, cv::BORDER_DEFAULT);
 
     if (use_tradition)
       armors = detector.detect(img, frame_count);

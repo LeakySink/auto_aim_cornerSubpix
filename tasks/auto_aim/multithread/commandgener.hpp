@@ -30,7 +30,6 @@ private:
   {
     std::list<auto_aim::Target> targets_;
     std::chrono::steady_clock::time_point t;
-    // std::function<void()> decide;
     double bullet_speed;
     Eigen::Vector3d gimbal_pos;
   };

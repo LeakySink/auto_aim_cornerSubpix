@@ -7,7 +7,6 @@
 #include <cerrno>
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 #include <exception>
 
 namespace tools

@@ -1,7 +1,6 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"
@@ -46,7 +45,6 @@ int main(int argc, char * argv[])
 
   auto_aim::Detector detector(config_path);
   auto_aim::Solver solver(config_path);
-  // auto_aim::YOLO yolo(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);

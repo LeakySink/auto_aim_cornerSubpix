@@ -3,7 +3,6 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
@@ -76,7 +75,6 @@ int main(int argc, char * argv[])
 
     decider.armor_filter(armors);
 
-    // decider.get_auto_aim_target(armors, ros2.subscribe_autoaim_target());
 
     decider.set_priority(armors);
 

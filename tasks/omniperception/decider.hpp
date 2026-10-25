@@ -2,7 +2,6 @@
 #define OMNIPERCEPTION__DECIDER_HPP
 
 #include <Eigen/Dense>  // 必须在opencv2/core/eigen.hpp上面
-#include <iostream>
 #include <list>
 #include <unordered_map>
 

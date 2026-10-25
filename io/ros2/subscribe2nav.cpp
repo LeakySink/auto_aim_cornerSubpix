@@ -1,6 +1,5 @@
 #include "subscribe2nav.hpp"
 
-#include <sstream>
 #include <vector>
 
 namespace io

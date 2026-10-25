@@ -2,11 +2,9 @@
 
 #include <chrono>
 #include <future>
-#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
@@ -115,7 +113,6 @@ int main(int argc, char * argv[])
 
     /// 发射逻辑
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
-    // command.shoot = false;
 
     cboard.send(command);
 

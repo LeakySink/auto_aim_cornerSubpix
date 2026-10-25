@@ -10,7 +10,6 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
-#include <vector>
 using Eigen::MatrixXd; using Eigen::VectorXd;
 static const double PI=3.14159265358979323846;
 static double lim(double a){ while(a>PI)a-=2*PI; while(a<=-PI)a+=2*PI; return a; }

@@ -1,7 +1,6 @@
 #include "ransac_sine_fitter.hpp"
 
 #include <Eigen/Dense>
-#include <algorithm>
 #include <cmath>
 #include <random>
 

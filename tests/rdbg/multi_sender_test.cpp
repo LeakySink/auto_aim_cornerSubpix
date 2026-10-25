@@ -15,7 +15,6 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>

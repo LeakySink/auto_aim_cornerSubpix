@@ -1,7 +1,6 @@
 #include "target.hpp"
 
 #include <cmath>
-#include <numeric>
 
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
@@ -208,7 +207,6 @@ void Target::update_ypda(const Armor & armor, int id)
 {
   //观测jacobi
   Eigen::MatrixXd H = h_jacobian(ekf_.x, id);
-  // Eigen::VectorXd R_dig{{4e-3, 4e-3, 1, 9e-2}};
   auto center_yaw = std::atan2(armor.xyz_in_world[1], armor.xyz_in_world[0]);
   auto delta_angle = tools::limit_rad(armor.ypr_in_world[0] - center_yaw);
   //串腿

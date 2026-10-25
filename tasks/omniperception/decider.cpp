@@ -3,7 +3,6 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <opencv2/opencv.hpp>
 
 #include "tools/remote_logger.hpp"

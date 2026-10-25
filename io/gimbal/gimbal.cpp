@@ -1,6 +1,5 @@
 #include "gimbal.hpp"
 
-#include <cmath>
 
 #include "tools/rdbg/tf_auto_pub.hpp"
 #include "tools/remote_logger.hpp"

@@ -152,7 +152,6 @@ void HikRobot::capture_start()
       cvt_param.nDstBufferSize = img.total() * img.elemSize();
       cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
 
-      // ret = MV_CC_ConvertPixelType(handle_, &cvt_param);
       const auto & frame_info = raw.stFrameInfo;
       auto pixel_type = frame_info.enPixelType;
       cv::Mat dst_image;

@@ -1,9 +1,7 @@
 #include "publish2nav.hpp"
 
 #include <Eigen/Dense>
-#include <chrono>
 #include <memory>
-#include <thread>
 
 #include "tools/remote_logger.hpp"
 
@@ -34,9 +32,6 @@ void Publish2Nav::send_data(const Eigen::Vector4d & target_pos)
   // 发布消息
   publisher_->publish(*message);
 
-  // RCLCPP_INFO(
-  //   this->get_logger(), "auto_aim_target_pos_publisher node sent message: '%s'",
-  //   message->data.c_str());
 }
 
 void Publish2Nav::start()

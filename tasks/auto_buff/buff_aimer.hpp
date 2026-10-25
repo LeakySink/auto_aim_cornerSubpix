@@ -5,7 +5,6 @@
 
 #include <Eigen/Dense>
 #include <chrono>
-#include <cmath>
 #include <vector>
 
 #include "../auto_aim/planner/planner.hpp"

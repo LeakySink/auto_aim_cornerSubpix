@@ -2,7 +2,6 @@
 #define AUTO_BUFF__YOLO11_BUFF_HPP
 #include <yaml-cpp/yaml.h>
 
-#include <filesystem>
 #include <opencv2/opencv.hpp>
 #include <openvino/openvino.hpp>
 

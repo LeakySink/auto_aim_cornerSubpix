@@ -1,11 +1,8 @@
 #ifndef BUFF__PREDICT_HPP
 #define BUFF__PREDICT_HPP
 
-#include <algorithm>
-#include <deque>
 #include <opencv2/opencv.hpp>
 #include <string>
-#include <vector>
 
 #include "tools/extended_kalman_filter.hpp"
 #include "tools/img_tools.hpp"

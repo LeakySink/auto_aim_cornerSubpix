@@ -402,7 +402,6 @@ ArmorType Detector::get_type(const Armor & armor)
     return ArmorType::small;
   }
 
-  // tools::logger()->debug("[Detector] get armor type by name: {}", ARMOR_NAMES[armor.name]);
 
   // 英雄、基地只能是大装甲板
   if (armor.name == ArmorName::one || armor.name == ArmorName::base) {
@@ -456,7 +455,6 @@ void Detector::show_result(
   cv::resize(binary_img, binary_img2, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
   cv::resize(detection, detection, {}, 0.5, 0.5);     // 显示时缩小图片尺寸
 
-  // cv::imshow("threshold", binary_img2);
   cv::imshow("detection", detection);
 }
 

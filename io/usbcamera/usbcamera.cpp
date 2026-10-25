@@ -23,7 +23,6 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
 
   // 守护线程
   daemon_thread_ = std::thread{[this] {
-    // tools::RemoteLogger::instance().log("INFO", "daemon thread start");
     while (!quit_) {
       std::this_thread::sleep_for(100ms);
 
@@ -57,7 +56,6 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
       }
       try_open();
     }
-    // tools::RemoteLogger::instance().log("INFO", "daemon thread exit");
   }};
 }
 
@@ -126,9 +124,7 @@ void USBCamera::open()
   }
 
   tools::RemoteLogger::instance().log("INFO", "{} USBCamera opened", device_name);
-  // tools::RemoteLogger::instance().log("INFO", "USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
   tools::RemoteLogger::instance().log("INFO", "USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
-  // tools::RemoteLogger::instance().log("INFO", "USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));
 
   // 取图线程
   capture_thread_ = std::thread{[this] {

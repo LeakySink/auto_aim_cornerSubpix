@@ -3,7 +3,6 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <deque>
 #include <optional>
 
 #include "buff_type.hpp"

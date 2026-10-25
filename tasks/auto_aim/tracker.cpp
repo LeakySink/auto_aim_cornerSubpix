@@ -65,7 +65,8 @@ std::list<Target> Tracker::track(
   // 过滤掉非我方装甲板
   armors.remove_if([&](const auto_aim::Armor & a) { return a.color != enemy_color_; });
 
-  // 过滤前哨站顶部装甲板
+  // 过滤前哨站顶部装甲板（当前故意不启用：顶部板与正面板用 27.5° / -15° 两个假设的
+  // 重投影误差比较，实测在俯仰角变化时判据不稳定，会误删正面板；保留以备后续改进）
   // armors.remove_if([this](const auto_aim::Armor & a) {
   //   return a.name == ArmorName::outpost &&
   //          solver_.oupost_reprojection_error(a, 27.5 * CV_PI / 180.0) <

@@ -19,7 +19,6 @@
 //   /tmp/lambda_capture_check
 
 #include <chrono>
-#include <cstdint>
 #include <cstdio>
 #include <thread>
 #include <vector>

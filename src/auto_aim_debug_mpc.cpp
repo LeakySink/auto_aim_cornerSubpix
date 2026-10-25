@@ -94,14 +94,11 @@ int main(int argc, char * argv[])
       data["plan_pitch_vel"] = plan.pitch_vel;
       data["plan_pitch_acc"] = plan.pitch_acc;
 
-      // data["plan_pitch0"] = plan.pitch0;
-      // data["plan_yaw0"] = plan.yaw0;
       data["yaw_error"] = yaw_err;
       data["pitch_error"] = pitch_err;
       data["yp_error"]=yp_error;
 
       data["fire"] = fire ? 1 : 0;
-      // data["fired"] = fired ? 1 : 0;
 
       if (target.has_value()) {
         const auto & e = target->ekf();
@@ -137,10 +134,6 @@ int main(int argc, char * argv[])
       } else {
         data["w"] = 0.0;
       }
-      // if (!armors.empty()) {
-      //   auto armor = armors.front();
-      //   data["measure_yaw"] = armor.yaw_raw;
-      // }
       tools::RemoteLogger::instance().plot(data);
 
       std::this_thread::sleep_for(10ms);

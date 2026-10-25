@@ -5,7 +5,6 @@
 #include <opencv2/opencv.hpp>
 #include <openvino/openvino.hpp>
 #include <string>
-#include <vector>
 
 #include "tasks/auto_aim/armor.hpp"
 #include "tasks/auto_aim/detector.hpp"

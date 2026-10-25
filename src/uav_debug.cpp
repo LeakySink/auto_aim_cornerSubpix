@@ -1,6 +1,5 @@
 #include <chrono>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"

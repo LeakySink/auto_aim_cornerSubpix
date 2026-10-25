@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <random>
 
 #include "tasks/auto_aim/classifier.hpp"
 #include "tools/img_tools.hpp"
@@ -258,7 +257,6 @@ cv::Mat YOLOV8::get_pattern(const cv::Mat & bgr_img, const Armor & armor) const
 
   // 检查ROI是否有效
   if (roi_left < 0 || roi_top < 0 || roi_right <= roi_left || roi_bottom <= roi_top) {
-    // std::cerr << "Invalid ROI: " << roi << std::endl;
     return cv::Mat();  // 返回一个空的Mat对象
   }
 

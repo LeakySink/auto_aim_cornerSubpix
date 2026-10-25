@@ -82,7 +82,6 @@ Armor::Armor(
   rectangular_error = std::max(left_rectangular_error, right_rectangular_error);
 
   ratio = max_length / max_width;
-  // color = class_id == 0 ? Color::blue : Color::red;
 
   if (class_id >= 0 && class_id < armor_properties.size()) {
     auto [color, name, type] = armor_properties[class_id];
@@ -130,7 +129,6 @@ Armor::Armor(
   rectangular_error = std::max(left_rectangular_error, right_rectangular_error);
 
   ratio = max_length / max_width;
-  // color = class_id == 0 ? Color::blue : Color::red;
 
   if (class_id >= 0 && class_id < armor_properties.size()) {
     auto [color, name, type] = armor_properties[class_id];

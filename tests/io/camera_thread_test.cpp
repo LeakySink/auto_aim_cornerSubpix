@@ -2,7 +2,6 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -59,15 +58,12 @@ int main(int argc, char * argv[])
       data["armor_num"] = armors.size();
 
       tools::RemoteLogger::instance().plot(data);
-      // cv::resize(img, img, {}, 0.5, 0.5);
-      // cv::imshow("reprojection", img);
     }
   });
 
   io::Camera camera(config_path);
   int num_yolo_thread = 8;
   auto yolos = tools::create_yolov8s(config_path, num_yolo_thread, true);
-  // auto yolos = tools::create_yolo11s(config_path, num_yolo_thread, true);
   std::vector<bool> yolo_used(num_yolo_thread, false);
   tools::ThreadPool thread_pool(num_yolo_thread);
 
@@ -83,8 +79,6 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(t, last_t);
     last_t = t;
 
-    // tools::RemoteLogger::instance().log("INFO", "{:.2f} fps", 1 / dt);
-    // tools::draw_text(img, fmt::format("{:.2f} fps", 1/dt), {10, 60}, {255, 255, 255});
     nlohmann::json data;
     data["fps"] = 1 / dt;
 

@@ -1,10 +1,8 @@
 #include "dm_imu.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <mutex>
 #include <queue>
 #include <thread>

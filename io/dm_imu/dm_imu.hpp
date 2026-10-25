@@ -5,10 +5,8 @@
 #include <serial/serial.h>
 
 #include <Eigen/Geometry>
-#include <array>
 #include <fstream>
 #include <initializer_list>
-#include <iostream>
 #include <thread>
 
 #include "tools/thread_safe_queue.hpp"
