@@ -98,6 +98,7 @@ Plan Planner::plan(Target target, double bullet_speed)
   // 没有任何可用装甲板：本帧直接放弃控制，不再往下算弹道与 MPC
   if (!std::isfinite(min_dist) || min_dist <= 0.0) {
     log_degraded("[Planner] 无可用装甲板（armor_xyza_list 为空或全为非有限值），本帧不控制");
+    clear_debug_aim();
     return {false};
   }
 
@@ -113,7 +114,10 @@ Plan Planner::plan(Target target, double bullet_speed)
   double yaw0, pitch0;
   Trajectory traj;
   try {
-    auto aim_ref = aim(target, bullet_speed);
+    // 只在这里（当前帧）记录一次调试瞄准点；get_trajectory 内部的 aim() 不再碰它
+    Eigen::Vector4d debug_aim;
+    auto aim_ref = aim(target, bullet_speed, &debug_aim);
+    set_debug_aim(debug_aim);
     yaw0 = aim_ref(0);
     pitch0 = aim_ref(1);
     traj = get_trajectory(target, yaw0, bullet_speed);
@@ -123,6 +127,7 @@ Plan Planner::plan(Target target, double bullet_speed)
     log_degraded(
       std::string("[Planner] 弹道/目标无解，本帧不控制：") + e.what() +
       "（bullet_speed=" + std::to_string(bullet_speed) + "）");
+    clear_debug_aim();
     return {false};
   }
 
@@ -171,7 +176,10 @@ Plan Planner::plan(Target target, double bullet_speed)
 
 Plan Planner::plan(std::optional<Target> target, double bullet_speed)
 {
-  if (!target.has_value()) return {false};
+  if (!target.has_value()) {
+    clear_debug_aim();
+    return {false};
+  }
 
   double delay_time =
     std::abs(target->ekf_x()[7]) > decision_speed_ ? high_speed_delay_time_
@@ -235,7 +243,8 @@ void Planner::setup_pitch_solver(const std::string & config_path)
   pitch_solver_->settings->max_iter = 10;
 }
 
-Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_speed)
+Eigen::Matrix<double, 2, 1> Planner::aim(
+  const Target & target, double bullet_speed, Eigen::Vector4d * debug_out) const
 {
   // 与 plan() 同样：显式初始化 + 跳过被污染的装甲板（读未初始化内存是 UB）
   Eigen::Vector3d xyz = Eigen::Vector3d::Zero();
@@ -257,7 +266,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
     throw std::runtime_error("no valid armor");
   }
 
-  debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
+  if (debug_out != nullptr) *debug_out = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
 
   auto azim = std::atan2(xyz.y(), xyz.x());
 
@@ -273,6 +282,31 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   }
 
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};
+}
+
+Eigen::Vector4d Planner::debug_xyza() const
+{
+  std::lock_guard<std::mutex> lock(debug_mutex_);
+  return debug_xyza_;
+}
+
+bool Planner::debug_xyza_valid() const
+{
+  std::lock_guard<std::mutex> lock(debug_mutex_);
+  return debug_valid_;
+}
+
+void Planner::set_debug_aim(const Eigen::Vector4d & xyza)
+{
+  std::lock_guard<std::mutex> lock(debug_mutex_);
+  debug_xyza_ = xyza;
+  debug_valid_ = true;
+}
+
+void Planner::clear_debug_aim()
+{
+  std::lock_guard<std::mutex> lock(debug_mutex_);
+  debug_valid_ = false;
 }
 
 Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_speed)

@@ -177,10 +177,13 @@ int main(int argc, char * argv[])
         tools::draw_points(img, image_points, {0, 255, 0});
       }
 
-      Eigen::Vector4d aim_xyza = planner.debug_xyza;
-      auto image_points =
-        solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
-      tools::draw_points(img, image_points, {0, 0, 255});
+      // 红框 = 当前帧的理想瞄准点（plan() 算完才写，无目标/无解时 validity 为 false）
+      if (planner.debug_xyza_valid()) {
+        Eigen::Vector4d aim_xyza = planner.debug_xyza();
+        auto image_points =
+          solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
+        tools::draw_points(img, image_points, {0, 0, 255});
+      }
     }
 
     tools::RemoteLogger::instance().plot_image(img, {{"name", "reprojection"}});
