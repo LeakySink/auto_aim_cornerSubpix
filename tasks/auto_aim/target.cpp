@@ -151,9 +151,19 @@ void Target::update(const Armor & armor)
 
   int id = -1;
   double min_cost = 1e10;
-  bool flip_yaw = false;
 
-  const double obs_yaw  = armor.ypr_in_world[0];
+  // PnP 给出的装甲板朝向有 ±π 二义性（平板正反面对称，IPPE 无法区分）。
+  // 模型约定（见 h_armor_xyz：armor = center − r·n̂）：x[6]/armor_yaw 指的是
+  // "从装甲板指向车体中心"的方向，因此对可见板有 n̂·p > 0（p 为板到云台原点的向量，
+  // 车体中心在板的后方更远处）。用这条几何关系把二义性定死：
+  // 不消歧的话，4 板目标里相差 π 的两块板在代价上完全等价（原来 min(yaw_err,
+  // yaw_err±π) 让它们相等），关联会永远锁在 0 号板；旋转时相位 a 只能靠"跳
+  // 90°/180°"去追，表现为状态抖动、w 学不出转速。
+  const double obs_yaw_raw = armor.ypr_in_world[0];
+  const double n_dot_p = std::cos(obs_yaw_raw) * armor.xyz_in_world[0] +
+                         std::sin(obs_yaw_raw) * armor.xyz_in_world[1];
+  const double obs_yaw = (n_dot_p < 0.0) ? tools::limit_rad(obs_yaw_raw + CV_PI) : obs_yaw_raw;
+
   const double obs_los  = armor.ypd_in_world[0];
   const double obs_dist = armor.ypd_in_world[2];
 
@@ -161,10 +171,9 @@ void Target::update(const Armor & armor)
     const auto & xyza = xyza_list[i];
     const Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head<3>());
 
-    // 观测 yaw 与预测装甲板 yaw，允许 PnP 的 ±π 二义性
-    const double yaw_err      = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
-    const double yaw_err_flip = std::abs(tools::limit_rad(obs_yaw + CV_PI - xyza[3]));
-    const double yaw_cost     = std::min(yaw_err, yaw_err_flip);
+    // 观测 yaw 已按几何消歧成"绝对朝向"，直接与预测的绝对朝向比较；
+    // 不再引入 ±π 分支（那正是 0↔2 / 1↔3 无法区分的根源）
+    const double yaw_cost = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
 
     const double los_cost  = std::abs(tools::limit_rad(obs_los - ypd[0]));
     const double dist_cost = std::abs(obs_dist - ypd[2]);
@@ -180,7 +189,6 @@ void Target::update(const Armor & armor)
     if (cost < min_cost) {
       min_cost = cost;
       id = i;
-      flip_yaw = yaw_err_flip < yaw_err;
     }
   }
 
@@ -194,11 +202,10 @@ void Target::update(const Armor & armor)
   last_id = id;
   update_count_++;
 
-  // 如果是 PnP yaw 翻转，先把观测 yaw 翻回来再送 EKF
+  // 统一把"消歧后的绝对朝向"送进 EKF（以前是按预测值去翻转观测，等于让观测迁就
+  // 已经跑偏的 a，只会把错误锁死）
   Armor corrected = armor;
-  if (flip_yaw) {
-    corrected.ypr_in_world[0] = tools::limit_rad(obs_yaw + CV_PI);
-  }
+  corrected.ypr_in_world[0] = obs_yaw;
 
   update_ypda(corrected, id);
 }
