@@ -82,15 +82,6 @@ leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
 high_speed_delay_time: 0.065 # s
 low_speed_delay_time: 0.055 # s planner use this value
-# 阻力系数 k（单位 1/m，模型 a = -k|v|v - g）。
-# 只在"多项式表覆盖不到、需要回退 RK4"时才用到。原值 0.2415 是历史遗留，与 22 m/s
-# 不自洽：实测 d>7.2m 弹道即无解（会刷 "Unsolvable target"，云台直接不受控）。
-# 下面按 ballistic-main 的物理参数换算：k = ρ·Cd·S/(2M)，
-# 17mm(M=3.2g, d=16.8mm, Cd=0.47, ρ=1.15@30℃) -> 0.01875
-drag_coefficient_up: 0.01875   # h >= boundary
-drag_coefficient_down: 0.00    # h <  boundary，先按纯抛物线
-drag_height_boundary: -0.3
-
 #####-----弹道模型-----#####
 # rk4 = 内置解析解 + RK4（原行为，缺省） | poly = ballistic-main 离线拟合的多项式表
 ballistics_model: poly

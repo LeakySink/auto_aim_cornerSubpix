@@ -59,10 +59,6 @@ private:
   double yaw_offset_;
   double pitch_offset_;
 
-  double drag_coefficient_up_;     // h >= boundary
-  double drag_coefficient_down_;   // h <  boundary
-  double drag_height_boundary_;    // 新增：高度分界，单位 m
-
   double fire_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
   // 与 Solver::min_valid_dist 同名的可选键：过滤掉预测位置离云台过近的"幽灵装甲板"。

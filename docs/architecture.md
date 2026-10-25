@@ -593,7 +593,7 @@ step = clamp( (h − z) / (dz/dθ) , ±10° )
 最多 12 次；|h − z| < 1e-4 m 收敛（兜底 1e-3）；每次迭代都检查 |θ| ≤ 80°
 ```
 
-**常数/参数来源**：`g = 9.7833`（硬编码）；`k` 由调用方按高度分档给（`drag_coefficient_up/down`，分界 `drag_height_boundary`，`standard3.yaml` 当前都为 0，即纯抛物线）。
+**常数/参数来源**：`g = 9.7833`（硬编码）；`k` **已不再由 yaml 配置** —— 原 `drag_coefficient_up` / `drag_coefficient_down` + `drag_height_boundary` 三键及"按高度二选一"的链路已于 2026-10 整体移除。现在：首选 C.6.1 的拟合表；超出拟合网格回退 RK4 时用编译期常量 `tools::kDefaultDragCoefficient = 0.01875`（17 mm 物理值 `ρCdS/(2M)`）。
 
 **坑**：`Trajectory` 构造函数里对 `v0 ≤ 0 / d ≤ 0 / 非有限值` 的判据必须写成 `!(isfinite(x) && x > 0)`（详见 `SEGFAULT_FIX_HANDOVER.md` §2.8：只写 `x <= 0` 挡不住 NaN，NaN 会一路变成 `static_cast<int>(NaN)` 的 UB）。
 

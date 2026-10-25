@@ -47,20 +47,6 @@ Planner::Planner(const std::string & config_path)
     min_valid_dist_ = yaml["min_valid_dist"].as<double>();
   }
 
-  auto old_node = yaml["drag_coefficient"];
-  auto up_node = yaml["drag_coefficient_up"];
-  auto down_node = yaml["drag_coefficient_down"];
-  auto boundary_node = yaml["drag_height_boundary"];
-
-  drag_coefficient_up_ =
-    up_node ? up_node.as<double>() : (old_node ? old_node.as<double>() : 0.0);
-
-  drag_coefficient_down_ =
-    down_node ? down_node.as<double>() : drag_coefficient_up_;
-
-  drag_height_boundary_ =
-    boundary_node ? boundary_node.as<double>() : 0.0;
-
   fire_thresh_ = tools::read<double>(yaml, "fire_thresh");
   decision_speed_ = tools::read<double>(yaml, "decision_speed");
   high_speed_delay_time_ = tools::read<double>(yaml, "high_speed_delay_time");
@@ -102,12 +88,9 @@ Plan Planner::plan(Target target, double bullet_speed)
     return {false};
   }
 
-  const double k0 =
-  (xyz.z() >= drag_height_boundary_)
-    ? drag_coefficient_up_
-    : drag_coefficient_down_;
-
-  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z(), k0);
+  // 弹道：优先 ballistics-main 拟合表，超出网格时 Trajectory 内部回退 RK4
+  //（阻力系数为编译期常量 tools::kDefaultDragCoefficient，不再由 yaml 配置）
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
   target.predict(bullet_traj.fly_time);
 
   // 2. Get trajectory
@@ -270,12 +253,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(
 
   auto azim = std::atan2(xyz.y(), xyz.x());
 
-  const double k =
-  (xyz.z() >= drag_height_boundary_)
-    ? drag_coefficient_up_
-    : drag_coefficient_down_;
-
-  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z(), k);
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
 
   if (bullet_traj.unsolvable) {
     throw std::runtime_error("Unsolvable bullet trajectory!");

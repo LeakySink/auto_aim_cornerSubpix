@@ -23,22 +23,6 @@ Aimer::Aimer(const std::string & config_path)
   yaw_offset_ = yaml["yaw_offset"].as<double>() / 57.3;      // degree to rad
   pitch_offset_ = yaml["pitch_offset"].as<double>() / 57.3;  // degree to rad
 
-  auto old_node = yaml["drag_coefficient"];
-  auto up_node = yaml["drag_coefficient_up"];
-  auto down_node = yaml["drag_coefficient_down"];
-  auto boundary_node = yaml["drag_height_boundary"];
-
-  drag_coefficient_up_ =
-    up_node.IsDefined()
-      ? up_node.as<double>()
-      : (old_node.IsDefined() ? old_node.as<double>() : 0.0);
-
-  drag_coefficient_down_ =
-    down_node.IsDefined() ? down_node.as<double>() : drag_coefficient_up_;
-
-  drag_height_boundary_ =
-    boundary_node.IsDefined() ? boundary_node.as<double>() : 0.0;
-
   comming_angle_ = yaml["comming_angle"].as<double>() / 57.3;  // degree to rad
   leaving_angle_ = yaml["leaving_angle"].as<double>() / 57.3;  // degree to rad
 
@@ -88,12 +72,8 @@ io::Command Aimer::aim(
   Eigen::Vector3d xyz0 = aim_point0.xyza.head(3);
   auto d0 = std::sqrt(xyz0[0] * xyz0[0] + xyz0[1] * xyz0[1]);
 
-  const double k0 =
-  (xyz0.z() >= drag_height_boundary_)
-    ? drag_coefficient_up_
-    : drag_coefficient_down_;
-
-  tools::Trajectory trajectory0(bullet_speed, d0, xyz0[2], k0);
+  // 弹道：优先拟合表，超出网格回退 RK4（阻力系数为编译期常量，见 tools/trajectory.hpp）
+  tools::Trajectory trajectory0(bullet_speed, d0, xyz0[2]);
   if (trajectory0.unsolvable) {
     tools::RemoteLogger::instance().log(
       "DEBUG", "[Aimer] Unsolvable trajectory0: {:.2f} {:.2f} {:.2f}",
@@ -129,12 +109,7 @@ io::Command Aimer::aim(
     Eigen::Vector3d xyz = aim_point.xyza.head(3);
     double d = std::sqrt(xyz.x() * xyz.x() + xyz.y() * xyz.y());
 
-    const double k =
-    (xyz.z() >= drag_height_boundary_)
-      ? drag_coefficient_up_
-      : drag_coefficient_down_;
-
-    current_traj = tools::Trajectory(bullet_speed, d, xyz.z(), k);
+    current_traj = tools::Trajectory(bullet_speed, d, xyz.z());
 
     // 检查弹道是否可解
     if (current_traj.unsolvable) {

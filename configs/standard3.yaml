@@ -70,16 +70,11 @@ decision_speed: 7 # rad/s
 high_speed_delay_time: 0.023 # s
 low_speed_delay_time: 0.04 # s planner use this value
 
-# 空气阻力系数（二次阻力模型 a = -k·|v|·v），按弹种/弹道表标定；
-# 缺省时静默回退为 0（纯重力抛物线）。参考：sentry.yaml 使用 up=0.2415, down=0.0, boundary=-0.3
-# 说明：这两项只在"多项式表覆盖不到、需要回退 RK4"时才用到（见 docs/architecture.md 附录 C.6）。
-# 若要用 ballistic-main 的离线拟合表（推荐，按弹速插值），加三行即可：
+# 弹道模型：缺省走内置解析解 + RK4（阻力系数是编译期常量 tools::kDefaultDragCoefficient，
+# 不再在此配置）。要用 ballistic-main 的离线拟合表（推荐，按弹速插值）加三行：
 #   ballistics_model: poly
 #   ballistics_csv: assets/ballistic/small.csv
-#   ballistics_x_range: [0.5, 15.0]   # 与 ballistic-main/g.py 的网格一致；超出即回退 RK4
-drag_coefficient_up: 0.0
-drag_coefficient_down: 0.0
-drag_height_boundary: 0.0
+#   ballistics_x_range: [0.5, 15.0]   # 超出即回退 RK4
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
