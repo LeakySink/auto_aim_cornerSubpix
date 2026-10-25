@@ -147,6 +147,8 @@ std::list<Armor> YOLOTUP::parse(
   // 用来回答"是模型没检出，还是被 score/置信度门槛杀了"。
   constexpr float kRawCandFloor = 0.05f;
   std::vector<RawCand> raw_cands;
+  // 全图最大分数（含所有被阈值滤掉的行）：用来区分"模型静默"(≈0) 与"解码丢了"(高分却无框)
+  double max_score_all = 0.0;
 
   auto to_img = [&](double net_x, double net_y) {
     return cv::Point2f((net_x - left) / scale, (net_y - top) / scale);
@@ -154,6 +156,7 @@ std::list<Armor> YOLOTUP::parse(
 
   for (int r = 0; r < output.rows; r++) {
     const double score = output.at<float>(r, 8);  // 已过 sigmoid
+    if (score > max_score_all) max_score_all = score;
     const bool above_threshold = (score >= score_threshold_);
 
     // 发布开启时，低于阈值但高于地板的候选也要走完解码（只用于画图）
@@ -289,11 +292,19 @@ std::list<Armor> YOLOTUP::parse(
       max_h = std::max(max_h, c.box.height);
     }
 
+    // 模型实际吃到的输入亮度：装甲板过曝时 tup 会整帧静默，这个数用来现场对号
+    double in_mean = 0.0, in_max = 0.0;
+    if (!tmp_input_.empty()) {
+      in_mean = cv::mean(tmp_input_)[0];
+      cv::minMaxLoc(tmp_input_, nullptr, &in_max, nullptr, nullptr);
+    }
+
     const std::string header = fmt::format(
-      "tup[{}] raw={} kept={} drop[s={} c={}] box={}x{}px score>={:.2f} conf>{:.2f} "
-      "scale={:.3f} {}x{}",
+      "tup[{}] raw={} kept={} drop[s={} c={}] box={}x{}px maxscr={:.3f} in[mean={:.0f} max={:.0f}] "
+      "score>={:.2f} conf>{:.2f} scale={:.3f} {}x{}",
       frame_count, raw_cands.size(), armors.size(), n_drop_score, n_drop_conf, max_w, max_h,
-      score_threshold_, min_confidence_, scale, bgr_img.cols, bgr_img.rows);
+      max_score_all, in_mean, in_max, score_threshold_, min_confidence_, scale, bgr_img.cols,
+      bgr_img.rows);
 
     std::string save_main, save_input;
     if (save_frames_ > 0 && save_seq_ < save_frames_) {
