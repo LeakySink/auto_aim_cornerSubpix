@@ -26,7 +26,7 @@ namespace tools
 /// - `plot_image` 按 `meta.name` ~30fps 选帧；UDP 仅当 Host `img_subscribe` 该流
 /// - 落盘优先级：image(0) < normal(1) < WARN(2) < ERROR(3)；队列满丢低优先级
 /// - Host 下行优先 `set_json_callback`；`poll_json` / `poll_calib_cmd` 仍可用
-/// - 配置见 yaml `remote_logger`；文档 `REMOTE_LOGGER.md` / 门户 Help `#vehicle`
+/// - 配置见 yaml `remote_logger`；文档 `docs/remote_logger.md` / 门户 Help `#vehicle`
 class RemoteLogger
 {
 public:

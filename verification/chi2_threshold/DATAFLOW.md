@@ -2,7 +2,7 @@
 
 > 适用范围：`auto_aim_cornerSubpix-main`
 > 相关文件：`tools/extended_kalman_filter.{hpp,cpp}`、`tasks/auto_aim/tracker.cpp`、`src/*_debug.cpp`
-> 结论来源：`REVIEW_OPTIMIZATION_20261018.md` 与本目录 `README.md` 的实测数据
+> 结论来源：本目录 `README.md` 的实测数据（推导过程见 `docs/architecture.md` 附录 C.5）
 
 ---
 

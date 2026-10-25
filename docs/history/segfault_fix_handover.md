@@ -3,7 +3,7 @@
 - 日期：2026-10-20
 - 基线：`d5b53ed`（审计文档提交，代码未改）
 - 结果：`4c0768c`，11 次提交，25 文件，**+805 / −66**
-- 依据：`SEGFAULT_AUDIT.md`（分三路静态审查 + 逐条回源码复核 + 从 `assets/*.xml` 解析真实模型输出维度）
+- 依据：`segfault_audit.md`（分三路静态审查 + 逐条回源码复核 + 从 `assets/*.xml` 解析真实模型输出维度）
 
 ---
 
@@ -223,4 +223,4 @@ git revert --no-commit d3037f6 && git commit
 | `dm_imu` packed 结构体 `*(float*)&u32` 强转        | 需按字段 `memcpy` 重写解析，改动面较大且当前平台未报错。                                                                    |
 | `commandgener` 忙等 / `socketcan` 10µs 轮询       | 性能问题，非崩溃。                                                                                            |
 
-以上仍在 `SEGFAULT_AUDIT.md` 的 §4 与 §2 中留有完整分析，可按需另行处理。
+以上仍在 `segfault_audit.md` 的 §4 与 §2 中留有完整分析，可按需另行处理。

@@ -197,7 +197,7 @@ int main(int argc, char ** argv)
   }
 
   // ---------- 6) 回归：未装模型时必须与原 RK4 逐值一致 ----------
-  // 期望值取自 SEGFAULT_FIX_HANDOVER.md §2.8 的实测（那次改动已证明 RK4 数值未变），
+  // 期望值取自 docs/history/segfault_fix_handover.md §2.8 的实测（那次改动已证明 RK4 数值未变），
   // 这里用来保证"新增多项式分支"没有顺手改掉默认路径。
   std::printf("\n== 6) 回归：未装多项式模型时的 RK4 与改动前一致 ==\n");
   tools::install_ballistics_model(nullptr);

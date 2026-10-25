@@ -1,6 +1,6 @@
 # Host ↔ 车 控制协议
 
-用法见 [`HOST.md`](HOST.md)，host 模块 API 见 [`DESIGN.md`](DESIGN.md)，车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+用法见 [`HOST.md`](HOST.md)，host 模块 API 见 [`DESIGN.md`](DESIGN.md)，车上发送端见 [`../docs/remote_logger.md`](../docs/remote_logger.md)。
 
 数据平面：plot/log JSON、图像 **`0xFE` UDP 分片**（兼容收旧 `0xFF` 单包）、`.rlog` RLG2。控制平面：车 DHCP；host 向车注册并排队；车只与 **队首** 发数据和心跳；后入调试机从队首拉流。车上数据面始终一份单播。**图像仅在有 host `img_subscribe` 时发送**；本地 `.rlog` 不受订阅影响。
 
@@ -229,11 +229,11 @@ frag n: [chunk...]
 | 2 | ≤320×≤30，15fps |
 | 3 | ≤320×≤25，10fps |
 
-车上按 **1s 窗口**统计非阻塞发送成败自适应升降档；Host `max_*` / `max_level` 再封顶。与 yaml 参数相同时只编码一次 JPEG。实现细节见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+车上按 **1s 窗口**统计非阻塞发送成败自适应升降档；Host `max_*` / `max_level` 再封顶。与 yaml 参数相同时只编码一次 JPEG。实现细节见 [`../docs/remote_logger.md`](../docs/remote_logger.md)。
 
 **数据面非阻塞**：车向队首 `sendto`/`sendmsg` 使用 `MSG_DONTWAIT`；缓冲满或弱网时 **丢远程包**，不阻塞本地 `.rlog`（disk-first 入队）。
 
-**诊断 plot 键（~1Hz，普通 plot JSON）**：`cam_fps`、`loop_fps`（主循环）、`img_tx_fps`、`img_tx_level`（远程出图）。来源 `io::FpsMeter` / `io::RemoteDebug`，**不是** CAN Command。字段说明见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md) §诊断曲线。
+**诊断 plot 键（~1Hz，普通 plot JSON）**：`cam_fps`、`loop_fps`（主循环）、`img_tx_fps`、`img_tx_level`（远程出图）。来源 `io::FpsMeter` / `io::RemoteDebug`，**不是** CAN Command。字段说明见 [`../docs/remote_logger.md`](../docs/remote_logger.md) §诊断曲线。
 
 ### plot.markers（marker_v1）
 
@@ -279,7 +279,7 @@ Watch 3D 用。仍走普通 plot JSON（Host 发射后仍是 `type:"plot"`），
 - `frames`: `{ "gimbal": { "parent":"world", "R":[9], "t":[3] }, ... }`（child→parent）
 - `tf`: 与 TF Viz 相同的外参包；Watch 可 ingest 进 FrameStore
 
-车端 API：定义 [`tools/rdbg/markers/viz_markers.hpp`](../tools/rdbg/markers/viz_markers.hpp)；自瞄转换 [`tasks/auto_aim/kalman_markers.hpp`](../tasks/auto_aim/kalman_markers.hpp)。用法见 [`REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+车端 API：定义 [`tools/rdbg/markers/viz_markers.hpp`](../tools/rdbg/markers/viz_markers.hpp)；自瞄转换 [`tasks/auto_aim/kalman_markers.hpp`](../tasks/auto_aim/kalman_markers.hpp)。用法见 [`../docs/remote_logger.md`](../docs/remote_logger.md)。
 
 **仅队首 → 车 `:15000`**
 

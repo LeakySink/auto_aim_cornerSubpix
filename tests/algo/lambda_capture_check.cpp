@@ -92,7 +92,7 @@ int main()
   std::printf("\n== 2. 错误模式（[&] 捕获形参）不再被使用 ==\n");
   // 这里仅说明旧写法的危害，不实际跑它（跑起来是 UB，可能崩），
   // 改为静态确认 perceptron.cpp 中已无 [&] 捕获形参的写法。
-  std::printf("  见 SEGFAULT_AUDIT §1.2；修复后构造线程均按值捕获指针\n");
+  std::printf("  见 docs/history/segfault_audit.md §1.2；修复后构造线程均按值捕获指针\n");
   expect(true, "perceptron.cpp 4 个工作线程均改为 [this, usbcamN] 按值捕获");
 
   std::printf("\n== 3. 线程按值捕获下并发安全 ==\n");

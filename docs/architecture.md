@@ -331,7 +331,7 @@ publish_image_name: "tup_detect"
 | `obs_pitch` | `:124` | rad | `ypd_in_world[1]` |
 | `obs_dist` | `:125` | m | `ypd_in_world[2]` |
 | `obs_armor_yaw` | `:126` | rad | `armor.ypr_in_world[0]` |
-| `markers` | `:134` | marker_v1 数组 | `tools::viz::kalman_markers(*target)`，Watch 页的 3D 显示（见 `REMOTE_LOGGER.md` 的 3D Markers 一节） |
+| `markers` | `:134` | marker_v1 数组 | `tools::viz::kalman_markers(*target)`，Watch 页的 3D 显示（见 `docs/remote_logger.md` 的 3D Markers 一节） |
 
 读图时的四个注意点：
 
@@ -595,7 +595,7 @@ step = clamp( (h − z) / (dz/dθ) , ±10° )
 
 **常数/参数来源**：`g = 9.7833`（硬编码）；`k` **已不再由 yaml 配置** —— 原 `drag_coefficient_up` / `drag_coefficient_down` + `drag_height_boundary` 三键及"按高度二选一"的链路已于 2026-10 整体移除。现在：首选 C.6.1 的拟合表；超出拟合网格回退 RK4 时用编译期常量 `tools::kDefaultDragCoefficient = 0.01875`（17 mm 物理值 `ρCdS/(2M)`）。
 
-**坑**：`Trajectory` 构造函数里对 `v0 ≤ 0 / d ≤ 0 / 非有限值` 的判据必须写成 `!(isfinite(x) && x > 0)`（详见 `SEGFAULT_FIX_HANDOVER.md` §2.8：只写 `x <= 0` 挡不住 NaN，NaN 会一路变成 `static_cast<int>(NaN)` 的 UB）。
+**坑**：`Trajectory` 构造函数里对 `v0 ≤ 0 / d ≤ 0 / 非有限值` 的判据必须写成 `!(isfinite(x) && x > 0)`（详见 `docs/history/segfault_fix_handover.md` §2.8：只写 `x <= 0` 挡不住 NaN，NaN 会一路变成 `static_cast<int>(NaN)` 的 UB）。
 
 ### C.6.1 多项式弹道分支（2026-10 新增，接 `ballistic-main` 的离线拟合）
 
@@ -626,7 +626,7 @@ step = clamp( (h − z) / (dz/dθ) , ±10° )
 1. **多项式表与"物理 k 的 RK4"在 d ≤ 15 m 内差 < 0.03°** —— 两者本来就同源（`a = −q·Cd·S/M − g` ≡ `a = −k|v|v − g`，`k = ρCdS/(2M)`）。所以 poly 分支的价值是**来源可信 + 可按弹速自动插值**，而不是精度飞跃；把 `k` 填对同样能立刻恢复可用。
 2. **`k = 0.2415` 不只是"远距离无解"**：v0 = 28 m/s、d = 8 m 时它反而"能解"，但给出 **19.2° 的吊射解**（正确值 3.17°）→ 云台抬得过高，照样打飞。所以旧配置会同时制造"刷 Unsolvable"和"能瞄但打高"两种症状。
 
-**回归保证**：缺省（`rk4`）时 RK4 路径逐值不变 —— 测试里对照 `SEGFAULT_FIX_HANDOVER.md` §2.8 的实测（23 m/s、5 m 平射 → pitch 0.0463 rad / t 0.2176 s；10 m 抬 2 m → 0.2922 / 0.4540）全部一致。
+**回归保证**：缺省（`rk4`）时 RK4 路径逐值不变 —— 测试里对照 `docs/history/segfault_fix_handover.md` §2.8 的实测（23 m/s、5 m 平射 → pitch 0.0463 rad / t 0.2176 s；10 m 抬 2 m → 0.2922 / 0.4540）全部一致。
 
 ## C.7 Aimer：提前量与瞄准点（`aimer.cpp`）
 

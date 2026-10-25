@@ -233,5 +233,5 @@ Netcheck **不**写入 `/api/robots`；通达度与日常发现目录是两套�
 |------|------|
 | [`PROTOCOL.md`](PROTOCOL.md) | 车 ↔ Host UDP |
 | [`DESIGN.md`](DESIGN.md) | Hub 结构、Python API |
-| [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md) | 车上发送端 |
+| [`../docs/remote_logger.md`](../docs/remote_logger.md) | 车上发送端 |
 | 门户 Help `#api` | 图形化摘要 |

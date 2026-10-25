@@ -325,6 +325,15 @@ DPS = 单位时间射击窗口占比 \times 射频 \times 单发子弹伤害
 边跑边打。目前的自瞄并没有考虑自身的移动，无法边跑边打。在本赛季，步兵经常需要从狗洞冲下去杀对面静止的英雄，而此时自瞄会认为对面在移动，导致前几发打不准，限制了操作手的发挥。我们计划引入轮式里程计信息，改善在该场景下的表现。
 
 
+## 文档导航
+
+工程文档集中在 [`docs/`](docs/README.md)（索引见其 README）：
+
+- [`docs/architecture.md`](docs/architecture.md) —— 主文档：架构、数据流、13 个入口、附录 A 运行流程 / B `plot(data)` 字段字典 / C 各模块数学流程
+- [`docs/ekf_model.md`](docs/ekf_model.md)、[`docs/planner.md`](docs/planner.md)、[`docs/detector.md`](docs/detector.md)、[`docs/coordinate_systems.md`](docs/coordinate_systems.md) —— 专题文档
+- [`docs/remote_logger.md`](docs/remote_logger.md) —— 远程调试日志、`.rlog` 与图片话题
+- [`docs/history/`](docs/history) —— 已闭环的历史记录（段错误审计/修复、2027 规则影响分析）
+
 ## 参考文献
 [1] Alan Day.【RM2024赛季-识别模型】深圳大学-RobotPilots[EB/OL]. RoboMaster论坛. https://bbs.robomaster.com/article/54091, 2025.
 

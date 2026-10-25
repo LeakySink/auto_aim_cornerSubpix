@@ -1,6 +1,6 @@
 # Host 内部设计
 
-给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。**浏览器 HTTP API** 见 [`API.md`](API.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../REMOTE_LOGGER.md`](../REMOTE_LOGGER.md)。
+给改 host 的程序员和 Agent 用。用法入口见 [`HOST.md`](HOST.md)。**浏览器 HTTP API** 见 [`API.md`](API.md)。控制协议见 [`PROTOCOL.md`](PROTOCOL.md)。车上发送端见 [`../docs/remote_logger.md`](../docs/remote_logger.md)。
 
 本文约定：路径相对 `host/`。包名 `rdbg`。主入口 `./host/start.sh` → `python -m rdbg serve`。
 
@@ -281,7 +281,7 @@ summarize(path) -> (n_json, n_img, sender_name)
 # include_jpeg=False 时 jpeg=b""，jpeg_len 仍为文件中长度
 ```
 
-Magic：v1 `0x524C4F47`（仅 JSON），v2 `0x32474C52`（`RLG2`）。v2：`type 0x00` json，`0x01` image。截断则打印 stderr 并停止。文件格式细节见 `REMOTE_LOGGER.md`。
+Magic：v1 `0x524C4F47`（仅 JSON），v2 `0x32474C52`（`RLG2`）。v2：`type 0x00` json，`0x01` image。截断则打印 stderr 并停止。文件格式细节见 `../docs/remote_logger.md`。
 
 ### 4.7a `rdbg.log.writer` / `rdbg.log.recorder`
 

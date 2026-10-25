@@ -55,7 +55,7 @@ Eigen::VectorXd ExtendedKalmanFilter::update(
   /// 卡方检验：必须在 x / P 更新之前完成
   // 新息 v = z − h(x⁻) 的协方差恰好是 S_prior，因此 NIS = vᵀ S_prior⁻¹ v ~ χ²(观测维数)。
   // 若改用更新后的 x/P（后验残差 + 后验 S），统计量会被"吸收"掉一部分，不再服从卡方分布：
-  // 实测（REVIEW_OPTIMIZATION_20261018.md）其期望只有 3.3~3.7（应为 4），
+  // 实测（见 docs/architecture.md 附录 C.5 与 verification/chi2_threshold/）其期望只有 3.3~3.7（应为 4），
   // 阈值 9.488 的实际误报率只剩 2%~4%，且对目标跳变/误匹配不敏感。
   Eigen::VectorXd innovation = z_subtract(z, h(x));
   double nis = (innovation.transpose() * S_prior.ldlt().solve(innovation)).value();
@@ -71,7 +71,7 @@ Eigen::VectorXd ExtendedKalmanFilter::update(
   //   标准 NEES = (x⁺ − x_true)ᵀ P⁺⁻¹ (x⁺ − x_true) ~ χ²(状态维数)，而真值不可得。
   //   这里用状态修正量 (x⁺ − x⁻)ᵀ P⁺⁻¹ (x⁺ − x⁻) 代替，其协方差是 P⁻ − P⁺（秩 ≤ 观测维数），
   //   并不服从 χ²；且 yaw 分量在 x_add 回绕 ±π 时会产生约 2π 的伪跳变
-  //   （实测 99.9% 的 NEES 爆表帧都来自这个回绕，见 REVIEW_OPTIMIZATION_20261018.md）。
+  //   （实测 99.9% 的 NEES 爆表帧都来自这个回绕，见 docs/architecture.md 附录 C.5）。
   //   因此 19.675 只能算保守上限；nees_fail 仅用于日志，不参与任何逻辑判断。
   double nees = ((x - x_prior).transpose() * P.ldlt().solve(x - x_prior)).value();
 
