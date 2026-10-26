@@ -13,6 +13,8 @@
 | [`coordinate_systems.md`](coordinate_systems.md) | 相机 / 云台 / 世界坐标系与变换链 |
 | [`remote_logger.md`](remote_logger.md) | RemoteLogger（`tools/rdbg/`）分层、`.rlog`、图片话题与订阅 |
 | [`CONFIG_PARAMETERS_REFERENCE.md`](CONFIG_PARAMETERS_REFERENCE.md) | 配置参数参考（以标定类为主） |
+| [`assumptions.md`](assumptions.md) | **物理世界假设清单**：每条假设对应的代码位置、被违反后的表现、验证方法；排查"莫名不准"时逐条对号 |
+| [`roadmap.md`](roadmap.md) | **后端加固路线图**（2026-10 ~ 2027-01）：变更影响矩阵、十周计划、1 月切换流程、验收标准 |
 
 ## 历史归档（已闭环，仅用于追溯"为什么这么改"）
 
