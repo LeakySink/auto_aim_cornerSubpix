@@ -31,6 +31,7 @@ detector 实现和改 yaml 外，不应改动任何后端文件。**
 | 交付 | `tests/eval/replay.cpp`（读 RLG2 → 驱动 Camera→Detector→Solver→Tracker）、`tests/eval/metrics.cpp`、`run_eval.sh`、真值采集规范 |
 | 指标 | 检出率 `P_n`、关键点误差（有标注时）、**PnP 距离误差**（卷尺真值）、角度误差、EKF 收敛时间、丢目标率、瞄点误差、开火判定正确率；全部按 **距离 / 角度 / 亮度** 分桶 |
 | 验收 | 60 s 回放 < 30 s（≥2× 实时）；同一 rlog 两次跑结果一致（可复现）；报告为 CSV + markdown |
+| **现状** | **Stage 1 已完成（2026-10）**：`python -m rdbg metrics/csv <run.rlog>` 可对录制数据出逐帧报告（关联 id 推进 / 相位斜率与抖动 / w 过零 / nis 越限 / 观测-估计一致性 / 距离-角度分桶），纯标准库、无需实车；自测见 `tests/eval/check_metrics.py`（合成 good/bad 两种场景）。**Stage 2（重跑检测，用于评估新模型）待做**：需在 C++ 侧实现 `.rlog` 读取 → 驱动 Detector→Solver→Tracker |
 
 > 附带收益：现场问题（如"红框乱飘"）从此可离线复现，不必赌现场。
 

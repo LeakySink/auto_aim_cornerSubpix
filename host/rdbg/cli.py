@@ -4,6 +4,15 @@ import argparse
 import sys
 
 
+def _safe_print(text):
+    """打印文本；遇到终端编码表示不了的字符就替换，而不是抛 UnicodeEncodeError。"""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        sys.stdout.write(text.encode(enc, "replace").decode(enc, "replace"))
+        sys.stdout.write(chr(10))
+
 def _parser():
     p = argparse.ArgumentParser(
         prog="rdbg",
@@ -47,6 +56,17 @@ def _parser():
                       help="output directory (default: <stem>_dump next to rlog)")
     dump.add_argument("--fps", type=float, default=10.0,
                       help="images.mp4 frame rate (default 10)")
+
+    met = sub.add_parser("metrics", help="analyse a .rlog and print a per-frame quality report")
+    met.add_argument("rlog", help="path to .rlog")
+    met.add_argument("--title", default=None, help="report title (default: file stem)")
+    met.add_argument("--derived", default=None,
+                     help="also write the derived series (unwrapped phase etc.) to this CSV")
+
+    csvp = sub.add_parser("csv", help="export a .rlog to a per-frame CSV")
+    csvp.add_argument("rlog", help="path to .rlog")
+    csvp.add_argument("-o", "--output", default=None,
+                      help="output CSV path (default: <rlog stem>.csv)")
     return p
 
 
@@ -79,6 +99,30 @@ def main(argv=None):
     if args.cmd == "dump":
         from .log.dump import dump_rlog_to_path
         return dump_rlog_to_path(args.rlog, output=args.output, fps=args.fps)
+
+    if args.cmd == "metrics":
+        from pathlib import Path
+
+        from .log import metrics
+        data = metrics.load(args.rlog)
+        title = args.title or Path(args.rlog).stem
+        _safe_print(metrics.report(data["json"], data["imgs"], title=title))
+        if args.derived:
+            info = metrics.to_csv(data["json"], args.derived)
+            print("[metrics] 逐帧数据已导出：%s（%d 行）" % (info["file"], info["rows"]))
+        return 0
+
+    if args.cmd == "csv":
+        from pathlib import Path
+
+        from .log import metrics
+        data = metrics.load(args.rlog)
+        out = args.output or str(Path(args.rlog).with_suffix(".csv"))
+        info = metrics.to_csv(data["json"], out)
+        print("[csv] %s：%d 行 / %d 列" % (info["file"], info["rows"], len(info["cols"])))
+        if info["skipped"]:
+            print("[csv] 已跳过嵌套字段：%s" % ", ".join(info["skipped"]))
+        return 0
 
     _parser().print_help()
     return 0
