@@ -49,10 +49,50 @@ python tests/eval/check_metrics.py     # 生成合成 rlog 并断言指标能区
 python tests/eval/make_fake_rlog.py /tmp/rlog --mode both
 ```
 
-## 局限（下一步）
+## Stage 2：重跑检测（`rlog_replay`，C++）
 
-本工具只分析**已记录的量**（`plot(data)` 的字段），**不重跑检测**。因此：
+上面的工具只分析**已记录的量**，不重跑检测。要回答"新模型比旧模型检出率高多少"，
+需要用 `tests/eval/rlog_replay.cpp`（C++，CMake 自动编成 `./build/rlog_replay`）：
 
-- 能回答"关联/相位/滤波/一致性"层面的问题；
-- **不能**回答"新模型比旧模型检出率高多少"——那需要 C++ 侧回放（读 `.rlog` 的图片 →
-  重新走 Detector→Solver→Tracker）。见 `docs/roadmap.md` W1–W2 的 Stage 2。
+```bash
+./build/rlog_replay configs/sentry.yaml eval_data/run_xxx.rlog --out replay.csv
+#   可选：--topic raw（默认） --limit 300 --tracker --min-conf 0.3 --quiet
+```
+
+输出 CSV：`frame,ts,det_n,max_conf,mean_conf,best_conf,best_name,best_type,best_color,`
+`best_dist,best_armor_yaw,best_cx,best_cy,obs_dist,dist_diff`（`--tracker` 时追加
+`a,w,r,l,h,armor_id,nis`）。末行打印汇总：处理帧数、检出帧比例、PnP 距离均值、
+**与录制 `obs_dist` 的差值均值**。
+
+### 两个前置条件（否则结论无效）
+
+1. **图片必须是原始帧**：`reprojection` / `tup_detect` 都画过框和关键点，拿它们重跑
+   检测会被自己画的标注污染。`auto_aim_debug_mpc` 已发布 `raw` 话题（未画标注），
+   工具默认只吃 `--topic raw`，找不到会告警并回退到全部图片。
+2. **必须是全分辨率**：`.rlog` 里的图片会被 `remote_logger.img_width` 压缩（当前 640），
+   而实车采集是 1440 —— 检测的等效尺度会变，**结论不能与实车对比**。工具会打印
+   图片分辨率并在过小时告警。两种解决办法：
+   - 录制评估数据时把 `img_width` 设成实车宽度（如 1440）；或
+   - 直接用下面的 `eval_record`（推荐）。
+
+## 全分辨率采集：`src/eval_record.cpp`
+
+```bash
+./build/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]
+                    [--quality Q] [--no-detect] [--quiet]
+```
+
+按**全分辨率**写标准 RLG2 `.rlog`（每帧 JSON 元数据 + 每 K 帧一张原始 JPEG），
+因此同一份数据可以同时喂给三套工具：
+
+```bash
+./build/eval_record configs/sentry.yaml --out eval_data/spin_01.rlog --every 2 --max-frames 3000
+./build/rlog_replay configs/sentry.yaml eval_data/spin_01.rlog --out spin_01.csv  # 重跑检测
+python -m rdbg metrics eval_data/spin_01.rlog                                     # 逐帧指标
+python -m rdbg replay  eval_data/spin_01.rlog                                     # host 可视化回放
+```
+
+写盘量估算：1440×1080 JPEG q90 ≈ 250 KB/张；`--every 2` @60fps ≈ 7.5 MB/s，
+3000 帧（约 100 s）≈ 750 MB，注意磁盘空间。
+
+> 1 月重训 YOLO 需要的**全分辨率原始帧**也由这条路径产出（`--no-detect` 可省 CPU）。

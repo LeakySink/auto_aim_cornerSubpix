@@ -4,12 +4,13 @@
 #   algo/  感知 / 自瞄算法
 #   io/    硬件冒烟
 #   ros2/  ROS2 桥（需 USE_ROS2 或 ros2_* 依赖）
+#   eval/  离线回放与评估（rlog_replay：读 .rlog 重跑检测）
 
 include(${PROJECT_SOURCE_DIR}/cmake/auto_executables.cmake)
 
 set(_TEST_LIBS ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim auto_buff)
 
-foreach(_cat IN ITEMS rdbg algo io ros2)
+foreach(_cat IN ITEMS rdbg algo io ros2 eval)
   auto_add_executables(
     DIR ${CMAKE_CURRENT_SOURCE_DIR}/${_cat}
     DEFAULT_LIBS ${_TEST_LIBS}

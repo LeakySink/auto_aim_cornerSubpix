@@ -6,7 +6,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [`architecture.md`](architecture.md) | **主文档**：四层架构、数据流、多线程模型、13 个入口、配置文件；附录 A 运行流程（逐行 + 时序图 + 远程看图）、附录 B `plot(data)` 字段字典、附录 C 各模块数学流程（C.6 弹道 + C.6.1 多项式表、C.14 脏数据护栏） |
+| [`architecture.md`](architecture.md) | **主文档**：四层架构、数据流、多线程模型、14 个入口、配置文件；附录 A 运行流程（逐行 + 时序图 + 远程看图）、附录 B `plot(data)` 字段字典、附录 C 各模块数学流程（C.6 弹道 + C.6.1 多项式表、C.14 脏数据护栏） |
 | [`ekf_model.md`](ekf_model.md) | 11 维 EKF：状态/转移/观测/噪声与可观测性 |
 | [`planner.md`](planner.md) | TinyMPC 规划器（约束、权重、参考轨迹） |
 | [`detector.md`](detector.md) | 检测与后处理（tup / yolov5 / yolo11 / 传统灯条） |

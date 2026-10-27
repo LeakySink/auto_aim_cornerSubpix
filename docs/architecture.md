@@ -157,9 +157,9 @@ configs/
 > 本附录由逐文件核对代码写成（2026-10-21），每一条都能在源码里对上；行号对应当时的工作区版本。
 > 建议阅读顺序：A.1 选一条链路 → A.2 看主循环 → A.3 对照时序图 → A.4 记住三个坑。
 
-## A.1 13 个可执行文件（`src/*.cpp`，名字即文件名）
+## A.1 14 个可执行文件（`src/*.cpp`，名字即文件名）
 
-`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 13 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
+`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 14 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
 
 ```bash
 ./build/<名字> <yaml路径>     # 位置参数 @config-path；--help 打印用法
@@ -175,6 +175,7 @@ configs/
 | `sentry` / `sentry_bp` / `sentry_debug` / `sentry_multithread` | `configs/sentry.yaml` | `CBoard` + `Camera` + 后视 `Camera("configs/camera.yaml")` | `YOLO` | `Aimer` + `Decider`（全向感知） | 名字带 `sentry*` 的**只在 `USE_ROS2=ON` 时生成**；`sentry_multithread` 用 `track(detection_queue, ...)` 重载 |
 | `uav` / `uav_debug` | `configs/uav.yaml` | `CBoard` + `Camera` | `YOLO` | `Aimer` | 空中机器人；`uav_debug`/`standard_mpc` 的 `YOLO` 默认 `debug=true` |
 | `auto_buff_debug` / `auto_buff_debug_mpc` | 无默认，**必须传** | `Camera`（MPC 版还有 `Gimbal`） | 打符专用检测 | `BuffAimer` | 打能量机关，与自瞄是两套 tasks |
+| `eval_record` | 无默认，**必须传** | `Camera` + `Gimbal` | 可选 `YOLO` | — | **离线评估/重训数据采集**：按全分辨率写标准 RLG2 `.rlog`（`--every` 抽帧、`--no-detect` 纯采图），产出可直接喂给 `tests/eval/rlog_replay`、`python -m rdbg metrics`、`python -m rdbg replay` |
 
 > 结论：想理解"自瞄怎么跑"，只读 **`auto_aim_debug_mpc`**（196 行、信息最全）即可；`standard_mpc` 就是"去掉 plot + 检测换多线程 + 加模式路由"的它。
 
@@ -622,7 +623,7 @@ step = clamp( (h − z) / (dz/dθ) , ±10° )
 | `tools/ballistics_poly.{hpp,cpp}` | 载入 CSV / 内联系数；按弹速**线性插值** 10 系数；基函数与 `ballistic-main/test.py:predict()` 逐项一致；`pitch` 列单位是**度** → 内部转弧度；`x` = 水平距离、`y` = 高度差；**超出拟合网格返回 false**（绝不三阶外推）；弹速超表上下限按端点夹取 |
 | `tools/ballistics_config.cpp` | `install_ballistics_from_config()`：读 `ballistics_model: poly\|rk4`、`ballistics_csv`、`ballistics_x_range` / `ballistics_y_range`、内联 `ballistics_pitch_coef` / `ballistics_time_coef` / `ballistics_v`；**加载失败 → 退回 RK4 并报 ERROR**（不崩、不静默变形） |
 | `tools/trajectory.cpp` | 入参守卫之后、RK4 之前插入 poly 分支；不可用则**回退原 RK4**，回退原因 2 s 限流记一次日志；结构体新增 `used_poly` 便于诊断 |
-| `Planner` / `Aimer` 构造函数 | 各调用一次装载（幂等）→ **13 个入口无需改动** |
+| `Planner` / `Aimer` 构造函数 | 各调用一次装载（幂等）→ **各入口无需改动** |
 | `assets/ballistic/{small,big}.csv` | 从 `ballistic-main/data/` 复制进本仓库，运行时不再跨工程取文件 |
 
 **实测对照**（`tests/algo/ballistics_poly_check.cpp`，不依赖 OpenCV/Eigen，可在本机直接编译运行；v0 = 22 m/s、h = 0）：

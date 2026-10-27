@@ -57,6 +57,9 @@ int main(int argc, char * argv[])
   // 修改），再在锁内整体替换；plan 线程的遍历也在锁内。
   std::list<auto_aim::Armor> armors;
   std::mutex armors_mutex;
+  // 最新世界姿态（主线程写、plan 线程读，用于把 q 记进 plot 数据）
+  Eigen::Quaterniond gimbal_q = Eigen::Quaterniond::Identity();
+  std::mutex gimbal_q_mutex;
   std::atomic<bool> quit = false;
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
@@ -81,10 +84,17 @@ int main(int argc, char * argv[])
       nlohmann::json data;
       data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);
 
-      data["gimbal_yaw"] = gs.yaw;
+      data["gimbal_yaw"] = gs.yaw;                // rad（离线回放按 rad 解释）
       data["gimbal_yaw_vel"] = gs.yaw_vel;
       data["gimbal_pitch"] = gs.pitch;
       data["gimbal_pitch_vel"] = gs.pitch_vel;
+      {
+        std::lock_guard<std::mutex> lock(gimbal_q_mutex);
+        data["gimbal_qw"] = gimbal_q.w();
+        data["gimbal_qx"] = gimbal_q.x();
+        data["gimbal_qy"] = gimbal_q.y();
+        data["gimbal_qz"] = gimbal_q.z();
+      }
 
       data["plan_yaw"] = plan.yaw;
       data["plan_yaw_vel"] = plan.yaw_vel;
@@ -145,8 +155,18 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, t);
+    // 单独发布**原始帧**（此时还没画任何标注）：离线回放/重跑检测只能吃干净图，
+    // 而 reprojection 那条流是画过框和关键点的。plot_image 仅在 host 订阅该流时
+    // 才真正编码发送，不订阅时零开销。
+    tools::RemoteLogger::instance().plot_image(img, {{"name", "raw"}});
     auto q = gimbal.q(t);
     solver.set_R_gimbal2world(q);
+    {
+      // 记下最新世界姿态：离线回放要复现 tracker 必须有它（只有 yaw/pitch 不够，
+      // 世界系姿态来自 IMU，无法从云台角度反推）
+      std::lock_guard<std::mutex> lock(gimbal_q_mutex);
+      gimbal_q = q;
+    }
     // 先在局部变量里完成检测与跟踪（tracker.track 会就地修改 armors），
     // 再在锁内整体替换共享列表 —— 锁持有时间只是一次 list move，很短，
     // 不会阻塞 plan 线程的遍历。

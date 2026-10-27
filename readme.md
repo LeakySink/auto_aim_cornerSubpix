@@ -329,7 +329,7 @@ DPS = 单位时间射击窗口占比 \times 射频 \times 单发子弹伤害
 
 工程文档集中在 [`docs/`](docs/README.md)（索引见其 README）：
 
-- [`docs/architecture.md`](docs/architecture.md) —— 主文档：架构、数据流、13 个入口、附录 A 运行流程 / B `plot(data)` 字段字典 / C 各模块数学流程
+- [`docs/architecture.md`](docs/architecture.md) —— 主文档：架构、数据流、14 个入口、附录 A 运行流程 / B `plot(data)` 字段字典 / C 各模块数学流程
 - [`docs/ekf_model.md`](docs/ekf_model.md)、[`docs/planner.md`](docs/planner.md)、[`docs/detector.md`](docs/detector.md)、[`docs/coordinate_systems.md`](docs/coordinate_systems.md) —— 专题文档
 - [`docs/remote_logger.md`](docs/remote_logger.md) —— 远程调试日志、`.rlog` 与图片话题
 - [`docs/assumptions.md`](docs/assumptions.md) —— 物理世界假设清单（假设 ↔ 代码位置 ↔ 违反表现 ↔ 验证方法）
