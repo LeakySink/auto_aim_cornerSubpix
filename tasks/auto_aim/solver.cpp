@@ -2,27 +2,16 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <atomic>
 #include <vector>
 
+#include "armor_geometry.hpp"
+#include "keypoint_check.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace auto_aim
 {
-constexpr double LIGHTBAR_LENGTH = 56e-3;     // m
-constexpr double BIG_ARMOR_WIDTH = 230e-3;    // m
-constexpr double SMALL_ARMOR_WIDTH = 135e-3;  // m
-
-const std::vector<cv::Point3f> BIG_ARMOR_POINTS{
-  {0, BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -BIG_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2},
-  {0, BIG_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}};
-const std::vector<cv::Point3f> SMALL_ARMOR_POINTS{
-  {0, SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2},
-  {0, SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}};
 
 Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3d::Identity())
 {
@@ -50,6 +39,14 @@ Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3
   if (yaml["max_valid_dist"] && yaml["max_valid_dist"].IsDefined()) {
     max_valid_dist_ = yaml["max_valid_dist"].as<double>();
   }
+
+  // 装甲板几何（板宽/灯条长/倾角/厚度）：1 月换样式只改 yaml（见 armor_geometry.hpp）
+  load_armor_geometry(yaml);
+
+  // 关键点语义校验默认只记 WARN（不改变现有行为）；设为 true 才真的拒收
+  if (yaml["reject_bad_keypoints"] && yaml["reject_bad_keypoints"].IsDefined()) {
+    reject_bad_keypoints_ = yaml["reject_bad_keypoints"].as<bool>();
+  }
 }
 
 Eigen::Matrix3d Solver::R_gimbal2world() const { return R_gimbal2world_; }
@@ -63,8 +60,34 @@ void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
 //solvePnP（获得姿态）
 bool Solver::solve(Armor & armor) const
 {
-  const auto & object_points =
-    (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  // 清零而不是留 NaN：万一调用方忘了检查返回值，也不会把 NaN 带进滤波/可视化
+  auto zero_pose = [&armor]() {
+    armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
+    armor.xyz_in_world = Eigen::Vector3d::Zero();
+    armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
+    armor.ypr_in_world = Eigen::Vector3d::Zero();
+    armor.ypd_in_world = Eigen::Vector3d::Zero();
+  };
+
+  // 关键点语义校验：换模型时第一时间发现"顺序/语义接错"（默认只记日志、不拒收）
+  // 注意必须放在 reject/clear 定义之前能用的形态（这里用 zero_pose 直接清零返回）
+  const auto kp = check_keypoints(armor.points, armor_geometry(), armor.type == ArmorType::big);
+  if (!kp.ok) {
+    static std::atomic<int> bad_kp_count{0};
+    const int n = ++bad_kp_count;
+    if (n <= 5 || n % 200 == 0) {
+      tools::RemoteLogger::instance().log(
+        "WARN",
+        "[Solver] 关键点校验失败：{}（aspect={:.2f} 上/下={:.2f} 左/右={:.2f}，累计 {} 次）",
+        kp.reason, kp.aspect, kp.top_bottom_ratio, kp.left_right_ratio, n);
+    }
+    if (reject_bad_keypoints_) {
+      zero_pose();
+      return false;
+    }
+  }
+
+  const auto object_points = armor_geometry().points(armor.type);
 
   cv::Vec3d rvec, tvec;
   cv::solvePnP(
@@ -78,20 +101,11 @@ bool Solver::solve(Armor & armor) const
   // 4 个角点的噪声会让 IPPE 解出几十米甚至 NaN 的位姿；这种观测一旦进 EKF，
   // 11 维状态会被污染（r/l/h 又没有过程噪声，很难自己恢复），下游 planner
   // 便报"弹道无解"、云台不受控。这里统一在"进 EKF 之前"拦掉。
-  // 清零而不是留 NaN：万一调用方忘了检查返回值，也不会把 NaN 带进滤波/可视化
-  auto clear_pose = [&armor]() {
-    armor.xyz_in_gimbal = Eigen::Vector3d::Zero();
-    armor.xyz_in_world = Eigen::Vector3d::Zero();
-    armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
-    armor.ypr_in_world = Eigen::Vector3d::Zero();
-    armor.ypd_in_world = Eigen::Vector3d::Zero();
-  };
-
   auto reject = [&](const char * why) {
     tools::RemoteLogger::instance().log(
       "WARN", "[Solver] 丢弃不可信位姿（{}）：cam_z={:.3f} conf={:.2f}", why, xyz_in_camera[2],
       armor.confidence);
-    clear_pose();
+    zero_pose();
     return false;
   };
 
@@ -125,7 +139,7 @@ bool Solver::solve(Armor & armor) const
     tools::RemoteLogger::instance().log(
       "WARN", "[Solver] 丢弃距离越界位姿：dist={:.2f} m（允许 {:.2f}~{:.2f}） conf={:.2f}", dist,
       min_valid_dist_, max_valid_dist_, armor.confidence);
-    clear_pose();
+    zero_pose();
     return false;
   }
 
@@ -145,7 +159,7 @@ std::vector<cv::Point2f> Solver::reproject_armor(
   auto sin_yaw = std::sin(yaw);
   auto cos_yaw = std::cos(yaw);
 
-  auto pitch = (name == ArmorName::outpost) ? -15.0 * CV_PI / 180.0 : 15.0 * CV_PI / 180.0;
+  auto pitch = armor_geometry().tilt_rad(name);
   auto sin_pitch = std::sin(pitch);
   auto cos_pitch = std::cos(pitch);
 
@@ -173,7 +187,7 @@ std::vector<cv::Point2f> Solver::reproject_armor(
 
   // reproject
   std::vector<cv::Point2f> image_points;
-  const auto & object_points = (type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  const auto object_points = armor_geometry().points(type);
   cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distort_coeffs_, image_points);
   return image_points;
 }
@@ -181,8 +195,7 @@ std::vector<cv::Point2f> Solver::reproject_armor(
 double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
 {
   // solve
-  const auto & object_points =
-    (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  const auto object_points = armor_geometry().points(armor.type);
 
   cv::Vec3d rvec, tvec;
   cv::solvePnP(

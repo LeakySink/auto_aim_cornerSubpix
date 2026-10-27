@@ -41,7 +41,7 @@ detector 实现和改 yaml 外，不应改动任何后端文件。**
 |---|---|
 | 目标 | 检测器可插拔；装甲板几何与关键点语义全部配置化 |
 | 交付 | `IDetector` 接口（`detect(img) → vector<Detection{box, keypoints, cls, score}>`）；`ArmorGeometry` yaml 段（板宽/灯条长/倾角/物体点顺序/关键点个数）；**关键点语义校验器**（凸性、对边长比、顺序 TL,TR,BR,BL、镜像一致性） |
-| 现状 | `solver.cpp` 里 `SMALL_ARMOR_WIDTH/BIG_ARMOR_WIDTH/LIGHTBAR_LENGTH` 与 ±15° 倾斜仍是硬编码；车体几何（radius/armor_num）**已在 yaml**（`ekf.{normal,outpost,base}`，0.2/4、0.2765/3、0.3205/3） |
+| 状态 | **已完成（2026-10）**：装甲几何全部配置化 —— 新增 `tasks/auto_aim/armor_geometry.hpp`（header-only 单例：`small_width`/`big_width`/`lightbar_length`/`tilt_deg`/`outpost_tilt_deg`/`thickness`），`Solver` 构造时从 yaml 的 `armor_geometry:` 段装载；`solver.cpp` 与 `kalman_markers.cpp` 两处硬编码副本已消除。**关键点语义校验**同步落地（`tasks/auto_aim/keypoint_check.hpp`：凸性 / 对边比 / 宽高比 / 退化边），默认只记 WARN，`reject_bad_keypoints: true` 时才拒收。车体几何（radius/armor_num）原本就在 yaml（`ekf.{normal,outpost,base}`）。**仍待做**：`IDetector` 显式接口化与关键点个数可变（4→6）支持 |
 | 验收 | 新增一个 detector 实现只需新增文件 + yaml，不改任何现有 `.cpp/.hpp`；关键点顺序接错时启动即报错 |
 
 ### W5–W6：状态估计鲁棒化（完全不依赖外观）

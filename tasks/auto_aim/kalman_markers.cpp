@@ -7,21 +7,17 @@
 #include <opencv2/core.hpp>
 
 #include "armor.hpp"
+#include "armor_geometry.hpp"
 #include "tools/rdbg/markers/viz_markers.hpp"
 
 namespace tools::viz
 {
 namespace
 {
-constexpr double LIGHTBAR_LENGTH = 56e-3;
-constexpr double BIG_ARMOR_WIDTH = 230e-3;
-constexpr double SMALL_ARMOR_WIDTH = 135e-3;
-constexpr double ARMOR_THICKNESS = 0.01;
-
 Eigen::Quaterniond armor_quat(double yaw, auto_aim::ArmorName name)
 {
-  const double pitch =
-    (name == auto_aim::ArmorName::outpost) ? -15.0 * CV_PI / 180.0 : 15.0 * CV_PI / 180.0;
+  // 倾角来自 armor_geometry（yaml 可配），不再硬编码
+  const double pitch = auto_aim::armor_geometry().tilt_rad(name);
   const double sy = std::sin(yaw);
   const double cy = std::cos(yaw);
   const double sp = std::sin(pitch);
@@ -62,9 +58,9 @@ nlohmann::json kalman_markers(const auto_aim::Target & target)
   }
 
   const auto plates = target.armor_xyza_list();
-  const double width =
-    (target.armor_type == auto_aim::ArmorType::big) ? BIG_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
-  const Eigen::Vector3d box_scale{ARMOR_THICKNESS, width, LIGHTBAR_LENGTH};
+  const auto & geo = auto_aim::armor_geometry();
+  const double width = geo.width(target.armor_type);
+  const Eigen::Vector3d box_scale{geo.thickness, width, geo.lightbar_length};
 
   std::vector<Eigen::Vector3d> spokes;
   spokes.reserve(plates.size() * 2);

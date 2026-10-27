@@ -82,6 +82,21 @@ leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
 high_speed_delay_time: 0.065 # s
 low_speed_delay_time: 0.055 # s planner use this value
+#####-----装甲板几何（1月中旬换样式只改这里）-----#####
+# 单位 m。缺省值 = 历史硬编码值（改这里会同时影响 PnP、3D marker 与关键点校验）。
+# 参考：小装甲板 135×56、大装甲板 230×56（RM 规则规定）；tilt 为板面俯仰角。
+armor_geometry:
+  small_width: 0.135
+  big_width: 0.230
+  lightbar_length: 0.056
+  tilt_deg: 15.0          # 普通装甲板
+  outpost_tilt_deg: -15.0 # 前哨站
+  thickness: 0.01         # 仅 3D 可视化用
+
+# 关键点语义校验：false = 只记 WARN（默认，不改变现有行为）；true = 校验失败直接丢弃该框。
+# 换新模型时建议先只看日志，确认关键点顺序/语义正确后再考虑开启拒收。
+reject_bad_keypoints: false
+
 #####-----弹道模型-----#####
 # rk4 = 内置解析解 + RK4（原行为，缺省） | poly = ballistic-main 离线拟合的多项式表
 ballistics_model: poly

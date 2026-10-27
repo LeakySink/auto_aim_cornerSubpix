@@ -9,8 +9,8 @@
 
 | # | 假设 | 代码位置 | 违反后的表现 | 如何验证 |
 |---|---|---|---|---|
-| A1 | 装甲板是**无厚度平面矩形**，四角 = 两根灯条的外端点；小装甲板宽 135 mm、大装甲板宽 230 mm、灯条长 56 mm | `tasks/auto_aim/solver.cpp:14-25`（`SMALL_ARMOR_WIDTH` / `BIG_ARMOR_WIDTH` / `LIGHTBAR_LENGTH`） | 距离按比例偏 → 抬枪量错 → 系统性打高/打低 | 正对 5 m 拍一张，量框宽：应 ≈ `fx·0.135/5 = 49 px`（`fx=1817.8`） |
-| A2 | 板法向水平，仅 ±15° 俯仰（outpost 为 −15°） | `solver.cpp:148`、`kalman_markers.cpp:24` | 远距离距离估计偏大 | 用俯仰非零的目标对照重投影误差 |
+| A1 | 装甲板是**无厚度平面矩形**，四角 = 两根灯条的外端点；小装甲板宽 135 mm、大装甲板宽 230 mm、灯条长 56 mm | **已配置化**：`configs/*.yaml` 的 `armor_geometry.{small_width,big_width,lightbar_length}`，代码只读 `tasks/auto_aim/armor_geometry.hpp` 的单例（`Solver` 构造时装载） | 距离按比例偏 → 抬枪量错 → 系统性打高/打低 | 正对 5 m 拍一张，量框宽：应 ≈ `fx·small_width/d`（135 mm @5 m、`fx=1817.8` → 49 px） |
+| A2 | 板法向水平，仅 ±15° 俯仰（outpost 为 −15°） | **已配置化**：`armor_geometry.tilt_deg` / `outpost_tilt_deg`；`Solver::reproject_armor()` 与 `kalman_markers` 共用同一单例（不再各抄一份） | 远距离距离估计偏大 | 用俯仰非零的目标对照重投影误差 |
 | A3 | 同一台车 N 块板共面于竖直圆柱，半径 0.2 / 0.2765 / 0.3205 m，板数 4 / 3 / 3 | `configs/sentry.yaml` 的 `ekf.{normal,outpost,base}`（`radius`/`armor_num`） | 相位/半径估计失真，瞄点绕圈 | 静态多角度拍摄，检查 4 块板的重投影是否同时贴合 |
 | A4 | 车体绕**竖直轴**旋转，旋转中心 = 板环几何中心；无侧倾/俯仰 | `tasks/auto_aim/target.cpp` 11 维状态 `x vx y vy z vz a w r l h` | 大角度命中偏移、z 方向漂移 | 让目标原地转，检查 `target_z` 是否恒定 |
 | A5 | 灯条竖直、两根等长且平行（传统检测的几何判据基础） | `tasks/auto_aim/detector.cpp`（`check_geometry`、比例 1.125 = 126/2/56 附近） | 传统二次矫正失效或误配 | 传统检测单独跑，看灯条配对成功率 |

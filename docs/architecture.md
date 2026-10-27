@@ -427,6 +427,12 @@ BIG  : (0, ±0.1150, ±0.028)      // 板宽 230 mm
 ```
 
 **2) PnP**：`cv::solvePnP(object_points, armor.points, K, dist, rvec, tvec, false, cv::SOLVEPNP_IPPE)`。
+
+> `object_points` 不再硬编码：来自 `tasks/auto_aim/armor_geometry.hpp` 的单例（由 yaml `armor_geometry:` 段装载，`Solver` 构造时读取），
+> 顺序为 [右上, 左上, 左下, 右下]，与检测器给出的 4 个关键点一一对应 —— **改动顺序等价于把姿态解成镜像**。
+> 同一份几何也被 `kalman_markers`（3D 可视化）使用，避免两处各抄一份常量。
+> `Solver::solve()` 入口还有一道**关键点语义校验**（`keypoint_check.hpp`：凸性 / 对边比 / 宽高比 / 退化边），
+> 默认只记 WARN（`reject_bad_keypoints: true` 时才拒收），用于换模型时立刻发现关键点顺序接错。
 IPPE 是平面目标专用解法，会给出「正面/反面」两个解；SDK 返回其中一个，这正是后续需要 yaw 二义性处理（`target.cpp` 的 `flip_yaw`）与 `optimize_yaw` 的根源。
 
 **3) 三次变换**（`:67-79`）：
