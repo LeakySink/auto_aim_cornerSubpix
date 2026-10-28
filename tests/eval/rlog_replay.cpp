@@ -293,19 +293,16 @@ int main(int argc, char ** argv)
     }
 
     if (frame == 0) {
-      std::printf("[replay] 图片分辨率 %dx%d
-", img.cols, img.rows);
-      if (img.cols < 1000)
-        std::printf(
-          "[replay] 警告：rlog 里的图被 remote_logger.img_width 压过（当前 %d 宽）。
-"
-          "         检测的等效尺度会与实车不同（416/%d vs 416/实车宽度），
-"
-          "         结论**不能**直接与实车对比。录制评估数据时请把 img_width 设为实车
-"
-          "         宽度（如 1440），或用 src/eval_record 采全分辨率帧。
-",
-          img.cols, img.cols);
+      char dim[64];
+      std::snprintf(dim, sizeof(dim), "[replay] 图片分辨率 %dx%d", img.cols, img.rows);
+      std::puts(dim);
+      if (img.cols < 1000) {
+        std::puts("[replay] 警告：rlog 里的图被 remote_logger.img_width 压过（宽度见上）。");
+        std::puts("         检测的等效尺度会与实车不同（416/压缩宽度 vs 416/实车宽度），");
+        std::puts("         结论不能直接与实车对比。");
+        std::puts("         录制评估数据时请把 img_width 设为实车宽度（如 1440），");
+        std::puts("         或用 src/eval_record 采全分辨率帧。");
+      }
     }
 
     FrameStat st;
@@ -334,29 +331,26 @@ int main(int argc, char ** argv)
 
     auto armors = yolo.detect(img, frame);
     double sum = 0.0;
-    auto_aim::Armor best;
-    bool has_best = false;
+    // Armor 没有默认构造函数，用指针记"当前最优"，避免复制与无参构造
+    const auto_aim::Armor * best = nullptr;
     for (auto & a : armors) {
       solver.solve(a);  // 填 xyz/ypr/ypd；距离与板朝向是旋转不变量
       if (a.confidence < args.min_conf) continue;
       ++st.det_n;
       sum += a.confidence;
-      if (!has_best || a.confidence > best.confidence) {
-        best = a;
-        has_best = true;
-      }
+      if (best == nullptr || a.confidence > best->confidence) best = &a;
     }
-    if (has_best) {
-      st.best_conf = best.confidence;
-      st.max_conf = best.confidence;
+    if (best != nullptr) {
+      st.best_conf = best->confidence;
+      st.max_conf = best->confidence;
       st.mean_conf = st.det_n ? sum / st.det_n : 0.0;
-      st.best_name = static_cast<int>(best.name);
-      st.best_type = static_cast<int>(best.type);
-      st.best_color = static_cast<int>(best.color);
-      st.best_dist = best.xyz_in_world.norm();
-      st.best_armor_yaw = best.ypr_in_world[0];
-      st.best_cx = best.center.x;
-      st.best_cy = best.center.y;
+      st.best_name = static_cast<int>(best->name);
+      st.best_type = static_cast<int>(best->type);
+      st.best_color = static_cast<int>(best->color);
+      st.best_dist = best->xyz_in_world.norm();
+      st.best_armor_yaw = best->ypr_in_world[0];
+      st.best_cx = best->center.x;
+      st.best_cy = best->center.y;
     }
 
     if (tracker) {
@@ -434,6 +428,5 @@ int main(int argc, char ** argv)
   if (with_cmp)
     std::printf("与录制 obs_dist 的|差|均值: %.3f m（%d 帧可比）\n", sum_diff / with_cmp, with_cmp);
   std::printf("CSV               : %s\n", args.out.c_str());
-  delete tracker;
   return 0;
 }
