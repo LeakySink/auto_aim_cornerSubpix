@@ -644,6 +644,13 @@ step = clamp( (h − z) / (dz/dθ) , ±10° )
 
 `k=0.01875` 是按 `k = ρ·Cd·S/(2M)` 用 ballistic-main 的 17 mm 参数（M=3.2 g、d=16.8 mm、Cd=0.47、ρ=1.15）算出的物理值。
 
+**补角语义（2026-10 修正，重要）**：CSV 里 `pitch` 列存的是**"相对视线的抬高补偿量"**，不是绝对仰角 —— 见 `ballistic-main/g.py`：
+`Pitch[i,j] = degrees(solved_pitch − atan2(Y[j], X[i]))`。因此 `BallisticsPoly::solve()` 内部必须再加视线仰角 `atan2(h, d)`：
+`pitch_abs = pitch_comp + atan2(h, d)`。
+**漏加时 `h=0` 完全看不出来**（los=0，早期对照只在 h=0 上做，因此掩盖了这个 bug），但 `h≠0` 会系统性打低：
+`d=2 m / h=2 m` 应给 46.23°，漏加只给 1.23°（现场表现为"近处高目标完全打不到"）。
+回归测试 `tests/algo/ballistics_poly_check.cpp` 第 3 节现已强制覆盖 `h ∈ {−1.9,−1.0,0,1.0,1.9,2.0}`，实测 poly 与物理 RK4 差 < 0.05°。
+
 **两条结论**：
 
 1. **多项式表与"物理 k 的 RK4"在 d ≤ 15 m 内差 < 0.03°** —— 两者本来就同源（`a = −q·Cd·S/M − g` ≡ `a = −k|v|v − g`，`k = ρCdS/(2M)`）。所以 poly 分支的价值是**来源可信 + 可按弹速自动插值**，而不是精度飞跃；把 `k` 填对同样能立刻恢复可用。

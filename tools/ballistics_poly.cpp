@@ -223,8 +223,20 @@ bool BallisticsPoly::solve(
     if (note) *note = "按弹速插值：V=" + num(v0) + " ∈ [" + num(lo.v) + "," + num(up.v) + "]";
   }
 
-  const double pitch_deg = eval(pc, d, h);  // 单位：度（抬头为正）
-  const double t = eval(tc, d, h);          // 单位：s
+  // !! 语义修正（2026-10）!!
+  // ballistic-main 的 CSV 里 pitch 列存的是"相对视线的抬高补偿量"，不是绝对仰角。
+  // 依据 ballistic-main/g.py:
+  //     self.Pitch[i, j] = degrees(res[0] - atan2(self.Y[j], self.X[i]))
+  // 即拟合目标 = 求解出的绝对 pitch 减去视线仰角。因此这里必须再加上视线仰角
+  //   los = atan2(h, d)
+  // 才是云台需要的绝对 pitch（抬头为正）。
+  // 漏加时 h=0 完全看不出来（los=0，这正是此前所有测试都通过的原因），
+  // 但 h≠0 会系统性打低：d=2 m / h=2 m 时应为 46.23°，漏加后只给 1.23°。
+  constexpr double kRad2Deg = 57.29577951308232;
+  const double pitch_comp_deg = eval(pc, d, h);  // 补偿量（度）
+  const double los_deg = std::atan2(h, d) * kRad2Deg;
+  const double pitch_deg = pitch_comp_deg + los_deg;  // 绝对仰角（度，抬头为正）
+  const double t = eval(tc, d, h);                    // 单位：s（绝对值）
   if (!std::isfinite(pitch_deg) || !std::isfinite(t) || t <= 0.0) {
     if (note) *note = "多项式求值结果非法：pitch=" + num(pitch_deg) + "deg t=" + num(t) + "s";
     return false;

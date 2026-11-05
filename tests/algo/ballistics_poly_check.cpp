@@ -140,35 +140,50 @@ int main(int argc, char ** argv)
   }
 
   // ---------- 3) 多项式 vs RK4 ----------
-  std::printf("\n== 3) 多项式 vs 内置 RK4（h=0）==\n");
-  const double k_phys = 0.01875;  // = ρ·Cd·S/(2M)，17mm 物理值（ballistic-main 参数）
-  const double k_bad = 0.2415;    // sentry.yaml 原值
+  // ---- 3) 多项式 vs 内置 RK4：必须覆盖 h != 0 ----
+  // 2026-10 的教训：早期版本只在 h=0 上做这条对照，恰好掩盖了一个严重 bug ——
+  // ballistic-main 的 CSV 里 pitch 列是"相对视线的补偿量"，漏加 atan2(h,d) 后
+  // h=0 完全看不出来（los=0），但 d=2/h=2 会给出 1.2 度而正确答案是 46.2 度。
+  // 因此这里强制在多个 h 上对照，并给出误差断言。
+  std::puts("");
+  std::puts("== 3) poly vs RK4 (including h != 0) ==");
+  constexpr double kPi = 3.14159265358979323846;
+  const double k_phys = 0.01875;  // = rho*Cd*S/(2M)，17mm 物理值
+  const double h_list[] = {-1.9, -1.0, 0.0, 1.0, 1.9, 2.0};
   for (double v0 : {22.0, 28.0}) {
-    std::printf("  v0=%.1f m/s\n   %-6s %-18s %-18s %-18s\n", v0, "d(m)", "poly(本模型)", "RK4 k=0.01875",
-                "RK4 k=0.2415");
-    for (double d : {5.0, 8.0, 10.0, 12.0, 15.0}) {
-      std::string note;
-      double pr = 0.0, pt = 0.0;
-      const bool pok = model->solve(v0, d, 0.0, pr, pt, &note);
-      tools::install_ballistics_model(nullptr);
-      const auto r1 = solve_traj(v0, d, 0.0, k_phys);
-      const auto r2 = solve_traj(v0, d, 0.0, k_bad);
-      tools::install_ballistics_model(model);
-      char c1[64], c2[64], c3[64];
-      std::snprintf(
-        c1, sizeof(c1), "%s %.3fdeg t=%.3f", pok ? "ok  " : "FAIL", pr * 180 / 3.14159265358979323846, pt);
-      if (r1.ok)
-        std::snprintf(c2, sizeof(c2), "ok   %.3fdeg t=%.3f", r1.pitch_deg, r1.t);
-      else
-        std::snprintf(c2, sizeof(c2), "无解");
-      if (r2.ok)
-        std::snprintf(c3, sizeof(c3), "ok   %.3fdeg t=%.3f", r2.pitch_deg, r2.t);
-      else
-        std::snprintf(c3, sizeof(c3), "无解（>7.2m 即此路）");
-      std::printf("   %-6.1f %-18s %-18s %-18s\n", d, c1, c2, c3);
-      expect(pok, "多项式应能求解该点");
+    std::printf("  v0=%.1f m/s", v0);
+    std::puts("");
+    std::printf("   %-6s %-6s %-16s %-16s %-10s", "d(m)", "h(m)", "poly(deg/t)", "RK4 k=0.01875",
+                "diff(deg)");
+    std::puts("");
+    for (double d : {2.0, 5.0, 8.0, 12.0, 15.0}) {
+      for (double h : h_list) {
+        std::string note;
+        double pr = 0.0, pt = 0.0;
+        const bool pok = model->solve(v0, d, h, pr, pt, &note);
+        tools::install_ballistics_model(nullptr);
+        const auto r1 = solve_traj(v0, d, h, k_phys);
+        tools::install_ballistics_model(model);
+        if (!pok || !r1.ok) {
+          std::printf("   %-6.1f %-6.1f %-16s %-16s", d, h, pok ? "ok" : "poly reject",
+                      r1.ok ? "ok" : "RK4 no-sol");
+          std::puts("");
+          continue;
+        }
+        const double poly_deg = pr * 180 / kPi;
+        const double diff = std::abs(poly_deg - r1.pitch_deg);
+        char c1[48], c2[48];
+        std::snprintf(c1, sizeof(c1), "%.3f / %.3f", poly_deg, pt);
+        std::snprintf(c2, sizeof(c2), "%.3f / %.3f", r1.pitch_deg, r1.t);
+        std::printf("   %-6.1f %-6.1f %-16s %-16s %+8.3f", d, h, c1, c2, poly_deg - r1.pitch_deg);
+        std::puts("");
+        // 容差：拟合表与物理 RK4 同源，实测差 < 0.05 度；留 0.25 度余量
+        expect(diff < 0.25, "poly 与 RK4 在 h!=0 时一致（差 < 0.25 度）");
+      }
     }
   }
+  std::puts("");
+
 
   // ---------- 4) 范围外回退 RK4 ----------
   std::printf("\n== 4) 超出拟合表范围 → 回退 RK4 ==\n");
