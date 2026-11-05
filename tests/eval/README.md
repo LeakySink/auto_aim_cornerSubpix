@@ -67,8 +67,9 @@ python tests/eval/make_fake_rlog.py /tmp/rlog --mode both
 ### 两个前置条件（否则结论无效）
 
 1. **图片必须是原始帧**：`reprojection` / `tup_detect` 都画过框和关键点，拿它们重跑
-   检测会被自己画的标注污染。`auto_aim_debug_mpc` 已发布 `raw` 话题（未画标注），
-   工具默认只吃 `--topic raw`，找不到会告警并回退到全部图片。
+   检测会被自己画的标注污染。`auto_aim_debug_mpc` 可发布 `raw` 话题（未画标注），但**默认关闭**（`.rlog` 体积会翻倍）：
+   录制时在 yaml 里设 `publish_raw_frame: true`。工具默认只吃 `--topic raw`，找不到会告警并回退。
+   更推荐直接用 `eval_record`（全分辨率，见下）。
 2. **必须是全分辨率**：`.rlog` 里的图片会被 `remote_logger.img_width` 压缩（当前 640），
    而实车采集是 1440 —— 检测的等效尺度会变，**结论不能与实车对比**。工具会打印
    图片分辨率并在过小时告警。两种解决办法：

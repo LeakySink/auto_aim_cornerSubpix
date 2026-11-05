@@ -20,6 +20,7 @@
 #include "tools/remote_logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/thread_safe_queue.hpp"
+#include "tools/yaml.hpp"
 using namespace std::chrono_literals;
 
 const std::string keys =
@@ -38,6 +39,18 @@ int main(int argc, char * argv[])
   }
 
   tools::RemoteLogger::instance().init(config_path);
+
+  // 是否额外发布未标注的原始帧（话题 raw）。默认关闭：
+  // 每个图流都会按名限频地 JPEG 编码并写入本地 .rlog（enable_local 时），
+  // 多一路流会让 .rlog 体积约翻倍、并多一次编码开销。
+  // 需要离线重跑检测（rlog_replay）或采评估数据时才打开它（见 docs/roadmap.md W1-2）。
+  bool publish_raw_frame = false;
+  {
+    const auto yaml = tools::load(config_path);
+    if (yaml["publish_raw_frame"] && yaml["publish_raw_frame"].IsDefined()) {
+      publish_raw_frame = yaml["publish_raw_frame"].as<bool>();
+    }
+  }
   io::RemoteDebug::install();
 
   io::Gimbal gimbal(config_path);
@@ -155,10 +168,11 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, t);
-    // 单独发布**原始帧**（此时还没画任何标注）：离线回放/重跑检测只能吃干净图，
-    // 而 reprojection 那条流是画过框和关键点的。plot_image 仅在 host 订阅该流时
-    // 才真正编码发送，不订阅时零开销。
-    tools::RemoteLogger::instance().plot_image(img, {{"name", "raw"}});
+    // 可选发布**原始帧**（此时还没画任何标注）：离线重跑检测只能吃干净图，
+    // 而 reprojection 那条流是画过框和关键点的。默认关闭（见上）。
+    if (publish_raw_frame) {
+      tools::RemoteLogger::instance().plot_image(img, {{"name", "raw"}});
+    }
     auto q = gimbal.q(t);
     solver.set_R_gimbal2world(q);
     {

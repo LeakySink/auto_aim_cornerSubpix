@@ -82,6 +82,13 @@ leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
 high_speed_delay_time: 0.065 # s
 low_speed_delay_time: 0.055 # s planner use this value
+#####-----离线回放/评估（默认关）-----#####
+# 额外发布一路"未标注原始帧"(话题 raw)，供 rlog_replay 重跑检测用。
+# 注意：每个图流都会按名限频地 JPEG 编码并写入 .rlog（enable_local 时），
+# 打开它会让 .rlog 体积约翻倍、并多一次编码开销 —— 只在采评估数据时开。
+# 若要全分辨率原始帧（推荐，重训也用），请改用 ./build/eval_record，不要把 img_width 调大。
+publish_raw_frame: false
+
 #####-----装甲板几何（1月中旬换样式只改这里）-----#####
 # 单位 m。缺省值 = 历史硬编码值（改这里会同时影响 PnP、3D marker 与关键点校验）。
 # 参考：小装甲板 135×56、大装甲板 230×56（RM 规则规定）；tilt 为板面俯仰角。
