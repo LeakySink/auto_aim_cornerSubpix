@@ -13,6 +13,7 @@
 | [`coordinate_systems.md`](coordinate_systems.md) | 相机 / 云台 / 世界坐标系与变换链 |
 | [`remote_logger.md`](remote_logger.md) | RemoteLogger（`tools/rdbg/`）分层、`.rlog`、图片话题与订阅 |
 | [`CONFIG_PARAMETERS_REFERENCE.md`](CONFIG_PARAMETERS_REFERENCE.md) | 配置参数参考（以标定类为主） |
+| [`heavy_robot_backend.md`](heavy_robot_backend.md) | **2027 重装自瞄后端改造清单**：为步兵调的后端改到重装需要动的 P0/P1 项（弹速兜底 22 改 16.5、big.csv 补 16.5 档、回退 k 分弹种、大装甲收敛、radius 重标、MPC 加速度/延迟/开火门控、两阶段形态切换、板面选点）、涉及文件与施工顺序、前后端分工边界 |
 | [`gimbal_mechanics_and_aiming.md`](gimbal_mechanics_and_aiming.md) | **机械尺度→电控带宽→自瞄工作基础**：各兵种转动惯量/力矩/闭环带宽估算、相位滞后与跟踪误差、执行链断链（加速度被丢弃）、各兵种自瞄假设、阶跃响应标定方案与 P0/P1/P2 清单 |
 | [`robot_types_and_aiming.md`](robot_types_and_aiming.md) | **2027 兵种特性与自瞄剖析**：各兵种几何/弹速/装甲变化、物理限制、自适应装甲的战术含义、不同兵种自瞄能力矩阵、对本仓库的 P0/P1/P2 影响清单（依据 2027 三份规则手册 + 618 条变化对照） |
 | [`assumptions.md`](assumptions.md) | **物理世界假设清单**：每条假设对应的代码位置、被违反后的表现、验证方法；排查"莫名不准"时逐条对号 |
