@@ -13,6 +13,7 @@
 | [`coordinate_systems.md`](coordinate_systems.md) | 相机 / 云台 / 世界坐标系与变换链 |
 | [`remote_logger.md`](remote_logger.md) | RemoteLogger（`tools/rdbg/`）分层、`.rlog`、图片话题与订阅 |
 | [`CONFIG_PARAMETERS_REFERENCE.md`](CONFIG_PARAMETERS_REFERENCE.md) | 配置参数参考（以标定类为主） |
+| [`gimbal_mechanics_and_aiming.md`](gimbal_mechanics_and_aiming.md) | **机械尺度→电控带宽→自瞄工作基础**：各兵种转动惯量/力矩/闭环带宽估算、相位滞后与跟踪误差、执行链断链（加速度被丢弃）、各兵种自瞄假设、阶跃响应标定方案与 P0/P1/P2 清单 |
 | [`robot_types_and_aiming.md`](robot_types_and_aiming.md) | **2027 兵种特性与自瞄剖析**：各兵种几何/弹速/装甲变化、物理限制、自适应装甲的战术含义、不同兵种自瞄能力矩阵、对本仓库的 P0/P1/P2 影响清单（依据 2027 三份规则手册 + 618 条变化对照） |
 | [`assumptions.md`](assumptions.md) | **物理世界假设清单**：每条假设对应的代码位置、被违反后的表现、验证方法；排查"莫名不准"时逐条对号 |
 | [`roadmap.md`](roadmap.md) | **后端加固路线图**（2026-10 ~ 2027-01）：变更影响矩阵、十周计划、1 月切换流程、验收标准 |
