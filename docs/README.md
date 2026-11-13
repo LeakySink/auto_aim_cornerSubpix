@@ -13,6 +13,7 @@
 | [`coordinate_systems.md`](coordinate_systems.md) | 相机 / 云台 / 世界坐标系与变换链 |
 | [`remote_logger.md`](remote_logger.md) | RemoteLogger（`tools/rdbg/`）分层、`.rlog`、图片话题与订阅 |
 | [`CONFIG_PARAMETERS_REFERENCE.md`](CONFIG_PARAMETERS_REFERENCE.md) | 配置参数参考（以标定类为主） |
+| [`heavy_handover.md`](heavy_handover.md) | **重装自瞄交接书（未来 6 个月唯一任务）**：一页速览、代码/文档地图、现状已实现-vs-未实现、已修 bug 复盘（含教训）、已知问题优先级、六个月研发计划与 gate、工作规范与 DoD、环境/故障排查、对外接口、风险、第一天 checklist |
 | [`heavy_aim_baseline.md`](heavy_aim_baseline.md) | **重装自瞄系统基线（命中率 >=75%）**：把 75% 翻译成 sigma<=24mm 的顶层指标与模块级误差预算；M0-M8 各模块的基线/检验方法/验收阈值/典型失效；四层检验体系（单元/离线回放/静态靶/实车）；统计口径（样本量、分层下界、置信区间）；基线参数总表；不达标排查决策树；里程碑 gate |
 | [`heavy_robot_backend.md`](heavy_robot_backend.md) | **2027 重装自瞄后端改造清单**：为步兵调的后端改到重装需要动的 P0/P1 项（弹速兜底 22 改 16.5、big.csv 补 16.5 档、回退 k 分弹种、大装甲收敛、radius 重标、MPC 加速度/延迟/开火门控、两阶段形态切换、板面选点）、涉及文件与施工顺序、前后端分工边界 |
 | [`gimbal_mechanics_and_aiming.md`](gimbal_mechanics_and_aiming.md) | **机械尺度→电控带宽→自瞄工作基础**：各兵种转动惯量/力矩/闭环带宽估算、相位滞后与跟踪误差、执行链断链（加速度被丢弃）、各兵种自瞄假设、阶跃响应标定方案与 P0/P1/P2 清单 |

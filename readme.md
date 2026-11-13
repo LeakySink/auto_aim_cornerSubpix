@@ -332,6 +332,7 @@ DPS = 单位时间射击窗口占比 \times 射频 \times 单发子弹伤害
 - [`docs/architecture.md`](docs/architecture.md) —— 主文档：架构、数据流、14 个入口、附录 A 运行流程 / B `plot(data)` 字段字典 / C 各模块数学流程
 - [`docs/ekf_model.md`](docs/ekf_model.md)、[`docs/planner.md`](docs/planner.md)、[`docs/detector.md`](docs/detector.md)、[`docs/coordinate_systems.md`](docs/coordinate_systems.md) —— 专题文档
 - [`docs/remote_logger.md`](docs/remote_logger.md) —— 远程调试日志、`.rlog` 与图片话题
+- [`docs/heavy_handover.md`](docs/heavy_handover.md) —— **重装自瞄交接书**：6 个月研发计划、现状清单、坑位复盘、第一天 checklist
 - [`docs/heavy_aim_baseline.md`](docs/heavy_aim_baseline.md) —— 重装自瞄系统基线：75% 命中率如何拆成各模块指标与检验方法
 - [`docs/heavy_robot_backend.md`](docs/heavy_robot_backend.md) —— 2027 重装自瞄：后端改造清单（只含后端，不含前端）
 - [`docs/gimbal_mechanics_and_aiming.md`](docs/gimbal_mechanics_and_aiming.md) —— 机械惯量/电控带宽如何决定自瞄假设（含执行链断链分析）
