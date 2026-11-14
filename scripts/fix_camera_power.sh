@@ -252,7 +252,7 @@ echo -e "  3. ${CYAN}使用带外部供电的 USB 集线器${RESET}"
 echo -e "  4. ${CYAN}BIOS 中禁用 USB Selective Suspend${RESET}"
 
 echo -e "\n${CYAN}快速测试:${RESET}"
-echo -e "  直接插主板 USB 口后运行: ${GREEN}./build/auto_aim_debug_mpc${RESET}"
+echo -e "  直接插主板 USB 口后运行: ${GREEN}./build/src/auto_aim_debug_mpc${RESET}"
 
 echo -e "\n${CYAN}重新运行此脚本:${RESET}"
 echo -e "  $0              # 常规诊断"

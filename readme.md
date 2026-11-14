@@ -83,7 +83,7 @@ IMU型号：使用C板内置BMI088作为IMU\
 
 3. 运行demo:
     ```bash
-    ./build/auto_aim_test
+    ./build/tests/auto_aim_test
     ```
 
 4. 注册自启：

@@ -161,7 +161,7 @@ TinyMPC 使用 ADMM（交替方向乘子法）将 QP 问题分解为多个简单
 
 **测量方法**：
 ```bash
-./build/gimbal_response_test  # 测量云台阶跃响应
+./build/tests/gimbal_response_test  # 测量云台阶跃响应
 ```
 
 | 云台类型 | max_yaw_acc | max_pitch_acc |

@@ -163,7 +163,7 @@ Hub 发现目录（周期 beacon，约 3 个周期无则剔除）。由 `RobotFl
 
 ### TF Viz
 
-- 公共 fleet 路由；`config.spawn: true` 时可本机拉起 `build/tf_pub_test`
+- 公共 fleet 路由；`config.spawn: true` 时可本机拉起 `build/tests/tf_pub_test`
 - 配置路径：`config.config_path` → env `RDBG_TF_PUB_CONFIG` → `configs/tf_pub.yaml`
 - `status` 可含 `spawned`、配置路径等
 

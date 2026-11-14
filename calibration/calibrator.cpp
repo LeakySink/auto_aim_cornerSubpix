@@ -474,7 +474,7 @@ bool Calibrator::write_yaml(const std::string & path) const
 
   std::ostringstream out;
   out << "# 标定结果（SAVE 写回；棋盘格参数也在此修改）\n";
-  out << "# 仅内参：camera_matrix / distort_coeffs；车上直接 ./build/calibrate\n";
+  out << "# 仅内参：camera_matrix / distort_coeffs；车上直接 ./build/calibration/calibrate\n";
   out << "# 用法见 calibration.md\n\n";
   out << "pattern_cols: " << pattern_size_.width << "\n";
   out << "pattern_rows: " << pattern_size_.height << "\n";

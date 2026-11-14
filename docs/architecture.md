@@ -127,12 +127,12 @@ cmake -B build
 make -C build/ -j$(nproc)
 
 # 运行主程序
-./build/standard_mpc
+./build/src/standard_mpc
 
 # 调试工具
-./build/planner_test_offline   # 离线测试规划器（不需要硬件）
-./build/gimbal_response_test   # 测量云台阶跃响应
-./build/auto_aim_test          # 集成测试（录制视频）
+./build/tests/planner_test_offline   # 离线测试规划器（不需要硬件）
+./build/tests/gimbal_response_test   # 测量云台阶跃响应
+./build/tests/auto_aim_test          # 集成测试（录制视频）
 ```
 
 ---
@@ -162,7 +162,7 @@ configs/
 `cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 14 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
 
 ```bash
-./build/<名字> <yaml路径>     # 位置参数 @config-path；--help 打印用法
+./build/src/<名字> <yaml路径>     # 位置参数 @config-path；--help 打印用法
 ```
 
 | 可执行文件 | 默认配置 | 硬件来源 | 检测 | 控制 | 说明 |

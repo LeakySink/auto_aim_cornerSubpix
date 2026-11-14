@@ -1,7 +1,7 @@
 // 本地联调 Watch 3D Markers：用 RemoteLogger 发 plot.markers，不依赖实车/相机。
 // 本文件默认不纳入 git（见 .gitignore）；构建：cmake --build build --target markers_pub_test
 //
-//   ./build/markers_pub_test
+//   ./build/tests/markers_pub_test
 //   Host 开 Watch，选车辆 markers_pub，应自动出现 3D 格。
 
 #include <chrono>

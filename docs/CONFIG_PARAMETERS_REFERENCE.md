@@ -366,7 +366,7 @@ low_speed_delay_time: 0.04   # s, 低速模式延迟
 **调参方法**:
 ```bash
 # 使用PlotJuggler测量实际延迟
-./build/standard_mpc | plotjuggler
+./build/src/standard_mpc | plotjuggler
 
 # 测量步骤：
 # 1. 观察目标检测时刻
@@ -470,7 +470,7 @@ max_pitch_acc: 100 # rad/s², Pitch加速度限制
 
 **测试方法**:
 ```bash
-./build/gimbal_response_test
+./build/tests/gimbal_response_test
 
 # 观察实际最大加速度
 # 设置为实测值的90%
@@ -719,7 +719,7 @@ camera_matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
 fx, fy: 焦距(像素)
 cx, cy: 主点坐标
 ```
-**标定工具**: `./build/calibrate_camera`
+**标定工具**: `./build/calibration/calibrate`
 
 #### distort_coeffs
 ```yaml
@@ -737,7 +737,7 @@ R_camera2gimbal: [r11, r12, r13, r21, r22, r23, r31, r32, r33]
 **作用**: 相机到云台的旋转矩阵
 **格式**: 3x3旋转矩阵，行优先
 **代码位置**: `tasks/auto_aim/aimer.cpp`
-**标定工具**: `./build/calibrate_handeye`
+**标定工具**: `./build/calibration/calibrate`
 
 #### t_camera2gimbal
 ```yaml
@@ -895,8 +895,7 @@ cp configs/standard3.yaml configs/my_robot.yaml
 # - auto_fire
 
 # 3. 运行标定
-./build/calibrate_camera
-./build/calibrate_handeye
+./build/calibration/calibrate
 
 # 4. 更新标定参数
 # - camera_matrix
@@ -926,13 +925,13 @@ cp configs/standard3.yaml configs/my_robot.yaml
 
 ```bash
 # 1. 静态测试
-./build/auto_aim_test
+./build/tests/auto_aim_test
 
 # 2. 动态测试
-./build/standard_mpc
+./build/src/standard_mpc
 
 # 3. 压力测试
-./build/auto_aim_test --stress --duration=60
+./build/tests/auto_aim_test --stress --duration=60
 ```
 
 ---

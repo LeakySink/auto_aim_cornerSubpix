@@ -52,10 +52,10 @@ python tests/eval/make_fake_rlog.py /tmp/rlog --mode both
 ## Stage 2：重跑检测（`rlog_replay`，C++）
 
 上面的工具只分析**已记录的量**，不重跑检测。要回答"新模型比旧模型检出率高多少"，
-需要用 `tests/eval/rlog_replay.cpp`（C++，CMake 自动编成 `./build/rlog_replay`）：
+需要用 `tests/eval/rlog_replay.cpp`（C++，CMake 自动编成 `./build/tests/rlog_replay`）：
 
 ```bash
-./build/rlog_replay configs/sentry.yaml eval_data/run_xxx.rlog --out replay.csv
+./build/tests/rlog_replay configs/sentry.yaml eval_data/run_xxx.rlog --out replay.csv
 #   可选：--topic raw（默认） --limit 300 --tracker --min-conf 0.3 --quiet
 ```
 
@@ -79,7 +79,7 @@ python tests/eval/make_fake_rlog.py /tmp/rlog --mode both
 ## 全分辨率采集：`src/eval_record.cpp`
 
 ```bash
-./build/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]
+./build/src/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]
                     [--quality Q] [--no-detect] [--quiet]
 ```
 
@@ -87,8 +87,8 @@ python tests/eval/make_fake_rlog.py /tmp/rlog --mode both
 因此同一份数据可以同时喂给三套工具：
 
 ```bash
-./build/eval_record configs/sentry.yaml --out eval_data/spin_01.rlog --every 2 --max-frames 3000
-./build/rlog_replay configs/sentry.yaml eval_data/spin_01.rlog --out spin_01.csv  # 重跑检测
+./build/src/eval_record configs/sentry.yaml --out eval_data/spin_01.rlog --every 2 --max-frames 3000
+./build/tests/rlog_replay configs/sentry.yaml eval_data/spin_01.rlog --out spin_01.csv  # 重跑检测
 python -m rdbg metrics eval_data/spin_01.rlog                                     # 逐帧指标
 python -m rdbg replay  eval_data/spin_01.rlog                                     # host 可视化回放
 ```

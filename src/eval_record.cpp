@@ -3,12 +3,12 @@
 // 为什么需要它：.rlog 里的图片会被 remote_logger.img_width 压到 640 宽，无法用来
 // 重跑检测（等效尺度会变），也不适合 1 月重训 YOLO。本工具**直接写标准 RLG2 .rlog**，
 // 但图片按**全分辨率**编码，因此：
-//   * ./build/rlog_replay <config.yaml> <file.rlog>   离线重跑检测做模型对比
+//   * ./build/tests/rlog_replay <config.yaml> <file.rlog>   离线重跑检测做模型对比
 //   * python -m rdbg metrics <file.rlog>              逐帧指标（同一套字段名）
 //   * python -m rdbg replay  <file.rlog>              host 端可视化回放
 //
 // 用法：
-//   ./build/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]
+//   ./build/src/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]
 //                        [--quality Q] [--no-detect] [--quiet]
 //   默认：out=./eval_data/run_<时间戳>.rlog, every=2（每 2 帧存 1 张）, max-frames=3000,
 //         quality=90（JPEG）, 开检测（用于附带每帧检出信息）
@@ -93,7 +93,7 @@ int main(int argc, char ** argv)
   }
   if (config_path.empty()) {
     std::printf(
-      "用法：./build/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]\n"
+      "用法：./build/src/eval_record <config.yaml> [--out <file.rlog>] [--every K] [--max-frames N]\n"
       "                      [--quality Q] [--no-detect] [--quiet]\n");
     return 2;
   }
@@ -192,7 +192,7 @@ int main(int argc, char ** argv)
   std::printf("\n[eval_record] 完成：处理 %d 帧，存图 %d 张（有检出 %d 帧）-> %s\n", frame, saved,
               with_det, out_path.c_str());
   std::printf("[eval_record] 后续：\n");
-  std::printf("  ./build/replay %s %s            # 重跑检测\n", config_path.c_str(), out_path.c_str());
+  std::printf("  ./build/tests/rlog_replay %s %s            # 重跑检测\n", config_path.c_str(), out_path.c_str());
   std::printf("  python -m rdbg replay %s   # host 可视化回放\n", out_path.c_str());
   return 0;
 }

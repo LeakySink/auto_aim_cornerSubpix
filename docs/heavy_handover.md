@@ -84,7 +84,9 @@ cmake -B build
 make -j$(nproc)
 ```
 
-产物在 `build/`。**本机（Windows）没有 OpenCV/Eigen/yaml-cpp，无法编译**——
+产物按源码目录分放：`build/src/`（`src/*.cpp`）、`build/tests/`（`tests/**/*.cpp`）、
+`build/calibration/`（`calibration/*.cpp`）——仓库没有设置 `RUNTIME_OUTPUT_DIRECTORY`，
+这是 CMake 的默认行为。**本机（Windows）没有 OpenCV/Eigen/yaml-cpp，无法编译**——
 C++ 改动只能在 Linux 机器上验证；Windows 侧只能做静态检查。
 
 ### 2.2 与本任务相关的可执行文件
@@ -443,9 +445,9 @@ Linux 机器上 `cmake -B build && make -j` 即可。**Windows 侧无法编译**
 2. [ ] 读 `docs/heavy_aim_baseline.md`（尤其 §0 误差预算、§2 模块基线）
 3. [ ] 读 `docs/heavy_robot_backend.md` §1–§2（知道要改哪几个文件）
 4. [ ] `git checkout feat/heavy-aim && git pull`；Linux 机器上 `cmake -B build && make -j`
-5. [ ] 跑一遍现有测试：`./build/ballistics_poly_check assets/ballistic/small.csv`（应全绿）
+5. [ ] 跑一遍现有测试：`./build/tests/ballistics_poly_check assets/ballistic/small.csv`（应全绿）
 6. [ ] 跑一遍评测台自测：`python tests/eval/check_metrics.py`
-7. [ ] 找一辆车（步兵也行），跑 `./build/auto_aim_debug_mpc configs/sentry.yaml`，
+7. [ ] 找一辆车（步兵也行），跑 `./build/src/auto_aim_debug_mpc configs/sentry.yaml`，
        确认能看到框、能打静止靶
 8. [ ] 开 M1 的第一件事：补 `big.csv` 的 V=16.5 档
 

@@ -108,14 +108,11 @@ pitch 在各层之间的符号约定不同，容易混淆：
 相机与云台之间的固定变换通过手眼标定获得：
 
 ```bash
-# 采集标定图像
-./build/capture
+# 车上启动标定（相机内参 + 手眼在同一程序内，网页端操作）
+./build/calibration/calibrate
 
-# 计算相机内参
-./build/calibrate_camera
-
-# 计算手眼变换
-./build/calibrate_handeye
+# 无相机联调
+./build/calibration/calibrate --test
 ```
 
 结果存储在 `configs/calibration.yaml` 的 `R_cam2gimbal` 字段。

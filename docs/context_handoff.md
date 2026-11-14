@@ -281,8 +281,8 @@ cmake --build build -j
 ### 第 2 步 · 离线回放对照（同一段 `.rlog`）
 
 ```bash
-./build/rlog_replay <config> <record.rlog>    # 重跑检测
-./build/rdbg metrics <record.rlog>
+./build/tests/rlog_replay <config> <record.rlog>   # 重跑检测（tests/eval → build/tests）
+(cd host && python -m rdbg metrics <record.rlog>)   # 逐帧质量报告（Python 模块，不在 build/ 下）
 ```
 
 对比 `60f03de` 前后：NIS 越限率、`armor_id` 推进次数、`w` 过零次数。

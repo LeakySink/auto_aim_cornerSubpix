@@ -46,9 +46,9 @@ host/
   HOST.md / DESIGN.md / PROTOCOL.md
 ```
 
-标定：车上 `./build/calibrate`（beacon 带 `app=calibrate`），门户首页「车辆」里点对应项打开标定页。步骤见 `calibration/calibration.md`。
+标定：车上 `./build/calibration/calibrate`（beacon 带 `app=calibrate`），门户首页「车辆」里点对应项打开标定页。步骤见 `calibration/calibration.md`。
 
-TF Viz：首页「功能 → TF Viz」在无 `app=tfviz` 发布者时，本机拉起 `build/tf_pub_test`（默认 `configs/tf_pub.yaml`；可用环境变量 `RDBG_TF_PUB_CONFIG` 覆盖；缺文件则拉起失败）。也可手动 `./build/tf_pub_test configs/xxx.yaml`，车辆列表会出现该发布者。
+TF Viz：首页「功能 → TF Viz」在无 `app=tfviz` 发布者时，本机拉起 `build/tests/tf_pub_test`（默认 `configs/tf_pub.yaml`；可用环境变量 `RDBG_TF_PUB_CONFIG` 覆盖；缺文件则拉起失败）。也可手动 `./build/tests/tf_pub_test configs/xxx.yaml`，车辆列表会出现该发布者。
 
 ## 参数（start.sh / serve）
 
@@ -67,7 +67,7 @@ TF Viz：首页「功能 → TF Viz」在无 `app=tfviz` 发布者时，本机�
 - **Watch 3D**：工作台面板可选「3D」。车端 `plot` 带合法 `markers`（`marker_v1`）时会**自动插入**一格 3D。侧栏可按 `ns` 开关图层（如关掉 `kalman.vel`）、选择 `display_frame`（默认 `world`）。与 TF Viz 分工：Watch = 通用 Marker；TF Viz = 相机/枪管外参专用页。协议见 `PROTOCOL.md` / `../docs/remote_logger.md`。
 - **Watch 录制**：工具栏「录制」把当前 SSE 流异步写入本机 `.rlog`（RLG2）；「停止录制」后可一键 **打开 Replay**。与车上 `enable_local` 的 `.rlog` 独立；不增加车端负载。
 - **Watch 远程画质**：下拉 **画质优先 / 均衡 / 流畅优先** 通过 `img_subscribe` 下发 `max_width` 等上限；弱网时车上还会自适应 `img_tx_level`（0–3）。标题栏显示 **cam / loop / tx / L***（来自车上诊断 plot）。本地回放/Dump 仍读 yaml 画质的那路 `.rlog`。
-- **TF Viz**：`tf_pub_test` beacon `app=tfviz`。首页「功能」打开时若网上无发布者，Hub 本机 spawn `build/tf_pub_test`，配置解析顺序：`config_path` → `RDBG_TF_PUB_CONFIG` → **`configs/tf_pub.yaml`**；文件不存在则拉起失败。侧栏展示 config 路径名与外参（`plot.tf`）。手工联调：`./build/tf_pub_test configs/xxx.yaml`。
+- **TF Viz**：`tf_pub_test` beacon `app=tfviz`。首页「功能」打开时若网上无发布者，Hub 本机 spawn `build/tests/tf_pub_test`，配置解析顺序：`config_path` → `RDBG_TF_PUB_CONFIG` → **`configs/tf_pub.yaml`**；文件不存在则拉起失败。侧栏展示 config 路径名与外参（`plot.tf`）。手工联调：`./build/tests/tf_pub_test configs/xxx.yaml`。
 - Replay：在页面输入 `.rlog` 绝对/相对路径后点「加载」。
 - Dump：导出目录含 `log.txt` / `plot.txt` / `images.mp4`。
-- 标定：车上 `./build/calibrate`（beacon `app=calibrate`），首页车辆列表点进去即可。
+- 标定：车上 `./build/calibration/calibrate`（beacon `app=calibrate`），首页车辆列表点进去即可。

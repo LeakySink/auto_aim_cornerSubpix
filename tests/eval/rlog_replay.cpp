@@ -4,7 +4,7 @@
 //       ② 把现场问题（丢帧、抖动、关联锁死）离线复现，不用赌现场。
 //
 // 用法：
-//   ./build/rlog_replay <config.yaml> <run.rlog> [options]
+//   ./build/tests/rlog_replay <config.yaml> <run.rlog> [options]
 //     --out <csv>      输出 CSV（默认 replay.csv）
 //     --topic <name>   只吃该图片话题（默认 raw，即未画标注的原始帧）
 //     --limit <N>      只处理前 N 帧（快速迭代）

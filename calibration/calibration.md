@@ -39,7 +39,7 @@ cmake --build build --target calibrate -j$(nproc)
 **车上（接好相机）：**
 
 ```bash
-./build/calibrate
+./build/calibration/calibrate
 ```
 
 成功时日志里应能看到类似：
@@ -60,7 +60,7 @@ cmake --build build --target calibrate -j$(nproc)
 无相机联调 host / 网页时（车上）：
 
 ```bash
-./build/calibrate --test
+./build/calibration/calibrate --test
 ```
 
 ---
@@ -123,7 +123,7 @@ host 下发 calibrate + 本机时间
 
 ```bash
 cmake --build build --target calibrate_test -j$(nproc)
-./build/calibrate_test
+./build/tests/calibrate_test
 ```
 
 ---

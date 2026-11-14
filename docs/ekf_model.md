@@ -198,8 +198,8 @@ $$\text{NIS} = \tilde{\mathbf{y}}_k^T \mathbf{S}_k^{-1} \tilde{\mathbf{y}}_k \si
 ### 数据采集
 
 ```bash
-./build/auto_aim_debug_mpc  # 实时查看 EKF 状态
-./build/auto_aim_test       # 录制数据用于离线分析
+./build/src/auto_aim_debug_mpc  # 实时查看 EKF 状态
+./build/tests/auto_aim_test       # 录制数据用于离线分析
 ```
 
 关注指标：NIS、残差（residual_yaw/pitch/distance）、收敛帧数、发散率。
