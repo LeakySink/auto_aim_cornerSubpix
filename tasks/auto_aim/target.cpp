@@ -230,7 +230,7 @@ void Target::update_ypda(const Armor & armor, int id)
   // 做法：用 view_penalty = 1/max(|cos(delta_angle)|, floor) 放大对应方差。
   //   delta_angle 是"板法向"与"从云台指向板的方向"之差：
   //   |cos|=1 正视（最可信，penalty=1）；|cos|->0 侧视（最多放大 1/floor 倍）。
-  //   上限取 1/0.25=4 倍：再斜的板本来就该被几何门控/校验器丢掉，
+  //   上限取 1/0.5=2 倍：再斜的板本来就该被几何门控/校验器丢掉，
   //   这里只做"降权"，不做"丢弃"（丢弃交给 tracker 的空间门控）。
   const double cos_view = std::abs(std::cos(delta_angle));
   // floor=0.5（最大降权 2 倍）而不是 0.25：
