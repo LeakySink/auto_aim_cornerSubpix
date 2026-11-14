@@ -16,7 +16,22 @@ from .fleet_bound import FleetBoundFeature
 # host/rdbg/features/tfviz.py → repo root (features → rdbg → host → repo)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "tf_pub.yaml"
-BINARY = REPO_ROOT / "build" / "tf_pub_test"
+# 仓库没有设置 RUNTIME_OUTPUT_DIRECTORY，CMake 默认把 tests/** 的产物放进
+# build/tests/；早期扁平布局是在 build/ 下。两种都认，避免 spawn 永远失败。
+_BINARY_CANDIDATES = (
+    REPO_ROOT / "build" / "tests" / "tf_pub_test",
+    REPO_ROOT / "build" / "tf_pub_test",
+)
+
+
+def tf_pub_binary() -> Path:
+    for cand in _BINARY_CANDIDATES:
+        if cand.is_file():
+            return cand
+    return _BINARY_CANDIDATES[0]
+
+
+BINARY = tf_pub_binary()
 
 
 def resolve_tf_pub_config(config: dict) -> Path:
