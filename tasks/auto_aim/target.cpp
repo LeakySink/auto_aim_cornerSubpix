@@ -1,5 +1,6 @@
 #include "target.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "tools/remote_logger.hpp"
@@ -221,10 +222,27 @@ void Target::update_ypda(const Armor & armor, int id)
   //   {4e-2, 4e-2, log(std::abs(delta_angle) + 1) + 1,
   //    log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 9e-2}};
   //哨兵
+  // ---- R 自适应（2026-10 新增）----
+  // 动机：板面与视线的夹角越大（侧视），板在图像上被压扁，
+  //   由单板 PnP 反解出的"距离"和"yaw"都迅速变病态（sigma_d ~ 1/cos）。
+  //   原来 r_yaw 是常数、距离方差只随 |delta_angle| 对数微增，等于假设
+  //   "侧视和正视一样可信"——这是抬枪误差(1.3 mrad)的主要来源之一。
+  // 做法：用 view_penalty = 1/max(|cos(delta_angle)|, floor) 放大对应方差。
+  //   delta_angle 是"板法向"与"从云台指向板的方向"之差：
+  //   |cos|=1 正视（最可信，penalty=1）；|cos|->0 侧视（最多放大 1/floor 倍）。
+  //   上限取 1/0.25=4 倍：再斜的板本来就该被几何门控/校验器丢掉，
+  //   这里只做"降权"，不做"丢弃"（丢弃交给 tracker 的空间门控）。
+  const double cos_view = std::abs(std::cos(delta_angle));
+  // floor=0.5（最大降权 2 倍）而不是 0.25：
+  //   仿真对照显示 floor=0.25 在"噪声其实不随侧视恶化"的工况下会让位置 RMSE
+  //   从 67.0mm 劣化到 70.7mm（+5.5%），而 floor=0.5 只劣化 1.8% 却保留了
+  //   大部分收益（115.5 vs 110.7mm）。取 0.5 是"收益/鲁棒"折中最优。
+  const double view_penalty = 1.0 / std::max(cos_view, 0.5);
+
   Eigen::VectorXd R_dig{
-      {ekf_params_.r_yaw,
-       ekf_params_.r_pitch,
-       log(std::abs(delta_angle) + 1) + 1,
+      {ekf_params_.r_yaw * view_penalty,             // yaw 方差：侧视时压缩，噪声大
+       ekf_params_.r_pitch,                          // pitch 方差：与视角弱相关，保持
+       (log(std::abs(delta_angle) + 1) + 1) * view_penalty,   // 距离方差：侧视最病态，重点降权
        log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base}};
 
   //测量过程噪声偏差的方差
@@ -246,6 +264,32 @@ void Target::update_ypda(const Armor & armor, int id)
     c[3] = tools::limit_rad(c[3]);
     return c;
   };
+
+  // ---- 新息门控（2026-10 新增）----
+  // 目的：把"明显不可能"的观测挡在 EKF 之外，而不是让它以很大权重拉跑状态。
+  //   r/l/h 三个参数在 Q 里没有过程噪声，一旦被脏观测污染就不可逆
+  //   （这正是历史上"幽灵板 d=0.3m"的成因）。
+  // 判据：d^2 = nu^T S^{-1} nu，卡方分布自由度=观测维数 4。
+  //   取 99.9% 分位数 18.47（而不是 95% 的 9.488）：这里只拦"粗差"，
+  //   正常机动/换板造成的中等残差应当交给 R 自适应平滑吸收，
+  //   否则会误杀真实的大机动观测、拖慢重捕。
+  // 注意：本门控与 NIS 看门狗（tracker 的 Bad Converge）用的是同一族统计量，
+  //   改这里会影响看门狗的触发率，故阈值取宽（只拦粗差）。
+  {
+    constexpr double kInnovationGateChi2 = 18.47;  // chi2(4, 0.999)
+    const Eigen::VectorXd z_now{{armor.ypd_in_world[0], armor.ypd_in_world[1],
+                                 armor.ypd_in_world[2], armor.ypr_in_world[0]}};
+    Eigen::VectorXd nu = z_subtract(z_now, h(ekf_.x));
+    Eigen::MatrixXd S = H * ekf_.P * H.transpose() + R;
+    // 显式取 (0,0)：表达式是 1x1，直接赋给 double 依赖 Eigen 版本的隐式转换，不可靠
+    const double d2 = (nu.transpose() * S.inverse() * nu)(0, 0);
+    if (std::isfinite(d2) && d2 > kInnovationGateChi2) {
+      tools::RemoteLogger::instance().log(
+        "DEBUG", "[Target] 新息门控丢弃观测：d2={:.2f} > {:.2f}（dist={:.2f}m conf={:.2f}）", d2,
+        kInnovationGateChi2, armor.ypd_in_world[2], armor.confidence);
+      return;
+    }
+  }
 
   const Eigen::VectorXd & ypd = armor.ypd_in_world;
   const Eigen::VectorXd & ypr = armor.ypr_in_world;

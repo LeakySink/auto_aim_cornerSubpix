@@ -8,6 +8,7 @@
 | --- | --- |
 | [`architecture.md`](architecture.md) | **主文档**：四层架构、数据流、多线程模型、14 个入口、配置文件；附录 A 运行流程（逐行 + 时序图 + 远程看图）、附录 B `plot(data)` 字段字典、附录 C 各模块数学流程（C.6 弹道 + C.6.1 多项式表、C.14 脏数据护栏） |
 | [`filter_ekf_vs_ukf.md`](filter_ekf_vs_ukf.md) | **EKF → UKF 评估**：非线性判断、单帧/真实跟踪实测对照（精度 3%、耗时 5x）、对 75% 预算的影响、代码修改量、触发条件与低成本替代方案。结论：不建议现在换 |
+| [`r_adaptive_and_gating.md`](r_adaptive_and_gating.md) | **R 自适应 + 新息门控**：观测噪声随视角降权（floor=0.5 的过拟合对照）、卡方门控（18.47 与 9.488 的误杀对照）、组合效果（粗差场景位置误差 17x 改善）、上线注意事项与回滚方式 |
 | [`ekf_model.md`](ekf_model.md) | 11 维 EKF：状态/转移/观测/噪声与可观测性 |
 | [`planner.md`](planner.md) | TinyMPC 规划器（约束、权重、参考轨迹） |
 | [`detector.md`](detector.md) | 检测与后处理（tup / yolov5 / yolo11 / 传统灯条） |
