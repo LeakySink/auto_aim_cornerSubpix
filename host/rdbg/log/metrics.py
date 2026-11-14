@@ -135,6 +135,9 @@ def analyze(rows):
         out["fps"] = 0.0
 
     # 1) 关联
+    #    id 的推进方向由 w 的符号决定（angle = x[6] + id·π/2，a 增则 id 减）：
+    #      w > 0 → 0→3→2→1；w < 0 → 0→1→2→3。
+    #    所以"正常"不是某个固定方向，而是**单调不折返**；折返才是关联抖动。
     ids = [int(v) for _, v in _series(rows, "armor_id")]
     if ids:
         pairs, back = {}, 0
@@ -144,10 +147,20 @@ def analyze(rows):
         for i in range(len(ids) - 2):
             if ids[i] == ids[i + 2] and ids[i] != ids[i + 1]:
                 back += 1
+        steps = [((b - a + 2) % 4) - 2 for a, b in zip(ids, ids[1:]) if a != b]
+        pos = sum(1 for s in steps if s > 0)
+        neg = sum(1 for s in steps if s < 0)
+        net = pos - neg
+        revs = abs(net) / 4.0
         out["armor_id"] = {
             "distinct": sorted(set(ids)),
             "transitions": {"%d->%d" % k: v for k, v in sorted(pairs.items())},
             "back_and_forth": back,
+            # +1 = id 递增（w<0），-1 = id 递减（w>0），0 = 无可判方向
+            "direction": (-1 if neg > pos else (1 if pos > neg else 0)),
+            "net_steps": net,
+            "revolutions": revs,
+            "back_per_rev": (back / revs) if revs > 0 else 0.0,
             "stuck_at": ids[0] if len(set(ids)) == 1 else None,
         }
 
@@ -201,16 +214,29 @@ def analyze(rows):
     if [v for _, v in _series(rows, "recent_nis_failures")]:
         out["recent_nis_failures"] = _stats([v for _, v in _series(rows, "recent_nis_failures")])
 
+    # 4.5) 帧率：判掉帧看这两个，别用"记录条数/时长"（图像与 plot 混算会翻倍）
+    for key in ("cam_fps", "loop_fps"):
+        vals = [v for _, v in _series(rows, key)]
+        if vals:
+            out[key] = _stats(vals)
+
     # 5) 观测 vs 估计距离
-    obs = [v for _, v in _series(rows, "obs_dist")]
-    if obs:
+    #    估计算的是"旋转中心到云台的水平距离" = hypot(x[0], x[2])，即 plot 里的
+    #    target_x / target_y。注意 target_z 是 x[4]（高度），拿它算水平距离是错的
+    #    （曾经写成 hypot(target_x, target_z)，凭空造出 1.8 m 的假不一致）。
+    #    另外必须**按行**配对：obs_dist 只在有观测的行上有值，不能用两个过滤后
+    #    列表的下标硬对，否则整体错位。
+    pairs = []
+    for r in rows:
+        o, ex, ey = r.get("obs_dist"), r.get("target_x"), r.get("target_y")
+        if _scalar(o) and _scalar(ex) and _scalar(ey):
+            pairs.append((o, math.hypot(ex, ey)))
+    if pairs:
+        obs = [p[0] for p in pairs]
         out["obs_dist"] = _stats(obs)
-        est = [math.hypot(r["target_x"], r["target_z"]) for r in rows
-               if _scalar(r.get("target_x")) and _scalar(r.get("target_z"))]
-        if est:
-            m = min(len(obs), len(est))
-            diff = [abs(obs[i] - est[i]) for i in range(m)]
-            out["obs_vs_est"] = {"mean_abs_diff_m": sum(diff) / m, "max_abs_diff_m": max(diff)}
+        diff = [abs(o - e) for o, e in pairs]
+        out["obs_vs_est"] = {"mean_abs_diff_m": sum(diff) / len(diff), "max_abs_diff_m": max(diff),
+                            "n": len(diff)}
         gaps, cur = [], 0
         for r in rows:
             if _scalar(r.get("obs_dist")):
@@ -249,8 +275,13 @@ def report(rows, imgs=None, title=None):
     L = []
     L.append("# .rlog 逐帧质量报告" + (("：" + title) if title else ""))
     L.append("")
-    L.append("- 帧数 **%d**，时长 **%.2f s**，平均 **%.1f fps**"
+    L.append("- 记录 **%d** 条（plot 与图像混算），时长 **%.2f s**，记录速率 **%.1f 条/秒**"
              % (m["frames"], m["duration_s"], m["fps"]))
+    cf, lf = m.get("cam_fps"), m.get("loop_fps")
+    if cf or lf:
+        L.append("- 相机帧率 `cam_fps` 均值 **%.1f**，主循环 `loop_fps` 均值 **%.1f**"
+                 "（判掉帧看这两行，不是上面的记录速率）"
+                 % (cf["mean"] if cf else float("nan"), lf["mean"] if lf else float("nan")))
     if imgs:
         span = (imgs[-1][0] - imgs[0][0]) / 1e9 if (len(imgs) >= 2 and imgs[0][0]) else 0.0
         L.append("- 图片记录 **%d** 张%s" % (len(imgs), ("，跨度 %.2f s" % span) if span > 0 else ""))
@@ -262,7 +293,10 @@ def report(rows, imgs=None, title=None):
         L.append("")
         L.append("- 出现的编号 `%s`" % a["distinct"])
         L.append("- 编号转移 `%s`" % (a["transitions"] or "无"))
-        L.append("- **来回跳（A→B→A）次数：%d**" % a["back_and_forth"])
+        dir_txt = {1: "id 递增（w<0）", -1: "id 递减（w>0）", 0: "无可判方向"}[a["direction"]]
+        L.append("- 主方向 **%s**，净推进 %d 步 ≈ **%.1f 圈**" % (dir_txt, a["net_steps"], a["revolutions"]))
+        L.append("- **折返（A→B→A）%d 次，每圈 %.2f 次**（单调自转应 ≈0；方向由 w 符号决定，"
+                 "不要按固定升序判）" % (a["back_and_forth"], a["back_per_rev"]))
         if a["stuck_at"] is not None:
             L.append("- [!] **全程锁在 %d 号板**：旋转时相位只能靠跳变去追 → 抖动" % a["stuck_at"])
         L.append("")
@@ -273,7 +307,8 @@ def report(rows, imgs=None, title=None):
         L.append("")
         L.append("- 解缠跨度 %.2f rad，**线性拟合斜率 ≈ %.2f rad/s**（估计转速）"
                  % (p["unwrapped_span_rad"], p["slope_rad_per_s"]))
-        L.append("- 去趋势残差 RMS **%.2f°**（越小越平滑；>5° 说明在抖）" % p["residual_rms_deg"])
+        L.append("- 去趋势残差 RMS **%.2f°**（判据看它与 PnP 单帧 yaw 噪声是否同量级；"
+                 "R[3] 的假设本就是 σ≈10°，所以 <20° 不足以单独判抖）" % p["residual_rms_deg"])
         L.append("")
 
     w = m.get("w")
@@ -303,8 +338,10 @@ def report(rows, imgs=None, title=None):
     if o:
         L.append("## 观测/估计一致性")
         L.append("")
-        L.append("- |obs_dist - |(target_x,target_z)||：mean %.3f m / max %.3f m"
-                 % (o["mean_abs_diff_m"], o["max_abs_diff_m"]))
+        L.append("- |obs_dist − |(target_x,target_y)||：mean %.3f m / max %.3f m（n=%d）"
+                 % (o["mean_abs_diff_m"], o["max_abs_diff_m"], o.get("n", 0)))
+        L.append("  - 观测是**板心**距离、估计是**旋转中心**距离，正常应 ≈ 装甲半径（0.2–0.3 m）；"
+                 "明显大于它才说明 PnP 与 EKF 不在同一量纲/同一目标")
         g = m.get("gaps")
         if g:
             L.append("- 观测中断 %d 段，最长 %d 帧（均 %.1f）"
