@@ -7,6 +7,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [`architecture.md`](architecture.md) | **主文档**：四层架构、数据流、多线程模型、14 个入口、配置文件；附录 A 运行流程（逐行 + 时序图 + 远程看图）、附录 B `plot(data)` 字段字典、附录 C 各模块数学流程（C.6 弹道 + C.6.1 多项式表、C.14 脏数据护栏） |
+| [`filter_ekf_vs_ukf.md`](filter_ekf_vs_ukf.md) | **EKF → UKF 评估**：非线性判断、单帧/真实跟踪实测对照（精度 3%、耗时 5x）、对 75% 预算的影响、代码修改量、触发条件与低成本替代方案。结论：不建议现在换 |
 | [`ekf_model.md`](ekf_model.md) | 11 维 EKF：状态/转移/观测/噪声与可观测性 |
 | [`planner.md`](planner.md) | TinyMPC 规划器（约束、权重、参考轨迹） |
 | [`detector.md`](detector.md) | 检测与后处理（tup / yolov5 / yolo11 / 传统灯条） |
@@ -34,6 +35,6 @@
 - `OPTIMIZATION_HANDOVER.md`、`REVIEW_OPTIMIZATION_20261018.md`（2026-10-11 / 10-18）：7 项优化改造及其逐条复核。结论已并入 [`architecture.md`](architecture.md) 的 C.5（NIS 卡方阈值 9.488/19.675、LDLT 求逆等价性）与 [`verification/chi2_threshold/`](../verification/chi2_threshold)；其中「往 yaml 加 `drag_coefficient_up/down/boundary`」一项**已作废**——三键与"按高度二选一"的链路于 2026-10 移除，弹道改由 `ballistics-main` 拟合表承担。
 - 根目录原有的 `SEGFAULT_*.md` / `RULE_2027_IMPACT.md` / `REMOTE_LOGGER.md`：按上表归档到 `history/` 或本目录。
 
-## 待定（未随代码更新，使用前请自行核对）
+## 归档
 
-- `2026技术方案_*`（创新点详解 / 完整版 / 算法篇 / 生成报告 / 图表清单 / 技术路线图）：参赛与申报材料，写作于 2026-10，**之后弹道、检测、护栏均有较大改动**，与当前实现可能不一致；保留仅作存档。
+- [`archive/`](archive/) —— 2026 赛季参赛材料（只做历史留存，不再维护；说明见 `archive/README.md`）
