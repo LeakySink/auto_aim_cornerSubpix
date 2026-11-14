@@ -219,6 +219,9 @@ do_bundle() {
   stem="$(basename "$RLOG" .rlog)"
   OUT="${OUT:-$EVID/proof_$stem}"
   mkdir -p "$OUT"/{raw,configs,metrics,replay,logs}
+  # 必须转成绝对路径：下面要在 `cd "$ROOT/host"` 的子 shell 里往外写，
+  # 相对路径会解析到 host/ 下面（曾导致 metrics.md 写不进、打包只剩 5 个文件）。
+  OUT="$(cd "$OUT" && pwd)"
 
   say "打包 → ${OUT#$ROOT/}"
   local rlog_abs
@@ -240,6 +243,7 @@ do_bundle() {
 
   ( cd "$ROOT/host" && "$PY" -m rdbg metrics "$rlog_abs" --derived "$OUT/metrics/derived.csv" \
       > "$OUT/metrics/metrics.md" ) || warn "metrics 失败（不影响其余产物）"
+  [ -s "$OUT/metrics/metrics.md" ] || die "metrics 报告为空：先用一条 rlog 手跑 'cd host && python -m rdbg metrics <rlog>' 看真实报错"
   ( cd "$ROOT/host" && "$PY" -m rdbg dump "$rlog_abs" -o "$OUT/replay/dump" --fps 10 >/dev/null ) \
       || warn "dump 失败（不影响指标结论）"
 
