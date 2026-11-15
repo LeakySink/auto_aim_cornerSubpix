@@ -5,7 +5,7 @@
 本项目是一套用于 RoboMaster 竞赛的**自瞄系统**，运行在机器人车载 NUC 上，通过视觉识别敌方装甲板并控制云台自动瞄准射击。
 
 与传统 ROS 方案不同，本项目采用**模块化视觉框架**：
-- 单一可执行文件按云台模式信号路由到不同任务模块（自瞄/打符/全景感知）
+- 单一可执行文件按云台模式信号路由到不同任务模块（自瞄/全景感知）
 - 不依赖 ROS 消息总线，延迟更低、部署更简单
 - ROS2 仅用于哨兵导航通信，核心自瞄功能不需要
 
@@ -16,11 +16,11 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │  src/  应用层                                        │
-│  standard_mpc.cpp / sentry.cpp / uav.cpp            │
+│  standard_mpc.cpp / sentry.cpp / eval_record.cpp    │
 │  每种机器人一个可执行文件，负责模块编排和模式路由      │
 ├─────────────────────────────────────────────────────┤
 │  tasks/  任务层                                      │
-│  auto_aim/  打符/  全景感知/                         │
+│  auto_aim/  全景感知/                                │
 │  具体功能实现：检测、跟踪、规划、控制                  │
 ├─────────────────────────────────────────────────────┤
 │  tools/  工具层                                      │
@@ -81,9 +81,11 @@
   }
 ```
 
-### 多线程模式（mt_auto_aim_debug）
+### 多线程检测（`tasks/auto_aim/multithread/`）
 
-检测在独立线程池中运行，通过 `thread_safe_queue` 与主线程通信，进一步降低延迟。
+检测可放进独立线程，通过 `ThreadSafeQueue` 与主线程通信以降低延迟；该实现仍保留
+（`sentry_multithread` 用 `track(detection_queue, ...)` 重载），但**多线程步兵入口
+`mt_standard` / `mt_auto_aim_debug` 已于 2026-11 删除**。
 
 ---
 
@@ -93,8 +95,9 @@
 |---|---|---|
 | `standard_mpc` | 步兵 | MPC 轨迹规划，主力版本 |
 | `auto_aim_debug_mpc` | 步兵（调试） | 带 PlotJuggler 可视化 |
-| `mt_auto_aim_debug` | 步兵（多线程） | 检测线程分离 |
 | `sentry` | 哨兵 | 需要 ROS2，含导航通信 |
+
+> 重装入尚无专属入口，直接用 `standard_mpc` + `configs/heavy.yaml`（待建）。
 
 ---
 
@@ -148,7 +151,7 @@ configs/
   calibration.yaml    # 相机内参 + 手眼标定结果
 ```
 
-详细参数说明见 [ekf_model.md](ekf_model.md) 和 [planner.md](planner.md)。
+详细参数说明见 [ekf_model.md](archive/ekf_model.md) 和 [planner.md](archive/planner.md)。
 
 ---
 
@@ -157,9 +160,9 @@ configs/
 > 本附录由逐文件核对代码写成（2026-10-21），每一条都能在源码里对上；行号对应当时的工作区版本。
 > 建议阅读顺序：A.1 选一条链路 → A.2 看主循环 → A.3 对照时序图 → A.4 记住三个坑。
 
-## A.1 14 个可执行文件（`src/*.cpp`，名字即文件名）
+## A.1 10 个可执行文件（`src/*.cpp`，名字即文件名）
 
-`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 14 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
+`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 10 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
 
 ```bash
 ./build/src/<名字> <yaml路径>     # 位置参数 @config-path；--help 打印用法
@@ -168,15 +171,14 @@ configs/
 | 可执行文件 | 默认配置 | 硬件来源 | 检测 | 控制 | 说明 |
 |---|---|---|---|---|---|
 | `auto_aim_debug_mpc` | `configs/sentry.yaml` | `Gimbal` + `Camera` | `YOLO(config,false)` | `Planner`（MPC） | **全链路可视化**：多一个 `plan_thread` 持续 `plot(data)` |
-| `standard_mpc` | 无默认，**必须传** | `Gimbal` + `Camera` | `YOLO(config,true)`（检测在主循环里） | `Planner`（MPC）+ `BuffAimer` | 步兵实战版；另起一个控制线程（`atomic<GimbalMode> mode` 路由：自瞄/打符）；默认开 detection 窗；含打符模块 `auto_buff::*` |
-| `mt_standard` | 无默认，**必须传** | `CBoard`(CAN) + `Camera` | `MultiThreadDetector` | `Aimer` + `CommandGener` | 多线程版；弹速/CAN 真值走 `CBoard` |
-| `mt_auto_aim_debug` | `configs/sentry.yaml` | `CBoard` + `Camera` | `MultiThreadDetector(config,true)` | `Aimer` + `CommandGener` | 调试版；`data["bullet_speed"]` 来自 CAN |
+| `standard_mpc` | 无默认，**必须传** | `Gimbal` + `Camera` | `YOLO(config,true)`（检测在主循环里） | `Planner`（MPC） | 步兵实战版；另起一个控制线程；默认开 detection 窗 |
 | `standard` | `configs/standard3.yaml` | `CBoard` + `Camera` | `YOLO` | `Aimer` + `CommandGener` | 单线程步兵版 |
 | `sentry` / `sentry_bp` / `sentry_debug` / `sentry_multithread` | `configs/sentry.yaml` | `CBoard` + `Camera` + 后视 `Camera("configs/camera.yaml")` | `YOLO` | `Aimer` + `Decider`（全向感知） | 名字带 `sentry*` 的**只在 `USE_ROS2=ON` 时生成**；`sentry_multithread` 用 `track(detection_queue, ...)` 重载 |
-| `uav` / `uav_debug` | `configs/uav.yaml` | `CBoard` + `Camera` | `YOLO` | `Aimer` | 空中机器人；`uav_debug`/`standard_mpc` 的 `YOLO` 默认 `debug=true` |
-| `auto_buff_debug` / `auto_buff_debug_mpc` | 无默认，**必须传** | `Camera`（MPC 版还有 `Gimbal`） | 打符专用检测 | `BuffAimer` | 打能量机关，与自瞄是两套 tasks |
 | `eval_record` | 无默认，**必须传** | `Camera` + `Gimbal` | 可选 `YOLO` | — | **离线评估/重训数据采集**：按全分辨率写标准 RLG2 `.rlog`（`--every` 抽帧、`--no-detect` 纯采图），产出可直接喂给 `tests/eval/rlog_replay`、`python -m rdbg metrics`、`python -m rdbg replay` |
 
+> 2026-11 起**打符（能量机关）子系统已整体移除**，`uav` / `uav_debug` / `mt_standard` /
+> `mt_auto_aim_debug` 四个入口一并删除，仓库只剩上述 10 个（含 3 个 `sentry*` 条件生成）。
+>
 > 结论：想理解"自瞄怎么跑"，只读 **`auto_aim_debug_mpc`**（196 行、信息最全）即可；`standard_mpc` 就是"去掉 plot + 检测换多线程 + 加模式路由"的它。
 
 ## A.2 `auto_aim_debug_mpc` 主循环逐段（行号对照）
@@ -271,8 +273,9 @@ sequenceDiagram
 ## A.4 三个最容易踩的坑（都已核到行）
 
 1. **弹速在 MPC 链路上恒为兜底值 22 m/s。**
-   `Gimbal::state()` 的 `yaw_vel / pitch_vel / bullet_speed / bullet_count` 被**显式置 0**（`io/gimbal/gimbal.cpp:212-217`，新串口协议不下发这些字段），而 `auto_aim_debug_mpc.cpp:68` 和 `standard_mpc.cpp:88` 都是把 `gs.bullet_speed` 直接喂给 `planner.plan()`；`planner.cpp:46` 有 `if (bullet_speed < 10 || bullet_speed > 25) bullet_speed = 22;` 兜底。
-   → 想用真弹速，得走 `io::CBoard`（CAN）的那几个入口（`standard` / `mt_*` / `sentry*` / `uav*`）。
+   `Gimbal::state()` 的 `yaw_vel / pitch_vel / bullet_speed / bullet_count` 被**显式置 0**（`io/gimbal/gimbal.cpp`，新串口协议不下发这些字段），而 `auto_aim_debug_mpc.cpp` 和 `standard_mpc.cpp` 都是把 `gs.bullet_speed` 直接喂给 `planner.plan()`；`planner.cpp` 有兜底逻辑，阈值与兜底值由 yaml 的 `bullet_speed_min/max/default` 控制（缺键时 10/25/22）。
+   → 想用真弹速，得走 `io::CBoard`（CAN）的那几个入口（`standard` / `sentry*`）。
+   → 重装（42mm）务必在 yaml 写 `bullet_speed_default: 16.5`，否则兜底会用 17mm 时代的值。
 2. **pitch 的符号是"反"的，而且只反了一半。**
    `planner.cpp:110` `plan.pitch = -plan.pitch;`（MPC 解出的抬头为正 → 下发给协议时取负），但紧随其后的 `plan.pitch_vel` / `plan.pitch_acc`（`:111-112`）**没有取负**；这也正是主线程用 `pitch_error = plan.pitch0 + gimbal.pitch`（加号而不是减号）的原因（`auto_aim_debug_mpc.cpp:70`）。
 3. **"开火"有两套判定。**
@@ -302,7 +305,7 @@ publish_image_name: "tup_detect"
 
 # 附录 B：`RemoteLogger::plot(data)` 字段字典
 
-> 对象：`auto_aim_debug_mpc.cpp:81-137` 组出来的 `nlohmann::json`（`mt_auto_aim_debug` / `uav_debug` / `sentry_debug` 字段略有不同，见末尾）。
+> 对象：`auto_aim_debug_mpc.cpp` 组出来的 `nlohmann::json`（`sentry_debug` 字段略有不同，见末尾）。
 > 上机时对着这张表看曲线，比看日志快得多。
 
 | key | 写入位置 | 单位 | 含义 / 坑 |
@@ -355,7 +358,7 @@ publish_image_name: "tup_detect"
 - **丢目标那几帧会掉 key**：`target_*` / `obs_*` / `armor_id` / `w` 只在 `target.has_value()` 时写入，曲线会断。
 - **`plan_*` 可能整组为 0**：`planner.plan()` 在"无目标"或"弹道无解"时 `return {false}`（`planner.cpp:79/127`），此时 Plan 的其余成员是聚合初始化的 0，`plan.control=false` → `gimbal.send()` 根本不会被调用（`auto_aim_debug_mpc.cpp:73`）。
 - **想排查"到底发没发指令"，得自己补三个 key**：`plan.control`、`plan.fire`、`plan.target_yaw`/`plan.target_pitch`（`planner.hpp:21-32` 里都有，只是没进 JSON）；另外 `gimbal.mode()`、`gs.bullet_speed`（恒 0）、`tracker.state()`、`target.diverged()`/`convergened()` 也不在 JSON 里，属于排查时优先补的字段。
-- **别的入口字段不同**：`mt_auto_aim_debug.cpp:163` 与 `uav_debug.cpp:160` 有 `data["bullet_speed"] = cboard.bullet_speed`（CAN 真值）；`sentry_debug.cpp:181/188` 有 `shootmode` / `bullet_speed`。跨入口对比时别按同一套 key 硬套。
+- **别的入口字段不同**：`sentry_debug.cpp` 有 `shootmode` / `bullet_speed`（CAN 真值）。跨入口对比时别按同一套 key 硬套。
 
 ---
 
@@ -376,7 +379,6 @@ publish_image_name: "tup_detect"
 | 提前量 | 飞行时间不动点迭代 + 瞄准点/选板策略 | `aimer.cpp` |
 | 开火 | 角度容差 + 指令突变门控 | `shooter.cpp` |
 | 控制 | TinyMPC：双积分模型 + ADMM 解带加速度约束的最优控制 | `planner/planner.cpp`、`planner/tinympc/admm.cpp` |
-| 打符 | 正弦拟合 + 专用 EKF（2 维 / 5 维） | `tools/ransac_sine_fitter.cpp`、`tasks/auto_buff/buff_predict.hpp` |
 
 ## C.1 检测后处理（`YOLO11::parse`）
 
@@ -780,12 +782,9 @@ primal_state = max|x − v|,  dual_state = ρ·max|v − v_prev|
 | `get_abs_angle(v1,v2)` | `acos(v1·v2 / (‖v1‖‖v2‖))`，零向量返回 0 |
 | `limit_min_max` | 简单上下限夹取 |
 
-## C.11 打符（`tasks/auto_buff/`）
-
-- **正弦拟合** `tools/ransac_sine_fitter.cpp`：模型 `y = A·sin(ω·t + φ) + C`，RANSAC 采样（每样本给 4 个未知量，实际按 `ω` 在 `[min_omega, max_omega]` 内取样 → 线性最小二乘解 `A, φ, C`），阈值内点数最多者胜。
-- **小符** `SmallTarget`（`buff_predict.hpp:40+`）：2 维 EKF `x = [angle, w]`，初始 `w = π/6`；预测用 `x ← A·x + Δt·B`；先把观测角按「扇叶序号」对齐到 `angle_c = lastangle + i·2π/5`（5 片扇叶的跳变歧义），再由 `lastangle` 变化判断正反转 `cw_ccw`。
-- **大符** `BigTarget`（`:140+`）：5 维 EKF `x = [angle, spd, a, w, sita]`，初值 `(0, 1.1775, 0.9125, 1.942, 0)`（对应转速 a ∈ [0.78, 1.045]、ω ∈ [1.884, 2.0] 的规则区间）；预测是非线性 `f`（用 `a, w, sita` 递推角度），观测仍是一维角度。
-- **瞄准** `buff_aimer.cpp`：`predict_time`（yaml 0.150 s）/`aim_time`/`wait_time`/`command_fire_gap` 控制打击节奏。
+> **C.11 打符（`tasks/auto_buff/`）已于 2026-11 整体移除**（本分支只做重装自瞄）。
+> 历史实现见 `docs/archive/`；`GimbalMode` 里也不再保留 SMALL_BUFF / BIG_BUFF，
+> 下位机若仍上报 mode=2/3，按 IDLE 处理（不接管云台）。
 
 ## C.12 标定（`calibration/`）
 
@@ -816,6 +815,6 @@ primal_state = max|x − v|,  dual_state = ρ·max|v − v_prev|
 | `ExtendedKalmanFilter::window_size` | `10000 → 100`（约 1.7 s @60 fps） | 让"失败比例"反映近期行为，看门狗对发散反应得动 |
 | `Planner::aim()` / `plan()` 的预测板过滤 | 丢弃 `dist < min_valid_dist`（缺省 0.5 m，与 Solver 同名 yaml 键）的预测装甲板 | EKF 状态被带跑时 `armor_xyza_list()` 会算出**离云台很近的幽灵板**，而这两处取的正是"最近的板" → 0.30 m 的幽灵会劫持弹道、把枪口压向地面（现场 `d=0.3033` 那条日志） |
 
-> 注意：`Solver::solve()` 变成 `bool` 后，**忽略返回值的调用点会静默退化**（`src/mt_auto_aim_debug.cpp`、`sentry_debug.cpp`、`uav_debug.cpp` 里用于调试可视化的那 3 处仍忽略返回值）—— 那些位置在失败时会画出 0/0/0，这本身就是"该检测被拒绝"的信号。新增调用点请检查返回值。
+> 注意：`Solver::solve()` 变成 `bool` 后，**忽略返回值的调用点会静默退化**（`src/sentry_debug.cpp` 里用于调试可视化的那处仍忽略返回值）—— 该位置在失败时会画出 0/0/0，这本身就是"该检测被拒绝"的信号。新增调用点请检查返回值。
 
 > **复现校验建议**：附录 C 里的每条公式都能用纯 Eigen 写 10~30 行小实验独立验证（弹道解代入能量守恒、EKF 的 `H` 用有限差分对比、PnP 变换链用一组已知点做往返）。`tests/algo/` 下已有 `trajectory_nan_check.cpp`、`limit_rad_check.cpp`、`ekf_update_check.cpp` 三个先例可照抄结构。

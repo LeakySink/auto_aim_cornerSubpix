@@ -1,8 +1,8 @@
 # 上下文交接 · 视觉自瞄后端
 
-> **生成时间**：2026-11-14
+> **最近更新**：2026-11-15（回写 R1/R3 状态、记录打符移除）
 > **仓库**：`D:\my\ckyf_vision\auto_aim_cornerSubpix-main`
-> **分支**：`feat/heavy-aim`（= `origin/feat/heavy-aim`，HEAD `60f03de`）
+> **分支**：`feat/heavy-aim`（只做 2027 重装自瞄）
 >
 > 本文件回答三个问题：**这个仓库经历了什么、现在站在哪、下一步做什么**。
 > 它是**会话级**交接，记录的是「决策 + 证据」；
@@ -12,13 +12,15 @@
 
 ## 0. 三行状态
 
-1. **主链路可用**：YOLO → 关键点语义校验 → PnP → 11 维 EKF → MPC/Planner → 云台，
-   已在**步兵量级**跑通，弹道也接进了运行时。
-2. **重装专属配置尚未落地**：弹速兜底仍是 22 m/s、`assets/ballistic/big.csv` 缺 16.5 档、
-   没有 `configs/heavy.yaml`、`armor.hpp` 里 `big` 仍是 230 mm（2027 已取消大装甲）。
-3. **最近一次代码改动没有编译过**：`60f03de`（R 自适应 + 新息门控）只有
-   Python 复刻模型的 Monte Carlo 验证，**本机没有 OpenCV/Eigen/yaml-cpp，C++ 一行都没编**。
-   接手第一件事就是把它编出来。
+1. **主链路可用且已编译验证**：YOLO → 关键点校验 → PnP → 11 维 EKF → MPC → 云台，
+   `60f03de` 已在本机用真实依赖编过（9 个 TU 零错误、零新增告警），详见
+   [`build_verification_60f03de.md`](build_verification_60f03de.md) §2。
+2. **重装参数：弹道已补齐，其余未落地** —— `big.csv` 已重生成到
+   `V∈[13.0, 16.6]`（16.5 档可用，12 m 处修正 209 mm）；仍缺 `configs/heavy.yaml`、
+   `armor.hpp` 里 `big` 仍是 230 mm（2027 已取消大装甲）。
+3. **下一件阻塞事是 `R` 标定，不是编译**：实车 `.rlog` 显示 NIS 均值 0.104（名义 4）、
+   越限 0.0%，Bad Converge 看门狗**确认永不触发**；新息门控在 123 s 里**触发 0 次**。
+   改 `R` 后必须重录对照。
 
 ---
 
@@ -115,7 +117,7 @@
 
 ### D4 · 不把 EKF 换成 UKF
 
-见 [`filter_ekf_vs_ukf.md`](filter_ekf_vs_ukf.md)。核心论据：
+见 [`filter_ekf_vs_ukf.md`](archive/filter_ekf_vs_ukf.md)。核心论据：
 
 - `h_jacobian()` 是**解析手推**的，不是数值差分，正常工况下 EKF ≈ UKF（精度差 ~3%）；
 - 代价是 **5 倍运行时**；
@@ -190,29 +192,51 @@
 
 ## 4. 未闭环风险清单（按优先级）
 
-### R1 · `60f03de` 从未编译 ⬅ **最高优先**
+### ~~R1 · `60f03de` 从未编译~~ ✅ 已闭合（2026-11-14）
 
-改动只有 47 增 3 删，但涉及 `<algorithm>` 引入、`std::max`、Eigen 表达式。
-可能的编译问题：`std::max(cos_view, 0.5)` 的 `double/double` 没问题，
-但 `Eigen::VectorXd` 初始化列表里混了 `int` 与 `double` 会告警。
-**判据**：`cmake -B build && cmake --build build -j` 零错误。
+用真实依赖（OpenCV 4.12 / Eigen 3.4 / fmt 11.2）编了 `tasks/auto_aim/` 的 9 个 TU：
+`target.cpp` / `armor` / `solver` / `tracker` / `voter` / `kalman_markers` / `planner`
+零错误，**告警集合与 `60f03de^` 完全一致（9 条既有 `-Wreorder`）**。
+`aimer.cpp` / `shooter.cpp` 仅差 `linux/can.h`（Windows 平台事实）。
+证据与命令见 [`build_verification_60f03de.md`](build_verification_60f03de.md)。
 
-### R2 · Bad Converge 看门狗可能变迟钝
+### R2 · Bad Converge 看门狗~~可能变迟钝~~ **已确认失效** ⬅ 当前最高优先
 
-R 变大 → NIS 变小。物理真实场景 NIS 越限率从 **3.5% → 1.0%**。
-看门狗判据是"越限比例 ≥40%、样本 ≥30"。
-门控与看门狗用的是同族统计量，**要一起调**。
-**判据**：故意喂一段跳变目标，看门狗仍能触发。
+实车 `.rlog`（`proof_run_1794666076342127058`，123 s）实测：
 
-### R3 · `big.csv` 缺 16.5 m/s 档
+```
+nis mean 0.104 / max 3.46    4 维名义期望是 4  →  S 过估约 38 倍
+越限比例 0.0%                看门狗判据是 ≥40%
+recent_nis_failures 恒 0
+新息门控触发 0 次           （扫全 225 MB rlog，门控消息 0 条）
+```
 
-现有 `V ∈ [13.0, 15.9625]`。重装打 16.5 会走 `out_of_grid` → 回退 RK4 → 阻力系数是 17mm 的
-→ 弹道偏高。**判据**：补齐后 `eval(16.5, …)` 不返回 false。
+**不是"迟钝"，是永不触发。** 根因是 `R` 的四个分量普遍过估，实测反标定：
 
-### R4 · 弹速兜底 22 m/s / 阻力系数硬编码
+| 分量 | 现假设 σ | 实测 σ（二阶差分稳健估计）|
+|---|---|---|
+| `R[0]` 视线 yaw | 0.20 rad | ~0.001–0.015 rad |
+| `R[1]` pitch | 0.20 rad | ~0.0005 rad |
+| `R[2]` 距离 | 1.0–1.6 m | **0.05–0.09 m** |
+| `R[3]` 板朝向 | 0.18 rad | 0.055–0.25 rad（重尾）|
 
-三处都要改成可配置：`ballistic-main` 兜底弹速、`kDefaultDragCoefficient`、回退 RK4 的 `k`。
-重装应为 16.5 m/s + `k≈0.00513`。
+**判据**：改 `R` 后重录同场景，`nis mean` 回到 1–6、越限率 ~0.1%，且 `w` 过零仍为 0。
+
+### ~~R3 · `big.csv` 缺 16.5 m/s 档~~ ✅ 已闭合（2026-11-15）
+
+根因是 `ballistic-main/v.py` 的 `dv` 少除 `(N-1)`，末点落在 15.9625。已修正并重生成：
+`V∈[13.0, 16.6]`、80 行、步长 0.045570。`solve(16.5, 12m)` 从"夹取到 15.9625 → 14.374°"
+变为"插值 → 13.377°"，**修正 0.997° ≈ 209 mm**。与独立 RK4 对拍差 0.015°。
+详见 [`../assets/ballistic/README.md`](../assets/ballistic/README.md)。
+
+### R4 · 弹速兜底 / 阻力系数 —— 部分闭合
+
+- ✅ 兜底弹速已可配置：`bullet_speed_default / min / max`（Aimer + Planner），
+  缺键保持旧行为；重装 yaml 写 `bullet_speed_default: 16.5` 即可。
+- ✅ 夹取不再静默：`BallisticsPoly::solve()` 夹取时打 `v_clamp` 日志（2 s 限流）。
+- ✅ 阻力系数按弹种拆常量：`kDragCoefficientSmall=0.01875` / `kDragCoefficientBig=0.00513`。
+- ⚠️ **仍未接线**：`Trajectory` 默认 k 恒为 small，回退 RK4 时打 42mm 会用错 k
+  （12 m 偏 1.81°≈380 mm）。需要"当前弹种"的进程级设置。
 
 ### R5 · `armor.hpp` 的 `armor_properties` 与 2027 冲突
 
@@ -229,7 +253,7 @@ R 变大 → NIS 变小。物理真实场景 NIS 越限率从 **3.5% → 1.0%**�
 
 `io/gimbal/gimbal.cpp::send()` 里 `(void)yaw_acc; (void)pitch_acc;` —— 
 规划器算的加速度**根本没发给电控**，同时 `msg.distance = 3.0f` 是硬编码、`jmp_time = 0`。
-这是 [`gimbal_mechanics_and_aiming.md`](gimbal_mechanics_and_aiming.md) 指出的最大单项误差来源。
+这是 [`gimbal_mechanics_and_aiming.md`](archive/gimbal_mechanics_and_aiming.md) 指出的最大单项误差来源。
 
 ### R8 · `docs/CONFIG_PARAMETERS_REFERENCE.md` 落后
 
@@ -267,31 +291,31 @@ R 变大 → NIS 变小。物理真实场景 NIS 越限率从 **3.5% → 1.0%**�
 
 ## 6. 下一步（严格按顺序）
 
-### 第 1 步 · 编译验证（阻塞一切）
+### ~~第 1 步 · 编译验证~~ ✅ 已做（2026-11-14）
+
+本机用真实依赖编过 9 个 TU，零错误零新增告警；车上仍建议跑一次
+`cmake --build build -j` 覆盖 `aimer/shooter/detector`。
+
+### 第 2 步 · 改 `R` 并重录对照 ⬅ **当前阻塞点**
+
+按 R2 的实测值收 `R`（`R[2]` 需从 σ=1.0–1.6 m 收到 0.08 m 量级），然后：
 
 ```bash
-cd auto_aim_cornerSubpix-main
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+bash scripts/collect_evidence.sh all -d 60 -r debug   # 编译+自检+录制+指标+打包
 ```
 
-**判据**：零错误、零新增告警。若有错，改动应局限于 `tasks/auto_aim/target.cpp`
-（47 增 3 删），修复后 `git commit --amend` 保持单提交。
+**判据**：`nis mean` 1–6、越限率 ~0.1%、门控触发 0–0.1%、`w` 过零仍 0、
+`armor_id` 每圈折返 ≤0.39。**场景必须与 Before 一致**（4.4 m、~5.28 rad/s）。
 
-### 第 2 步 · 离线回放对照（同一段 `.rlog`）
+### ~~第 3 步 · 补 `big.csv` 16.5 档~~ ✅ 已做（2026-11-15）
 
-```bash
-./build/tests/rlog_replay <config> <record.rlog>   # 重跑检测（tests/eval → build/tests）
-(cd host && python -m rdbg metrics <record.rlog>)   # 逐帧质量报告（Python 模块，不在 build/ 下）
-```
+`V∈[13.0, 16.6]`，`solve(16.5,12m)` 修正 209 mm。剩下的只是 `configs/heavy.yaml` 与
+`ekf.heavy` 分支。
 
-对比 `60f03de` 前后：NIS 越限率、`armor_id` 推进次数、`w` 过零次数。
-**判据**：`armor_id` 推进不退化；NIS 越限率变化在 R2 的预期内（3.5% → ~1%）。
+### 第 3.5 步 · 把 k 接上弹种（R4 遗留）
 
-### 第 3 步 · 重装 M1（参数体系）
-
-按 [`heavy_robot_backend.md`](heavy_robot_backend.md) 的 P0 顺序：
-补 `big.csv` 的 16.5 档 → 弹速/阻力系数可配置 → `configs/heavy.yaml` → `ekf.heavy` + Tracker 分支。
+`Trajectory` 默认 `k` 恒为 17mm 值，回退 RK4 打 42mm 会偏 380 mm。
+需要"当前弹种"的进程级设置，与 `install_ballistics_from_config()` 一起初始化。
 
 ### 第 4 步 · 执行器辨识（最大单项误差）
 
@@ -339,10 +363,11 @@ cmake --build build -j
 
 ```
 目标      重装自瞄命中率 ≥75%  ⟺  σ_aim ≤ 24 mm（目标面）
-现状      主链路通，重装参数未落地，最后一次改动未编译
-分支      feat/heavy-aim @ 60f03de
-第一步    把 60f03de 编出来
-第二步    同一段 .rlog 跑 rdbg metrics 对比 NIS / armor_id / w
-最大坑    R2 看门狗迟钝、R3 big.csv 缺 16.5、R7 加速度被丢弃
+现状      主链路通 + 已编译；弹道 16.5 档已补齐；R 待标定
+分支      feat/heavy-aim（只做重装自瞄，打符与无人机/多线程入口已移除）
+第一步    ✅ 编译（2026-11-14 本机 9 TU 零错误）
+第二步    ✅ big.csv 补到 V∈[13.0,16.6]（12 m 修正 209 mm）
+第三步    收 R → 重录同场景 → NIS 回到 1–6            ⬅ 卡在这里
+最大坑    R2 看门狗确认失效、R4 回退 k 仍按 17mm、R7 加速度被丢弃
 规矩      验证有效再提交，中文提交信息，文档同步索引
 ```

@@ -70,7 +70,7 @@
 | 有效检测速度 | 42mm 法向 **>8 m/s** | 大入射角可能不算命中 |
 | 自适应装甲 | 未加固 ×1.5 / 已加固 ×0.5 | 要能选板上瞄点 |
 
-（依据：`docs/robot_types_and_aiming.md`，全部核对到 2027 规则原文）
+（依据：`docs/archive/robot_types_and_aiming.md`，全部核对到 2027 规则原文）
 
 ---
 
@@ -86,8 +86,10 @@ make -j$(nproc)
 
 产物按源码目录分放：`build/src/`（`src/*.cpp`）、`build/tests/`（`tests/**/*.cpp`）、
 `build/calibration/`（`calibration/*.cpp`）——仓库没有设置 `RUNTIME_OUTPUT_DIRECTORY`，
-这是 CMake 的默认行为。**本机（Windows）没有 OpenCV/Eigen/yaml-cpp，无法编译**——
-C++ 改动只能在 Linux 机器上验证；Windows 侧只能做静态检查。
+这是 CMake 的默认行为。本机（Windows）**已能编译**：用 MSYS2 ucrt64 的 g++ 14.2 +
+真实依赖头文件（OpenCV 4.12 / Eigen 3.4 / fmt 11.2）可以编 `tasks/auto_aim/` 的全部
+TU，方法见 [`build_verification_60f03de.md`](build_verification_60f03de.md) §1、§7；
+但 `aimer/shooter/detector` 需要 Linux 头文件或 OpenVINO，全量构建仍应在车上做。
 
 ### 2.2 与本任务相关的可执行文件
 
@@ -96,8 +98,11 @@ C++ 改动只能在 Linux 机器上验证；Windows 侧只能做静态检查。
 | `auto_aim_debug_mpc` | **主调试入口**：相机→检测→跟踪→MPC→云台 + 可视化 + 录制 | 日常调试、实车 |
 | `eval_record` | 全分辨率采集，写标准 `.rlog` | 采训练/评估数据 |
 | `rlog_replay` | 读 `.rlog` 重跑"检测→PnP(→Tracker)"，出 CSV | 换模型前后对比、离线评估 |
-| `sentry_debug` / `mt_auto_aim_debug` | 其它调试变体 | 备用 |
+| `sentry_debug` | 哨兵调试变体 | 备用 |
 | `tests/algo/*` | 单元测试（滤波、弹道、限幅等）| 改算法后必跑 |
+
+> 2026-11 起打符子系统与 `uav` / `mt_standard` / `mt_auto_aim_debug` 入口已删除，
+> 采集与打包可用一键脚本 `scripts/collect_evidence.sh`。
 
 ### 2.3 数据流（一句话版本）
 
@@ -121,15 +126,15 @@ C++ 改动只能在 Linux 机器上验证；Windows 侧只能做静态检查。
 |---|---|---|---|
 | 1 | **本文** | 交接总览 | 现在 |
 | 2 | `docs/heavy_aim_baseline.md` | **75% 的模块级基线与检验方法**（误差预算、M0–M8、四层检验、统计口径）| 定目标/验收时 |
-| 3 | `docs/heavy_robot_backend.md` | **后端要改哪些地方**（P0/P1 清单、涉及文件、施工顺序、前后端边界）| 开工时 |
-| 4 | `docs/gimbal_mechanics_and_aiming.md` | **机械→电控→自瞄**：惯量/带宽/滞后/执行链断链 | 调 MPC 时 |
-| 5 | `docs/robot_types_and_aiming.md` | **2027 各兵种特性**、规则数值、自适应装甲 | 查规则依据 |
+| 3 | `docs/archive/heavy_robot_backend.md` | **后端要改哪些地方**（P0/P1 清单、涉及文件、施工顺序、前后端边界）| 开工时 |
+| 4 | `docs/archive/gimbal_mechanics_and_aiming.md` | **机械→电控→自瞄**：惯量/带宽/滞后/执行链断链 | 调 MPC 时 |
+| 5 | `docs/archive/robot_types_and_aiming.md` | **2027 各兵种特性**、规则数值、自适应装甲 | 查规则依据 |
 | 6 | `docs/architecture.md` | 代码架构与数学流程（附录 A 运行流程、B 数据字段、C 各模块数学）| 读代码时 |
-| 7 | `docs/assumptions.md` | 物理世界假设清单（A–H）| 怀疑假设时 |
-| 8 | `docs/roadmap.md` | 后端加固路线图 W1–W10 | 看历史计划 |
-| 9 | `docs/remote_logger.md` | `.rlog` 格式与 host 端工具 | 用评测台时 |
+| 7 | `docs/archive/assumptions.md` | 物理世界假设清单（A–H）| 怀疑假设时 |
+| 8 | `docs/archive/roadmap.md` | 后端加固路线图 W1–W10 | 看历史计划 |
+| 9 | `docs/archive/remote_logger.md` | `.rlog` 格式与 host 端工具 | 用评测台时 |
 
-**只读三份就够开工**：本文 + `heavy_aim_baseline.md` + `heavy_robot_backend.md`。
+**只读三份就够开工**：本文 + `docs/heavy_aim_baseline.md` + `docs/archive/heavy_robot_backend.md`。
 
 ---
 
@@ -443,7 +448,7 @@ Linux 机器上 `cmake -B build && make -j` 即可。**Windows 侧无法编译**
 
 1. [ ] 读本文 §0/§1/§6
 2. [ ] 读 `docs/heavy_aim_baseline.md`（尤其 §0 误差预算、§2 模块基线）
-3. [ ] 读 `docs/heavy_robot_backend.md` §1–§2（知道要改哪几个文件）
+3. [ ] 读 `docs/archive/heavy_robot_backend.md` §1–§2（知道要改哪几个文件）
 4. [ ] `git checkout feat/heavy-aim && git pull`；Linux 机器上 `cmake -B build && make -j`
 5. [ ] 跑一遍现有测试：`./build/tests/ballistics_poly_check assets/ballistic/small.csv`（应全绿）
 6. [ ] 跑一遍评测台自测：`python tests/eval/check_metrics.py`
