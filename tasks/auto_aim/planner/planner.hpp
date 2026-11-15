@@ -65,6 +65,13 @@ private:
   // 正常交战中不会有 0.5m 以内的目标；出现即说明 EKF 状态被带跑（见 tracker 的空间门控）。
   double min_valid_dist_ = 0.5;
 
+  // 兜底弹速（与 Aimer 同名同义；缺键保持旧行为 22 / 10 / 25）。
+  // 重装 42mm 应配 bullet_speed_default: 16.5 —— 写死 22 会在测速不可用时
+  // 把 12 m 处的抬枪角算低约 5°，弹丸直接飞过目标上方。
+  double bullet_speed_default_ = 22.0;
+  double bullet_speed_min_ = 10.0;
+  double bullet_speed_max_ = 25.0;
+
   // 调试瞄准点（跨线程读写，见 public 里的说明）
   mutable std::mutex debug_mutex_;
   Eigen::Vector4d debug_xyza_ = Eigen::Vector4d::Zero();

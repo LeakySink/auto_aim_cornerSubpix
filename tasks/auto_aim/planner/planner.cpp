@@ -1,6 +1,7 @@
 #include "planner.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -52,6 +53,13 @@ Planner::Planner(const std::string & config_path)
   high_speed_delay_time_ = tools::read<double>(yaml, "high_speed_delay_time");
   low_speed_delay_time_ = tools::read<double>(yaml, "low_speed_delay_time");
 
+  if (yaml["bullet_speed_default"] && yaml["bullet_speed_default"].IsDefined())
+    bullet_speed_default_ = yaml["bullet_speed_default"].as<double>();
+  if (yaml["bullet_speed_min"] && yaml["bullet_speed_min"].IsDefined())
+    bullet_speed_min_ = yaml["bullet_speed_min"].as<double>();
+  if (yaml["bullet_speed_max"] && yaml["bullet_speed_max"].IsDefined())
+    bullet_speed_max_ = yaml["bullet_speed_max"].as<double>();
+
   setup_yaw_solver(config_path);
   setup_pitch_solver(config_path);
 }
@@ -59,8 +67,13 @@ Planner::Planner(const std::string & config_path)
 Plan Planner::plan(Target target, double bullet_speed)
 {
   // 0. Check bullet speed
-  if (bullet_speed < 10 || bullet_speed > 25) {
-    bullet_speed = 22;
+  if (!std::isfinite(bullet_speed) || bullet_speed < bullet_speed_min_ ||
+      bullet_speed > bullet_speed_max_) {
+    log_degraded(
+      "弹速异常（" + std::to_string(bullet_speed) + " m/s，允许 " +
+      std::to_string(bullet_speed_min_) + "~" + std::to_string(bullet_speed_max_) +
+      "），改用兜底 " + std::to_string(bullet_speed_default_) + " m/s");
+    bullet_speed = bullet_speed_default_;
   }
 
   // 1. Predict fly_time

@@ -30,6 +30,15 @@ Aimer::Aimer(const std::string & config_path)
   low_speed_delay_time_ = yaml["low_speed_delay_time"].as<double>();
   decision_speed_ = yaml["decision_speed"].as<double>();
 
+  // 兜底弹速：缺键保持旧行为（22 / 10 / 25），换弹种时用 yaml 覆盖。
+  // 重装 42mm 应配 bullet_speed_default: 16.5。
+  if (yaml["bullet_speed_default"].IsDefined())
+    bullet_speed_default_ = yaml["bullet_speed_default"].as<double>();
+  if (yaml["bullet_speed_min"].IsDefined())
+    bullet_speed_min_ = yaml["bullet_speed_min"].as<double>();
+  if (yaml["bullet_speed_max"].IsDefined())
+    bullet_speed_max_ = yaml["bullet_speed_max"].as<double>();
+
   if (yaml["left_yaw_offset"].IsDefined() && yaml["right_yaw_offset"].IsDefined()) {
     left_yaw_offset_ = yaml["left_yaw_offset"].as<double>() / 57.3;    // degree to rad
     right_yaw_offset_ = yaml["right_yaw_offset"].as<double>() / 57.3;  // degree to rad
@@ -49,7 +58,15 @@ io::Command Aimer::aim(
   double delay_time =
     target.ekf_x()[7] > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
 
-  if (bullet_speed < 14) bullet_speed = 23;
+  // 测速不可用时不要凭空猜一个"够快"的值：按配置的兜底弹速，并与同一套
+  // 上下限判据一致（否则 yaml 写了 16.5 又被 <14 的旧判据改写成 23）。
+  if (!std::isfinite(bullet_speed) || bullet_speed < bullet_speed_min_ ||
+      bullet_speed > bullet_speed_max_) {
+    tools::RemoteLogger::instance().log(
+      "WARN", "[Aimer] 弹速异常（{:.2f} m/s，允许 {:.1f}~{:.1f}），改用兜底 {:.2f} m/s",
+      bullet_speed, bullet_speed_min_, bullet_speed_max_, bullet_speed_default_);
+    bullet_speed = bullet_speed_default_;
+  }
 
   // 考虑detector和tracker所消耗的时间，此外假设aimer的用时可忽略不计
   auto future = timestamp;
