@@ -205,10 +205,20 @@ bool BallisticsPoly::solve(
     pc = rows_.front().pitch;
     tc = rows_.front().time;
     if (note) *note = "弹速低于表下限，按 V=" + num(rows_.front().v) + " 夹取";
+    // 夹取是"静默降级"：调用方拿到的是合法结果，却比真实弹速对应的解算偏了
+    // （42mm 上 16.5 被夹到 15.9625，12 m 处抬枪角偏 1.0°≈209 mm）。
+    // 按类别限流打日志，让车上和 rlog 里都看得见。
+    ballistics_log(
+      "v_clamp", "[Ballistics] 弹速 " + num(v0) + " 低于表下限，按 V=" + num(rows_.front().v) +
+                   " 夹取（表 V∈[" + num(rows_.front().v) + "," + num(rows_.back().v) + "]）");
   } else if (v0 >= rows_.back().v) {
     pc = rows_.back().pitch;
     tc = rows_.back().time;
     if (note) *note = "弹速高于表上限，按 V=" + num(rows_.back().v) + " 夹取";
+    ballistics_log(
+      "v_clamp", "[Ballistics] 弹速 " + num(v0) + " 高于表上限，按 V=" + num(rows_.back().v) +
+                   " 夹取（表 V∈[" + num(rows_.front().v) + "," + num(rows_.back().v) +
+                   "]；补齐该档见 ballistic-main/v.py）");
   } else {
     std::size_t hi = 1;
     while (hi < rows_.size() && rows_[hi].v < v0) ++hi;
