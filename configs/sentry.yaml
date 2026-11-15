@@ -114,6 +114,12 @@ ballistics_csv: assets/ballistic/small.csv
 # 拟合网格范围（与 ballistic-main/g.py 的调用参数一致）；超出即回退 RK4
 ballistics_x_range: [0.5, 15.0]
 ballistics_y_range: [-2.0, 2.0]
+# 弹速兜底（Aimer / Planner 共用）。缺键时保持旧行为 23|22 / 14|10 / +inf|25。
+# 重装 42mm 改成：bullet_speed_default: 16.5
+#                 bullet_speed_min: 10
+#                 bullet_speed_max: 20
+# 注意 big.csv 当前 V 上限只有 15.9625，16.5 会被静默夹取（见 assets/ballistic/README.md）
+# bullet_speed_default: 22.0
 
 # 位姿合理性门限（Solver 出参校验）：小于 0.5 m 的"敌人"物理上不存在，
 # 现场出现过 d=0.30 m 的脏解（虚假框被 IPPE 解成贴脸），这里显式写出来便于调整
