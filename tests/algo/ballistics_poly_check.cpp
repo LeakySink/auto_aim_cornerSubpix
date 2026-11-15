@@ -259,20 +259,28 @@ int main(int argc, char ** argv)
              "big.csv V 上限应 ≥16.5（现为 " + std::to_string(heavy->v_max()) +
                "；重跑 ballistic-main/v.py 重新生成）");
 
-      // 16.5 不得被夹取：与表上限求解结果应完全一致且 note 里不含"夹取"
+      // 16.5 不得被夹取，且解算结果必须与物理积分一致
       if (heavy->v_max() >= 16.5) {
-        std::string n165, nmax;
-        double p165 = 0.0, t165 = 0.0, pmax = 0.0, tmax = 0.0;
+        std::string n165;
+        double p165 = 0.0, t165 = 0.0;
         const bool ok1 = heavy->solve(16.5, 12.0, 0.0, p165, t165, &n165);
-        const bool ok2 = heavy->solve(heavy->v_max(), 12.0, 0.0, pmax, tmax, &nmax);
-        std::printf("  solve(16.5, 12m) pitch=%.3f°（note: %s）\n", p165 * 180 / 3.14159265358979323846,
-                    n165.c_str());
-        expect(ok1 && ok2, "16.5 m/s @12m 应可解");
+        std::printf("  solve(16.5, 12m) pitch=%.3f°（note: %s）\n",
+                    p165 * 180 / 3.14159265358979323846, n165.c_str());
+        expect(ok1, "16.5 m/s @12m 应可解");
         expect(n165.find("夹取") == std::string::npos,
                "16.5 m/s 不应被夹取（note 里出现\"夹取\"说明表又没盖住）");
-        expect(std::abs(p165 - pmax) < 5e-4,
-               "16.5 与表上限的 pitch 应几乎相同（差 " +
-                 std::to_string((p165 - pmax) * 180 / 3.14159265358979323846) + "°）");
+
+        // 与物理积分对拍（42mm 的 k=0.00513）：这才是"表算得对不对"的判据。
+        // 注意不要拿"表上限"去比 —— pitch 对弹速的敏感度约 1.7°/(m/s)，
+        // 上限若在 16.6，16.5 与它的差本来就有 0.17°，那样比是错的。
+        const auto rk = solve_traj(16.5, 12.0, 0.0, tools::kDragCoefficientBig);
+        const double d_deg = p165 * 180 / 3.14159265358979323846 - rk.pitch_deg;
+        std::printf("  与 RK4(k=%.5f) 对拍：poly=%.3f° rk4=%.3f° 差=%.3f°\n",
+                    tools::kDragCoefficientBig, p165 * 180 / 3.14159265358979323846,
+                    rk.pitch_deg, d_deg);
+        expect(rk.ok, "RK4 @16.5/12m 应可解");
+        expect(std::abs(d_deg) < 0.25,
+               "big.csv 在 16.5 m/s 处应与物理积分一致（差 " + std::to_string(d_deg) + "°）");
       }
     }
   }
