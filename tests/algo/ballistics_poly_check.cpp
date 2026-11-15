@@ -231,6 +231,52 @@ int main(int argc, char ** argv)
     expect(std::abs(b.t - 0.4540) < 2e-3, "抬射 fly_time 与文档一致");
   }
 
+  // ---------- 7) 重装 42mm：big.csv 必须覆盖 16.5 m/s ----------
+  // 背景（2026-11 现场排查）：ballistic-main/v.py 的 dv 少除一个 (N-1)，
+  // 最后一个点落在 15.9625，16.0 从未生成；而 2027 重装目标弹速是 16.5。
+  // 运行时 solve() 会把 16.5 **静默夹取**到表上限，12 m 处抬枪角偏 1.0°
+  // （≈209 mm，板宽只有 135 mm）——不报错、不打日志、测试全绿，最难发现。
+  // 这一节就是盯住它：表必须盖住 16.5，且 16.5 与表上限的解不能有差别。
+  std::printf("\n== 7) 重装 42mm：big.csv 弹速覆盖 ==\n");
+  {
+    // 由传入的 csv 路径推导同目录的 big.csv，这样两种调用方式都能跑
+    std::string big = csv;
+    const auto slash = big.find_last_of("/\\");
+    big = (slash == std::string::npos ? std::string() : big.substr(0, slash + 1)) + "big.csv";
+
+    auto heavy = std::make_shared<tools::BallisticsPoly>();
+    std::string big_err;
+    if (!heavy->load_csv(big, &big_err)) {
+      // 表不在就跳过（不把它算作失败：small 表场景下本来就没有 big.csv 的职责）
+      std::printf("  跳过：加载 %s 失败（%s）\n", big.c_str(), big_err.c_str());
+    } else {
+      std::printf("  big.csv 行数=%zu V∈[%.4f, %.4f] m/s\n", heavy->size(), heavy->v_min(),
+                  heavy->v_max());
+      expect(heavy->v_min() > 12.0 && heavy->v_min() < 13.5, "big.csv V 下限应 ≈13.0");
+
+      // 核心断言：必须盖到 16.5（重装目标弹速）
+      expect(heavy->v_max() >= 16.5,
+             "big.csv V 上限应 ≥16.5（现为 " + std::to_string(heavy->v_max()) +
+               "；重跑 ballistic-main/v.py 重新生成）");
+
+      // 16.5 不得被夹取：与表上限求解结果应完全一致且 note 里不含"夹取"
+      if (heavy->v_max() >= 16.5) {
+        std::string n165, nmax;
+        double p165 = 0.0, t165 = 0.0, pmax = 0.0, tmax = 0.0;
+        const bool ok1 = heavy->solve(16.5, 12.0, 0.0, p165, t165, &n165);
+        const bool ok2 = heavy->solve(heavy->v_max(), 12.0, 0.0, pmax, tmax, &nmax);
+        std::printf("  solve(16.5, 12m) pitch=%.3f°（note: %s）\n", p165 * 180 / 3.14159265358979323846,
+                    n165.c_str());
+        expect(ok1 && ok2, "16.5 m/s @12m 应可解");
+        expect(n165.find("夹取") == std::string::npos,
+               "16.5 m/s 不应被夹取（note 里出现\"夹取\"说明表又没盖住）");
+        expect(std::abs(p165 - pmax) < 5e-4,
+               "16.5 与表上限的 pitch 应几乎相同（差 " +
+                 std::to_string((p165 - pmax) * 180 / 3.14159265358979323846) + "°）");
+      }
+    }
+  }
+
   std::printf("\n%s（失败项 %d）\n", g_fail == 0 ? "全部通过" : "存在失败", g_fail);
   return g_fail == 0 ? 0 : 1;
 }
