@@ -4,5 +4,5 @@
 
 include(${PROJECT_SOURCE_DIR}/cmake/auto_executables.cmake)
 auto_add_executables(
-  DEFAULT_LIBS ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io
+  DEFAULT_LIBS ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io
 )

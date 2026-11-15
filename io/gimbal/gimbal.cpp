@@ -55,8 +55,6 @@ std::string Gimbal::str(GimbalMode mode) const
   switch (mode) {
     case GimbalMode::IDLE:       return "IDLE";
     case GimbalMode::AUTO_AIM:   return "AUTO_AIM";
-    case GimbalMode::SMALL_BUFF: return "SMALL_BUFF";
-    case GimbalMode::BIG_BUFF:   return "BIG_BUFF";
     default:                     return "INVALID";
   }
 }
@@ -218,8 +216,13 @@ void Gimbal::read_thread()
     switch (rx_data_.mode) {
       case 0:  mode_ = GimbalMode::IDLE;       break;
       case 1:  mode_ = GimbalMode::AUTO_AIM;   break;
-      case 2:  mode_ = GimbalMode::SMALL_BUFF; break;
-      case 3:  mode_ = GimbalMode::BIG_BUFF;   break;
+      // 2/3 = 小/大能量机关（打符）：本仓库已移除打符子系统（2026-11）。
+      // 下位机若仍上报这两个值，按 IDLE 处理 —— 不接管云台，比"当成 AUTO_AIM
+      // 乱打"安全，也不打 WARN（否则切一次模式就刷一条日志）。
+      case 2:
+      case 3:
+        mode_ = GimbalMode::IDLE;
+        break;
       default:
         mode_ = GimbalMode::IDLE;
         tools::RemoteLogger::instance().log("WARN", "[Gimbal] Invalid mode: {}", rx_data_.mode);

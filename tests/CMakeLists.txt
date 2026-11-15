@@ -8,7 +8,7 @@
 
 include(${PROJECT_SOURCE_DIR}/cmake/auto_executables.cmake)
 
-set(_TEST_LIBS ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim auto_buff)
+set(_TEST_LIBS ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 
 foreach(_cat IN ITEMS rdbg algo io ros2 eval)
   auto_add_executables(

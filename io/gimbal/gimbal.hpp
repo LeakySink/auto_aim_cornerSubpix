@@ -58,9 +58,7 @@ static_assert(sizeof(VisionToGimbal) == 27);
 enum class GimbalMode
 {
   IDLE,
-  AUTO_AIM,
-  SMALL_BUFF,
-  BIG_BUFF
+  AUTO_AIM
 };
 
 struct GimbalState

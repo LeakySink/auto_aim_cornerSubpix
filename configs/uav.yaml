@@ -120,13 +120,6 @@ R_camera2gimbal: [0.00046423063676173171, 0.033770528223625203, 0.99942950522456
 t_camera2gimbal: [-0.034955523715399906, -0.000074403211899371, 0.001248173910106823]
 
 
-#####-----buff_detector参数-----#####
-model: "assets/yolo11_buff_int8.xml"
-
-#####-----buff_aimer参数-----#####
-fire_gap_time: 0.600   # s
-predict_time: 0.090     # s
-
 #####-----remote_logger-----#####
 remote_logger:
   remote_host: "127.0.0.1"

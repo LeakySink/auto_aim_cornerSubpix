@@ -31,7 +31,6 @@ ros2_setup_interfaces()
 add_subdirectory(tools)
 add_subdirectory(io)
 add_subdirectory(tasks/auto_aim)
-add_subdirectory(tasks/auto_buff)
 add_subdirectory(tasks/omniperception)
 
 add_subdirectory(src)
