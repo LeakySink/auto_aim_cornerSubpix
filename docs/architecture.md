@@ -167,8 +167,29 @@ center_aim:
 ./build/tests/center_aimer_check
 ```
 
-断言：瞄准角严格指向中心、fire 必须落在窗口内、开火事件数 ≈ 每 90° 一次
-（`h≠0` 时降为每 180° 一次）、竖直超窗口的板不会被选中、云台偏 5° 时不开火。
+断言（6 节）：瞄准角严格指向中心；`fly_time` 量级正确（5 m/16.5 m/s ≈ 0.319 s）；
+fire 必须落在命中窗口内；开火事件数 ≈ 每 90° 一次（`h≠0` 时降为每 180° 一次）；
+竖直超窗口的板不会被选中；云台偏 5° 时不开火；`launch_delay` 补偿后
+`total_time - fly_time` 必须精确等于该延迟。
+
+### `heavy_aim` 的 `plot(data)` 字段
+
+除通用字段（`t` / `gimbal_*` / `target_*` / `w` / `armor_id` / `bullet_speed`）外，
+另有 9 个重装专属字段，调 `heavy_t_to_cross` 与 `heavy_align_err_deg` 最有用：
+
+| 字段 | 含义 |
+|---|---|
+| `heavy_valid` | 本帧是否解算成功 |
+| `fire` | 是否允许开火（到达时刻板压线 且 云台到位） |
+| `heavy_plate_id` | 预计命中的板号 |
+| `heavy_align_err_deg` / `heavy_window_deg` | 到达时刻的 yaw 偏差 / 该距离的板面角宽（半宽 = 窗口/2） |
+| `heavy_pitch_err_deg` / `heavy_pitch_window_deg` | pitch 方向同理 |
+| `heavy_fly_time` / `heavy_total_time` | 纯飞行时间 / `launch_delay + fly_time` |
+| `heavy_t_to_cross` | 距板心穿过瞄准线还有多久（仅观察，不参与判据） |
+| `heavy_aim_x/y/z` | 瞄准点（外推后的旋转中心） |
+
+> ⚠️ `heavy_aim` **不写** `obs_*` 字段，所以 `python -m rdbg metrics` 里的
+> "观测/估计一致性"一节对它无效；`nis` 仍由 EKF 自己发布，可正常看。
 
 ---
 
