@@ -1,5 +1,6 @@
 #include "center_aimer.hpp"
 
+#include <chrono>
 #include <cmath>
 
 #include <yaml-cpp/yaml.h>
@@ -42,6 +43,8 @@ CenterAimer::CenterAimer(const std::string & config_path)
   if (ca && ca.IsDefined()) {
     cfg_.hit_margin = yaml_or(ca, "hit_margin", cfg_.hit_margin);
     cfg_.gimbal_tol = yaml_or(ca, "gimbal_tol_deg", cfg_.gimbal_tol);
+    cfg_.launch_delay = yaml_or(ca, "launch_delay", cfg_.launch_delay);
+    cfg_.min_fire_gap = yaml_or(ca, "min_fire_gap", cfg_.min_fire_gap);
     cfg_.require_settled = (ca["require_settled"] && ca["require_settled"].IsDefined())
                              ? ca["require_settled"].as<bool>()
                              : cfg_.require_settled;
@@ -51,6 +54,8 @@ CenterAimer::CenterAimer(const std::string & config_path)
   // 防御：hit_margin 写错（比如 1.5）会让窗口变成负数，永远不开火
   if (!(cfg_.hit_margin >= 0.0 && cfg_.hit_margin < 0.95)) cfg_.hit_margin = 0.30;
   if (cfg_.max_iter < 1) cfg_.max_iter = 1;
+  if (!(cfg_.launch_delay >= 0.0) || cfg_.launch_delay > 1.0) cfg_.launch_delay = 0.0;
+  if (!(cfg_.min_fire_gap >= 0.0) || cfg_.min_fire_gap > 5.0) cfg_.min_fire_gap = 0.0;
 }
 
 bool CenterAimer::aim_center(
@@ -62,12 +67,13 @@ bool CenterAimer::aim_center(
   if (x0.size() < 11 || !x0.allFinite()) return false;
   if (!std::isfinite(bullet_speed) || bullet_speed <= 0.0) return false;
 
-  // 飞行时间与距离互相依赖：距离 -> traj.fly_time -> 外推更远的中心 -> 距离再变。
-  // 一般 2~3 次收敛；不收敛就用最后一次（误差在毫米级）。
+  // 预测时刻 = launch_delay + fly_time：既要算弹丸飞行，也要算"判定→出膛"的延迟。
+  // 距离与 fly_time 互相依赖，一般 2~3 次收敛；不收敛就用最后一次（误差在毫米级）。
   double fly = 0.0;
+  double total = cfg_.launch_delay;
   for (int i = 0; i < cfg_.max_iter; ++i) {
     Target pred = target;  // 值拷贝：predict() 会改状态，不能动调用方的 target
-    pred.predict(fly);
+    pred.predict(total);
     const Eigen::VectorXd xp = pred.ekf_x();
     if (xp.size() < 11 || !xp.allFinite()) return false;
 
@@ -78,16 +84,15 @@ bool CenterAimer::aim_center(
     if (traj.unsolvable) return false;
 
     const double new_fly = traj.fly_time;
-    if (std::abs(new_fly - fly) < cfg_.fly_time_eps) {
-      fly = new_fly;
-      break;
-    }
+    const bool converged = std::abs(new_fly - fly) < cfg_.fly_time_eps;
     fly = new_fly;
+    total = cfg_.launch_delay + new_fly;
+    if (converged) break;
   }
 
-  // 用最终 fly_time 再外推一次，保证 aim / pitch 与 fly_time 严格对应
+  // 用最终 total 再外推一次，保证 aim / pitch / 板位置与 total 严格对应
   Target pred = target;
-  pred.predict(fly);
+  pred.predict(total);
   const Eigen::VectorXd xp = pred.ekf_x();
   if (xp.size() < 11 || !xp.allFinite()) return false;
 
@@ -101,6 +106,7 @@ bool CenterAimer::aim_center(
   if (out != nullptr) {
     out->valid = true;
     out->fly_time = fly;
+    out->total_time = total;
     out->aim_xyz = aim;
     out->aim_pitch_abs = traj.pitch;
     out->yaw = tools::limit_rad(std::atan2(aim.y(), aim.x()) + cfg_.yaw_offset);
@@ -118,9 +124,9 @@ CenterAimResult CenterAimer::solve(
 
   if (!std::isfinite(gimbal_yaw) || !std::isfinite(gimbal_pitch)) return CenterAimResult{};
 
-  // 到达时刻的目标状态：板的位置要按"那时"算，而不是"现在"
+  // 到达时刻的目标状态：板的位置要按"出膛后弹丸飞完"那一刻算（launch_delay + fly）
   Target pred = target;
-  pred.predict(r.fly_time);
+  pred.predict(r.total_time);
 
   const auto plates = pred.armor_xyza_list();
   if (plates.empty()) return CenterAimResult{};
@@ -185,7 +191,24 @@ CenterAimResult CenterAimer::solve(
               std::abs(gimbal_pitch - r.pitch) < tol;
   }
 
-  r.fire = in_window && settled;
+  // 开火冷却：fire 是"允许开火"的持续信号，板扫过窗口的整段时间都为真
+  // （1 rad/s 下约 0.36 s）。若下位机见 fire 就打一发，必须限最小间隔。
+  bool gate = in_window && settled;
+  if (gate && cfg_.min_fire_gap > 0.0 && fired_once_) {
+    const double since = std::chrono::duration<double>(t - last_fire_).count();
+    if (since >= 0.0 && since < cfg_.min_fire_gap) {
+      gate = false;
+      r.suppressed = true;
+    }
+    if (since < 0.0) {  // 时间回退（换时钟/首帧）：重新计时，避免永久压制
+      fired_once_ = false;
+    }
+  }
+  if (gate) {
+    last_fire_ = t;
+    fired_once_ = true;
+  }
+  r.fire = gate;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据
   const double w = target.ekf_x()[7];

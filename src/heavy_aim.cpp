@@ -127,6 +127,8 @@ int main(int argc, char * argv[])
     data["heavy_pitch_err_deg"] = res.pitch_err_deg;
     data["heavy_pitch_window_deg"] = res.pitch_window_deg;
     data["heavy_fly_time"] = res.fly_time;
+    data["heavy_total_time"] = res.total_time;  // launch_delay + fly_time
+    data["heavy_suppressed"] = res.suppressed ? 1 : 0;
     data["heavy_t_to_cross"] = res.t_to_cross;
 
     if (!targets.empty()) {

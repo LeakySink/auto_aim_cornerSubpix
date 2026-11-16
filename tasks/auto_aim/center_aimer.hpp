@@ -41,6 +41,16 @@ struct CenterAimConfig
   double gimbal_tol = 0.5;    ///< deg，云台到位判据（yaw/pitch 各自）
   bool require_settled = true;  ///< 云台没到位就不开火（防止"预测对了但枪没到"）
 
+  /// 从"判定开火"到"弹丸出膛"的总延迟 [s]：CAN 下发 + 下位机处理 + 摩擦轮/拨弹
+  /// 建立时间。预测时刻 = launch_delay + fly_time，漏掉它会系统性打早。
+  /// 默认 0（行为与未引入该参数时一致），实测后填。
+  double launch_delay = 0.0;
+
+  /// 两次"允许开火"之间的最小间隔 [s]。fire 是持续信号，板扫过窗口的整段时间
+  /// 都会为真（1 rad/s 下约 0.36 s），若下位机"见 fire 即打一发"会连发。
+  /// 0 = 不限（默认，保持旧行为）。
+  double min_fire_gap = 0.0;
+
   int max_iter = 6;            ///< 飞行时间迭代上限
   double fly_time_eps = 1e-3;  ///< s，相邻两次 fly_time 差小于它即认为收敛
 };
@@ -53,7 +63,9 @@ struct CenterAimResult
   double yaw = 0.0;    ///< 云台指令角 [rad]
   double pitch = 0.0;  ///< 云台指令角 [rad]（向上为负，与 io::Command 一致）
   double aim_pitch_abs = 0.0;  ///< 瞄准点的绝对仰角 [rad]（向上为正，弹道解算结果）
-  double fly_time = 0.0;
+  double fly_time = 0.0;       ///< 纯飞行时间 [s]
+  double total_time = 0.0;     ///< launch_delay + fly_time [s]（判据实际用的外推时长）
+  bool suppressed = false;     ///< 本来命中但被 min_fire_gap 压掉
 
   int plate_id = -1;            ///< 预计命中的装甲板编号
   double align_err_deg = 180.0; ///< 到达时刻该板相对瞄准线的 yaw 偏差
@@ -71,6 +83,9 @@ public:
   /// 默认构造：不读 yaml，用结构体默认值（单元测试/离线仿真用）
   CenterAimer() = default;
 
+  /// 显式给配置（单测里改 launch_delay / min_fire_gap 等，不需要写 yaml）
+  explicit CenterAimer(const CenterAimConfig & cfg) : cfg_(cfg) {}
+
   explicit CenterAimer(const std::string & config_path);
 
   /// gimbal_yaw / gimbal_pitch：云台当前反馈角（与 io::Gimbal::state() 同约定）。
@@ -80,6 +95,13 @@ public:
 
   const CenterAimConfig & config() const { return cfg_; }
 
+  /// 清空开火冷却状态（单测/换目标时用）
+  void reset_fire_gate() const
+  {
+    fired_once_ = false;
+    last_fire_ = std::chrono::steady_clock::time_point{};
+  }
+
   /// 只算"瞄准中心的指令角"，不判开火。给调试/单测用。
   bool aim_center(
     const Target & target, std::chrono::steady_clock::time_point t, double bullet_speed,
@@ -87,6 +109,10 @@ public:
 
 private:
   CenterAimConfig cfg_;
+
+  // 开火冷却：solve() 是 const，故状态用 mutable（每帧调用一次，无并发）
+  mutable bool fired_once_ = false;
+  mutable std::chrono::steady_clock::time_point last_fire_{};
 };
 
 }  // namespace auto_aim
