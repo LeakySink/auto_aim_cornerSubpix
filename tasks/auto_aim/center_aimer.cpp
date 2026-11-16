@@ -44,7 +44,6 @@ CenterAimer::CenterAimer(const std::string & config_path)
     cfg_.hit_margin = yaml_or(ca, "hit_margin", cfg_.hit_margin);
     cfg_.gimbal_tol = yaml_or(ca, "gimbal_tol_deg", cfg_.gimbal_tol);
     cfg_.launch_delay = yaml_or(ca, "launch_delay", cfg_.launch_delay);
-    cfg_.min_fire_gap = yaml_or(ca, "min_fire_gap", cfg_.min_fire_gap);
     cfg_.require_settled = (ca["require_settled"] && ca["require_settled"].IsDefined())
                              ? ca["require_settled"].as<bool>()
                              : cfg_.require_settled;
@@ -55,7 +54,6 @@ CenterAimer::CenterAimer(const std::string & config_path)
   if (!(cfg_.hit_margin >= 0.0 && cfg_.hit_margin < 0.95)) cfg_.hit_margin = 0.30;
   if (cfg_.max_iter < 1) cfg_.max_iter = 1;
   if (!(cfg_.launch_delay >= 0.0) || cfg_.launch_delay > 1.0) cfg_.launch_delay = 0.0;
-  if (!(cfg_.min_fire_gap >= 0.0) || cfg_.min_fire_gap > 5.0) cfg_.min_fire_gap = 0.0;
 }
 
 bool CenterAimer::aim_center(
@@ -119,6 +117,9 @@ CenterAimResult CenterAimer::solve(
   const Target & target, std::chrono::steady_clock::time_point t, double gimbal_yaw,
   double gimbal_pitch, double bullet_speed) const
 {
+  // t 目前不参与判据（连发冷却交给电控），保留参数是为了接口稳定与后续扩展
+  (void)t;
+
   CenterAimResult r;
   if (!aim_center(target, t, bullet_speed, &r)) return CenterAimResult{};
 
@@ -191,24 +192,9 @@ CenterAimResult CenterAimer::solve(
               std::abs(gimbal_pitch - r.pitch) < tol;
   }
 
-  // 开火冷却：fire 是"允许开火"的持续信号，板扫过窗口的整段时间都为真
-  // （1 rad/s 下约 0.36 s）。若下位机见 fire 就打一发，必须限最小间隔。
-  bool gate = in_window && settled;
-  if (gate && cfg_.min_fire_gap > 0.0 && fired_once_) {
-    const double since = std::chrono::duration<double>(t - last_fire_).count();
-    if (since >= 0.0 && since < cfg_.min_fire_gap) {
-      gate = false;
-      r.suppressed = true;
-    }
-    if (since < 0.0) {  // 时间回退（换时钟/首帧）：重新计时，避免永久压制
-      fired_once_ = false;
-    }
-  }
-  if (gate) {
-    last_fire_ = t;
-    fired_once_ = true;
-  }
-  r.fire = gate;
+  // 连发节奏（最小开火间隔）由电控负责，这里不设冷却：
+  // fire 只表示"此刻开火能命中"，剩下交给下位机。
+  r.fire = in_window && settled;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据
   const double w = target.ekf_x()[7];

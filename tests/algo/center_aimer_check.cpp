@@ -54,13 +54,11 @@ struct RunStats
   int events = 0;           // 连续 fire 段数
   int inconsistent = 0;     // fire 但不在窗口内
   int bad_plate_id = 0;     // 选到了不该选的板
-  int suppressed = 0;       // 本来命中、被 min_fire_gap 压掉
   double max_err_deg = 0.0;
   double max_dt_err = 0.0;  // |total_time - fly_time - launch_delay|
 };
 
 /// 用"理想跟随"跑一段：云台角直接取上一刻算出的指令角；时间戳按 dt 递增
-/// （开火冷却依赖真实时间，不能全用同一个 time_point）
 RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double speed, int steps,
              double dt, bool require_even_plate, double launch_delay = 0.0)
 {
@@ -77,7 +75,6 @@ RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double spee
     const auto res = aimer.solve(target, tp, ref.yaw, ref.pitch, speed);
     ++st.frames;
     st.max_dt_err = std::max(st.max_dt_err, std::abs(res.total_time - res.fly_time - launch_delay));
-    if (res.suppressed) ++st.suppressed;
     if (res.fire) {
       ++st.fire_frames;
       if (!prev) ++st.events;
@@ -204,28 +201,6 @@ int main()
     expect(st.max_dt_err < 1e-6, "total_time 必须等于 launch_delay + fly_time");
     expect(st.inconsistent == 0, "补偿延迟后判据仍须自洽");
     expect(st.events >= 1, "补偿延迟后仍应能在窗口内开火");
-  }
-
-  // ---------- 7) 开火冷却：min_fire_gap 把"持续为真"压成"每次窗口一帧" ----------
-  std::printf("\n== 7) min_fire_gap=1.0 s ==\n");
-  {
-    const double w = 1.0;
-    Target t_plain(kDist, w, kRadius, 0.0);
-    CenterAimer plain;
-    const auto a = run(plain, t_plain, kSpeed, 300, dt, false);
-
-    auto_aim::CenterAimConfig cfg;
-    cfg.min_fire_gap = 1.0;
-    auto_aim::CenterAimer gapped(cfg);
-    Target t_gap(kDist, w, kRadius, 0.0);
-    const auto b = run(gapped, t_gap, kSpeed, 300, dt, false);
-
-    std::printf("  无冷却：fire 帧=%d 事件=%d\n", a.fire_frames, a.events);
-    std::printf("  有冷却：fire 帧=%d 事件=%d 被压掉=%d\n", b.fire_frames, b.events, b.suppressed);
-    expect(a.fire_frames > a.events, "无冷却时一个窗口应含多帧");
-    expect(b.suppressed > 0, "冷却应真的压掉一些帧");
-    expect(b.fire_frames <= b.events, "每次窗口最多留 1 帧开火");
-    expect(b.events == a.events, "冷却不应减少开火窗口次数");
   }
 
   std::printf("\n%s（失败项 %d）\n", g_fail == 0 ? "全部通过" : "存在失败", g_fail);
