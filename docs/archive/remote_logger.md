@@ -15,7 +15,7 @@ plot / log / plot_image     对外 API（tools/remote_logger.hpp）
         └─ rdbg/transport   UDP bind / sendto / recv
 ```
 
-host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。  
+host 来排队；只向队首发 UDP。控制协议见 [`host/PROTOCOL.md`](../../host/PROTOCOL.md)。  
 门户图形化摘要：Host Help → **RemoteLogger**（`/help#vehicle`）。
 
 支持五种数据：
@@ -101,7 +101,7 @@ remote_logger:
 
 ## 注册协议
 
-host 向车注册，不是车向 host。详细报文见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
+host 向车注册，不是车向 host。详细报文见 [`host/PROTOCOL.md`](../../host/PROTOCOL.md)。
 
 ```
 车 --beacon--> 255.255.255.255:15999     （enable_remote 期间一直发）
@@ -162,7 +162,7 @@ frag n: [chunk]
 
 ### 远程 JPEG（仅 UDP）
 
-档位 **0–3**（数字越大越省带宽）：由发送成败自适应升降；Host 还可通过 `img_subscribe` 的 `max_*` 或 `type=json` 的 `set_img_tx` 设上限（`apply_tx_cap`）。档位与 yaml 宽/质/fps 对照见 [`host/PROTOCOL.md`](host/PROTOCOL.md) §5。
+档位 **0–3**（数字越大越省带宽）：由发送成败自适应升降；Host 还可通过 `img_subscribe` 的 `max_*` 或 `type=json` 的 `set_img_tx` 设上限（`apply_tx_cap`）。档位与 yaml 宽/质/fps 对照见 [`host/PROTOCOL.md`](../../host/PROTOCOL.md) §5。
 
 本地 `.rlog` **不受**远程档位影响，始终 yaml `img_width`/`img_quality`。
 
@@ -216,7 +216,7 @@ plot/log → var_buf  ──────────► 队列 → .rlog
 
 ## 3D Markers（Watch）
 
-Watch 工作台可显示通用 3D Marker（类 ROS Marker 精简版）。**不是**新 UDP 类型：仍放进 `plot(json)` 的保留键 `markers`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md) 的 `plot.markers`。
+Watch 工作台可显示通用 3D Marker（类 ROS Marker 精简版）。**不是**新 UDP 类型：仍放进 `plot(json)` 的保留键 `markers`。协议字段见 [`host/PROTOCOL.md`](../../host/PROTOCOL.md) 的 `plot.markers`。
 
 **分层：**
 
@@ -271,4 +271,4 @@ tools::RemoteLogger::instance().plot(data);
 | `img_tx_fps` | `img_worker` 成功发出远程 JPEG 计数 | 远程出图 fps |
 | `img_tx_level` | 远程自适应档位 0–3 | 与 `img_subscribe`/`set_img_tx` 上限叠加 |
 
-`init` 后调用一次 `io::RemoteDebug::install()`（回调消费 `set_img_tx`）；主循环只需 `on_frame(cam_fps)`。协议字段见 [`host/PROTOCOL.md`](host/PROTOCOL.md)。
+`init` 后调用一次 `io::RemoteDebug::install()`（回调消费 `set_img_tx`）；主循环只需 `on_frame(cam_fps)`。协议字段见 [`host/PROTOCOL.md`](../../host/PROTOCOL.md)。

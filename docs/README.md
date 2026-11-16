@@ -9,7 +9,7 @@
 |---|---|
 | [`heavy_handover.md`](heavy_handover.md) | **计划**：未来 6 个月做什么、验收 gate、故障排查、第一周 checklist |
 | [`heavy_aim_baseline.md`](heavy_aim_baseline.md) | **目标与预算**：75% 命中率 ⟺ σ≤24 mm 的分解、M0–M8 模块基线、四层检验体系、统计口径 |
-| [`architecture.md`](architecture.md) | **工程参考**：四层架构、数据流、10 个入口、`plot(data)` 字段字典、各模块数学流程 |
+| [`architecture.md`](architecture.md) | **工程参考**：四层架构、数据流与延迟、9 个入口、重装策略、模块速查、弹道与护栏、调试字段。**约 320 行**，逐模块数学推导已移到 [`archive/pipeline_details.md`](archive/pipeline_details.md) |
 | [`context_handoff.md`](context_handoff.md) | **当前状态**：走到哪一步、验证强度分级、未闭环风险 R1–R9 |
 | [`build_verification_60f03de.md`](build_verification_60f03de.md) | **构建与验证**：怎么在本机编、门控灵敏度实测、实车 `.rlog` 复核、一键采样脚本 |
 

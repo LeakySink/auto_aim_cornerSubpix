@@ -377,7 +377,7 @@ bash scripts/collect_evidence.sh all -d 60 -r debug   # 编译+自检+录制+指
 | 弹道 | `tools/trajectory.cpp`（RK4）、`tools/ballistics_poly.cpp`（多项式）|
 | 规划/开火门控 | `tasks/auto_aim/planner/`、`tasks/auto_aim/aimer.cpp` |
 | 云台协议 | `io/gimbal/gimbal.cpp`（**加速度被丢弃，见 R7**）|
-| 调试数据输出 | 各 `src/*.cpp` 的 `plot()` 调用；字段字典见 `docs/architecture.md` 附录 B |
+| 调试数据输出 | 各 `src/*.cpp` 的 `plot()` 调用；字段表见 `docs/architecture.md` §12（完整字典在 `docs/archive/pipeline_details.md` 附录 B）|
 | 离线评测 | `tests/eval/`、`tools/rdbg/` |
 
 ---

@@ -39,6 +39,7 @@
 | `r_adaptive_and_gating.md` | R 自适应 + 门控的原始论证 | 历史决策（实测结论见 `../build_verification_60f03de.md`） |
 | `filter_ekf_vs_ukf.md` | 为什么不换 UKF | 想换滤波时 |
 | `roadmap.md` | 旧的后端加固周计划 | 看历史计划 |
+| `pipeline_details.md` | 原 `architecture.md` 的附录 A/B/C：入口逐段 walkthrough、时序图、字段字典、各模块数学推导（**2026-10 逐行核对版，行号已过期**）| 想追某条公式/某个字段怎么来的 |
 
 ## 为什么归档而不是删除
 

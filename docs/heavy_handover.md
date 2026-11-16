@@ -129,7 +129,7 @@ TU，方法见 [`build_verification_60f03de.md`](build_verification_60f03de.md) 
 | 3 | `docs/archive/heavy_robot_backend.md` | **后端要改哪些地方**（P0/P1 清单、涉及文件、施工顺序、前后端边界）| 开工时 |
 | 4 | `docs/archive/gimbal_mechanics_and_aiming.md` | **机械→电控→自瞄**：惯量/带宽/滞后/执行链断链 | 调 MPC 时 |
 | 5 | `docs/archive/robot_types_and_aiming.md` | **2027 各兵种特性**、规则数值、自适应装甲 | 查规则依据 |
-| 6 | `docs/architecture.md` | 代码架构与数学流程（附录 A 运行流程、B 数据字段、C 各模块数学）| 读代码时 |
+| 6 | `docs/architecture.md` | 代码架构、数据流、入口、重装策略、弹道与护栏（**精简版**；逐模块数学与旧 walkthrough 见 `docs/archive/pipeline_details.md`）| 读代码时 |
 | 7 | `docs/archive/assumptions.md` | 物理世界假设清单（A–H）| 怀疑假设时 |
 | 8 | `docs/archive/roadmap.md` | 后端加固路线图 W1–W10 | 看历史计划 |
 | 9 | `docs/archive/remote_logger.md` | `.rlog` 格式与 host 端工具 | 用评测台时 |
