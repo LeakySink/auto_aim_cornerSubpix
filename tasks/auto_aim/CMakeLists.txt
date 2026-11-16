@@ -12,6 +12,7 @@ add_library(auto_aim OBJECT
     detector.cpp
     solver.cpp
     aimer.cpp
+    center_aimer.cpp
     target.cpp
     tracker.cpp
     voter.cpp

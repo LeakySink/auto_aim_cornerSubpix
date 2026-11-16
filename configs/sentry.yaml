@@ -118,8 +118,17 @@ ballistics_y_range: [-2.0, 2.0]
 # 重装 42mm 改成：bullet_speed_default: 16.5
 #                 bullet_speed_min: 10
 #                 bullet_speed_max: 20
-# 注意 big.csv 当前 V 上限只有 15.9625，16.5 会被静默夹取（见 assets/ballistic/README.md）
+# 注意 big.csv 现行 V 上限 16.6，已覆盖重装 16.5（见 assets/ballistic/README.md）
 # bullet_speed_default: 22.0
+
+#####-----重装自瞄：瞄中心 + 等板转过来开火-----#####
+# 见 src/heavy_aim.cpp 与 tasks/auto_aim/center_aimer.hpp。
+# 云台始终压在**旋转中心**（不逐板跳），开火判据是"弹丸到达时刻有板压在瞄准线上"。
+center_aim:
+  hit_margin: 0.30        # 只用板面中间 70% 判定命中，吸收 PnP/超前量误差
+  gimbal_tol_deg: 0.5     # 云台到位判据（yaw/pitch 各自）
+  require_settled: true   # 云台没到位就不开火；整定不好时可临时设 false
+  max_iter: 6             # 飞行时间迭代次数
 
 # 位姿合理性门限（Solver 出参校验）：小于 0.5 m 的"敌人"物理上不存在，
 # 现场出现过 d=0.30 m 的脏解（虚假框被 IPPE 解成贴脸），这里显式写出来便于调整
