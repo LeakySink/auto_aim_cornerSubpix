@@ -95,9 +95,67 @@
 |---|---|---|
 | `standard_mpc` | 步兵 | MPC 轨迹规划，主力版本 |
 | `auto_aim_debug_mpc` | 步兵（调试） | 带 PlotJuggler 可视化 |
+| `heavy_aim` | **重装** | **瞄旋转中心 + 等板转过来开火**（见下节），不走 MPC |
 | `sentry` | 哨兵 | 需要 ROS2，含导航通信 |
 
-> 重装入尚无专属入口，直接用 `standard_mpc` + `configs/heavy.yaml`（待建）。
+---
+
+## 重装策略：瞄中心 + 等板转过来（`heavy_aim`）
+
+2026-11 组会定的目标：**枪口始终压在对面车的旋转中心，程序判断"现在发射能正好
+打到转过来的那块板"时 fire=1。**
+
+### 为什么不逐板瞄准
+
+4 板目标在 45° 处两块板同时可见，逐板瞄准会让云台在两者之间来回跳；重装云台惯量大，
+跳变的代价远大于把枪口稳定在一个点上。**中心是唯一稳定点。**
+
+### 为什么瞄中心也能打中
+
+板心到旋转中心的距离就是 `r`（0.2~0.3 m）。子弹沿"云台→中心"这条线飞，
+只要**弹丸到达的那一刻**有板正好压在这条线上，就会命中板面。所以判据不是
+"现在瞄得准不准"，而是"**到达时刻**板在不在线上"。
+
+### 每个控制周期的时序（`tasks/auto_aim/center_aimer.cpp`）
+
+1. 迭代求 `fly_time`（距离依赖 fly_time，fly_time 又依赖距离，一般 2~3 次收敛）；
+2. 用 `fly_time` 把 EKF 状态外推到**弹丸到达时刻**，得到那时的中心与各板位置；
+3. 瞄准点 = 外推后的中心，yaw = `atan2(y, x)`，pitch = `-(弹道抬角 + offset)`；
+4. 逐板算到达时刻该板相对瞄准线的 yaw/pitch 偏差，与**板面角宽**比较：
+   - `角宽 = 2·atan2(板宽·(1-margin)/2, 距离)`，默认 `margin=0.30`（只用板面中间 70%）；
+   - 任一板 yaw 与 pitch 都落在窗口内，且云台已到位（`gimbal_tol_deg`）→ `fire=1`。
+
+### 参数（`configs/*.yaml`）
+
+```yaml
+center_aim:
+  hit_margin: 0.30        # 只用板面中间 70% 判定，吸收 PnP/超前量误差
+  gimbal_tol_deg: 0.5     # 云台到位判据
+  require_settled: true   # 没到位不开火
+  max_iter: 6             # fly_time 迭代次数
+```
+
+### 已知限制（实车前必须知道）
+
+- **窗口很窄**：5 m、板宽 135 mm（打七折 94.5 mm）→ 角宽约 1.08°，半宽 0.54°。
+  目标 1 rad/s 时板扫过这个窗口约 0.36 s；**5 rad/s 时只有 ~70 ms**，所以
+  `fly_time` 和延迟标定的误差直接决定能不能打中。
+- **只瞄中心 ⇒ 打不到高处的板**：`h≠0` 的板（上下错位）在 pitch 方向超出窗口，
+  会被自动排除，等效只剩 2 块板可用（每 180° 一次窗口）。
+- **不补偿云台滞后**：`heavy_aim` 直接把指令角发给云台，没有 MPC 的相位补偿；
+  若实测滞后 >20 ms，需要在指令上加超前（或改回 MPC + 该判据）。
+- **fire 是"允许开火"信号**，持续时间等于板扫过窗口的时间，连发节奏由下位机决定。
+
+### 单元测试
+
+`tests/algo/center_aimer_check.cpp`（不需要硬件）：
+
+```bash
+./build/tests/center_aimer_check
+```
+
+断言：瞄准角严格指向中心、fire 必须落在窗口内、开火事件数 ≈ 每 90° 一次
+（`h≠0` 时降为每 180° 一次）、竖直超窗口的板不会被选中、云台偏 5° 时不开火。
 
 ---
 
@@ -160,9 +218,9 @@ configs/
 > 本附录由逐文件核对代码写成（2026-10-21），每一条都能在源码里对上；行号对应当时的工作区版本。
 > 建议阅读顺序：A.1 选一条链路 → A.2 看主循环 → A.3 对照时序图 → A.4 记住三个坑。
 
-## A.1 10 个可执行文件（`src/*.cpp`，名字即文件名）
+## A.1 11 个可执行文件（`src/*.cpp`，名字即文件名）
 
-`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 10 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
+`cmake/auto_executables.cmake` 会把 `src/` 下**每个** `.cpp` 编成同名可执行文件，所以"这个仓库有几个程序"= 11 个；它们共用 `tasks/`（算法）、`tools/`（工具）、`io/`（硬件）。
 
 ```bash
 ./build/src/<名字> <yaml路径>     # 位置参数 @config-path；--help 打印用法
@@ -173,11 +231,12 @@ configs/
 | `auto_aim_debug_mpc` | `configs/sentry.yaml` | `Gimbal` + `Camera` | `YOLO(config,false)` | `Planner`（MPC） | **全链路可视化**：多一个 `plan_thread` 持续 `plot(data)` |
 | `standard_mpc` | 无默认，**必须传** | `Gimbal` + `Camera` | `YOLO(config,true)`（检测在主循环里） | `Planner`（MPC） | 步兵实战版；另起一个控制线程；默认开 detection 窗 |
 | `standard` | `configs/standard3.yaml` | `CBoard` + `Camera` | `YOLO` | `Aimer` + `CommandGener` | 单线程步兵版 |
+| `heavy_aim` | `configs/sentry.yaml` | `Gimbal` + `Camera` | `YOLO(config,false)` | `CenterAimer`（瞄中心 + 等板转过来） | **重装专用**：不跑 MPC，fire 由"到达时刻板是否压线"决定，见前面《重装策略》一节 |
 | `sentry` / `sentry_bp` / `sentry_debug` / `sentry_multithread` | `configs/sentry.yaml` | `CBoard` + `Camera` + 后视 `Camera("configs/camera.yaml")` | `YOLO` | `Aimer` + `Decider`（全向感知） | 名字带 `sentry*` 的**只在 `USE_ROS2=ON` 时生成**；`sentry_multithread` 用 `track(detection_queue, ...)` 重载 |
 | `eval_record` | 无默认，**必须传** | `Camera` + `Gimbal` | 可选 `YOLO` | — | **离线评估/重训数据采集**：按全分辨率写标准 RLG2 `.rlog`（`--every` 抽帧、`--no-detect` 纯采图），产出可直接喂给 `tests/eval/rlog_replay`、`python -m rdbg metrics`、`python -m rdbg replay` |
 
 > 2026-11 起**打符（能量机关）子系统已整体移除**，`uav` / `uav_debug` / `mt_standard` /
-> `mt_auto_aim_debug` 四个入口一并删除，仓库只剩上述 10 个（含 3 个 `sentry*` 条件生成）。
+> `mt_auto_aim_debug` 四个入口一并删除，仓库只剩上述 11 个（含 3 个 `sentry*` 条件生成）。
 >
 > 结论：想理解"自瞄怎么跑"，只读 **`auto_aim_debug_mpc`**（196 行、信息最全）即可；`standard_mpc` 就是"去掉 plot + 检测换多线程 + 加模式路由"的它。
 

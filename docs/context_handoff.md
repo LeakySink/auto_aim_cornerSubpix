@@ -15,6 +15,10 @@
 1. **主链路可用且已编译验证**：YOLO → 关键点校验 → PnP → 11 维 EKF → MPC → 云台，
    `60f03de` 已在本机用真实依赖编过（9 个 TU 零错误、零新增告警），详见
    [`build_verification_60f03de.md`](build_verification_60f03de.md) §2。
+   **重装已有了专属入口 `src/heavy_aim.cpp`**（2026-11-16）：瞄旋转中心、
+   到达时刻有板压线才开火，不走 MPC；核心在 `tasks/auto_aim/center_aimer.*`，
+   单测 `tests/algo/center_aimer_check.cpp` 已通过。策略与限制见
+   [`architecture.md`](architecture.md) 的《重装策略》一节，**实车未验证**。
 2. **重装参数：弹道已补齐，其余未落地** —— `big.csv` 已重生成到
    `V∈[13.0, 16.6]`（16.5 档可用，12 m 处修正 209 mm）；仍缺 `configs/heavy.yaml`、
    `armor.hpp` 里 `big` 仍是 230 mm（2027 已取消大装甲）。
@@ -368,6 +372,6 @@ bash scripts/collect_evidence.sh all -d 60 -r debug   # 编译+自检+录制+指
 第一步    ✅ 编译（2026-11-14 本机 9 TU 零错误）
 第二步    ✅ big.csv 补到 V∈[13.0,16.6]（12 m 修正 209 mm）
 第三步    收 R → 重录同场景 → NIS 回到 1–6            ⬅ 卡在这里
-最大坑    R2 看门狗确认失效、R4 回退 k 仍按 17mm、R7 加速度被丢弃
+最大坑    R2 看门狗确认失效、R4 回退 k 仍按 17mm、R7 加速度被丢弃、重装策略未上实车
 规矩      验证有效再提交，中文提交信息，文档同步索引
 ```
