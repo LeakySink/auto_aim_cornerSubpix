@@ -36,6 +36,12 @@ struct CenterAimConfig
   /// 0.3 表示只用板宽的 70% / 板高的 70% 做判据。
   double hit_margin = 0.30;
 
+  /// 板面朝向门槛：板的外法向必须大致朝向枪口才可打。
+  /// `cos_face` 定义为 n̂·p / |p_xy|（n̂ = 板→车体中心方向，见 h_armor_xyz），
+  /// 正视 = +1，侧棱 = 0，背面 = −1。背面永远打不到（车身挡着），
+  /// 侧棱投影宽度趋 0 也基本打不到，所以默认只接受 cos_face ≥ 0.15。
+  double min_face_cos = 0.15;
+
   double yaw_offset = 0.0;    ///< rad，与 Aimer 同名参数同义
   double pitch_offset = 0.0;  ///< rad，pitch 指令在世界系向上为负
   double gimbal_tol = 0.5;    ///< deg，云台到位判据（yaw/pitch 各自）
@@ -66,6 +72,7 @@ struct CenterAimResult
   double total_time = 0.0;     ///< launch_delay + fly_time [s]（判据实际用的外推时长）
 
   int plate_id = -1;            ///< 预计命中的装甲板编号
+  double cos_face = 0.0;        ///< 该板朝向枪口的程度（1=正视 0=侧棱 <0=背面）
   double align_err_deg = 180.0; ///< 到达时刻该板相对瞄准线的 yaw 偏差
   double hit_window_deg = 0.0;  ///< 该距离下板面的 yaw 角宽（全宽）
   double pitch_err_deg = 0.0;   ///< 到达时刻该板相对瞄准线的 pitch 偏差

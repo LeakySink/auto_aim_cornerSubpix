@@ -43,6 +43,7 @@ CenterAimer::CenterAimer(const std::string & config_path)
   const auto ca = yaml["center_aim"];
   if (ca && ca.IsDefined()) {
     cfg_.hit_margin = yaml_or(ca, "hit_margin", cfg_.hit_margin);
+    cfg_.min_face_cos = yaml_or(ca, "min_face_cos", cfg_.min_face_cos);
     cfg_.gimbal_tol = yaml_or(ca, "gimbal_tol_deg", cfg_.gimbal_tol);
     cfg_.launch_delay = yaml_or(ca, "launch_delay", cfg_.launch_delay);
     cfg_.require_settled = (ca["require_settled"] && ca["require_settled"].IsDefined())
@@ -53,6 +54,8 @@ CenterAimer::CenterAimer(const std::string & config_path)
 
   // 防御：hit_margin 写错（比如 1.5）会让窗口变成负数，永远不开火
   if (!(cfg_.hit_margin >= 0.0 && cfg_.hit_margin < 0.95)) cfg_.hit_margin = 0.30;
+  // min_face_cos 允许负值（放宽到"只要不是正背面"），但 >=1 会把所有板挡掉
+  if (!(cfg_.min_face_cos > -1.0 && cfg_.min_face_cos < 0.99)) cfg_.min_face_cos = 0.15;
   if (cfg_.max_iter < 1) cfg_.max_iter = 1;
   if (!(cfg_.launch_delay >= 0.0) || cfg_.launch_delay > 1.0) cfg_.launch_delay = 0.0;
 }
@@ -145,6 +148,8 @@ CenterAimResult CenterAimer::solve(
   double best_score = 1e9;
   double best_err_yaw = 180.0 * kRad2Deg;  // 占位
   double best_win_yaw = 0.0, best_err_pitch = 0.0, best_win_pitch = 0.0;
+  double best_cos_face = -1.0;
+  int blocked_by_face = 0;  // 统计被"背面/侧棱"判据挡掉的板数（诊断用）
 
   for (std::size_t i = 0; i < plates.size(); ++i) {
     const Eigen::Vector3d p = plates[i].head<3>();
@@ -153,12 +158,26 @@ CenterAimResult CenterAimer::solve(
     const double horiz = std::hypot(p.x(), p.y());
     if (!(range > 0.2) || !(horiz > 0.1)) continue;
 
+    // ---- 可见性：只有朝向我们这块板才可能命中 ----
+    // n̂ = 板→车体中心方向（plates[i][3] 就是这个角）。
+    // cos_face = n̂·p̂：正视 +1、侧棱 0、背面 −1。
+    // 不判这个的话，"瞄中心"会把**背面/远侧**那块也当成候选 —— 它同样压在瞄准线上，
+    // 但子弹会先打在车身或前侧板上（2026-11 实测：4 板目标有 7/8 的相位会选中背面板）。
+    const double n_yaw = plates[i][3];
+    const double cos_face =
+      (std::cos(n_yaw) * p.x() + std::sin(n_yaw) * p.y()) / horiz;
+    if (cos_face < cfg_.min_face_cos) {
+      ++blocked_by_face;
+      continue;
+    }
+
     const double phi = std::atan2(p.y(), p.x());
     const double elev = std::atan2(p.z(), horiz);
     const double err_yaw = std::abs(tools::limit_rad(phi - yaw_los));
     const double err_pitch = std::abs(elev - elev_aim);
 
-    const double half_yaw = std::atan2(eff_w / 2.0, horiz);
+    // 侧视时板在视线上被压扁，有效宽度按 cos_face 收缩（正视 1、侧棱 →0）
+    const double half_yaw = std::atan2(eff_w * cos_face / 2.0, horiz);
     const double half_pitch = std::atan2(eff_h / 2.0, range);
     if (half_yaw <= 0.0 || half_pitch <= 0.0) continue;
 
@@ -171,12 +190,30 @@ CenterAimResult CenterAimer::solve(
       best_win_yaw = 2.0 * half_yaw;
       best_err_pitch = err_pitch;
       best_win_pitch = 2.0 * half_pitch;
+      best_cos_face = cos_face;
     }
   }
 
-  if (best_id < 0) return CenterAimResult{};
+  if (best_id < 0) {
+    // 所有板都在背面/侧棱：本帧不该开火（不是"数据坏了"）。留个可查的痕迹。
+    if (blocked_by_face > 0) {
+      using clock = std::chrono::steady_clock;
+      static clock::time_point last_all_hidden{};
+      static bool logged{false};
+      const auto now = clock::now();
+      if (!logged || std::chrono::duration<double>(now - last_all_hidden).count() > 2.0) {
+        last_all_hidden = now;
+        logged = true;
+        tools::RemoteLogger::instance().log(
+          "DEBUG", "[CenterAim] {} 块板全部朝外（cos_face<{:.2f}），本帧无可见靶",
+          blocked_by_face, cfg_.min_face_cos);
+      }
+    }
+    return CenterAimResult{};
+  }
 
   r.plate_id = best_id;
+  r.cos_face = best_cos_face;
   r.align_err_deg = best_err_yaw * kRad2Deg;
   r.hit_window_deg = best_win_yaw * kRad2Deg;
   r.pitch_err_deg = best_err_pitch * kRad2Deg;

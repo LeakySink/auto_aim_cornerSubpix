@@ -54,6 +54,8 @@ struct RunStats
   int events = 0;           // 连续 fire 段数
   int inconsistent = 0;     // fire 但不在窗口内
   int bad_plate_id = 0;     // 选到了不该选的板
+  int back_face_hits = 0;   // 选中了背面/侧棱板（cos_face < 0.15）
+  double min_fire_cos_face = 1.0;
   double max_err_deg = 0.0;
   double max_dt_err = 0.0;  // |total_time - fly_time - launch_delay|
 };
@@ -75,6 +77,11 @@ RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double spee
     const auto res = aimer.solve(target, tp, ref.yaw, -ref.pitch, speed);  // 反馈抬头为正
     ++st.frames;
     st.max_dt_err = std::max(st.max_dt_err, std::abs(res.total_time - res.fly_time - launch_delay));
+    // 可见性：任何时候都不该选中"背面/侧棱"的板（不论是否开火）
+    if (res.valid) {
+      if (res.cos_face < 0.15) ++st.back_face_hits;
+      st.min_fire_cos_face = std::min(st.min_fire_cos_face, res.cos_face);
+    }
     if (res.fire) {
       ++st.fire_frames;
       if (!prev) ++st.events;
@@ -133,11 +140,17 @@ int main()
     const double expect_events = w * (steps * dt) / (M_PI / 2.0);
     std::printf("  帧=%d fire 帧=%d 事件=%d（期望 ≈%.2f）最大对齐误差=%.3f°\n", st.frames,
                 st.fire_frames, st.events, expect_events, st.max_err_deg);
+    std::printf("  背面/侧棱被选中=%d 次  最小 cos_face=%.2f\n", st.back_face_hits,
+                st.min_fire_cos_face);
     expect(st.frames > 0, "应有有效帧");
     expect(st.events >= 1, "3 秒内至少一次开火窗口");
     expect(std::abs(st.events - expect_events) <= 1.5, "事件数应与 90° 穿越次数一致");
     expect(st.inconsistent == 0, "fire 时必须落在命中窗口内（自洽性）");
     expect(st.fire_frames > 0 && st.fire_frames < st.frames, "fire 应只占一部分帧");
+    // 关键：一整圈里背面/侧棱的板压在瞄准线上的次数和正面一样多，
+    // 不判 cos_face 就会有一半的"命中"打在背面上。
+    expect(st.back_face_hits == 0, "任何时刻都不该选中背面/侧棱板");
+    expect(st.min_fire_cos_face >= 0.15, "被选中的板必须朝向我们");
   }
 
   // ---------- 3) 竖直方向不匹配：只瞄中心就打不到高处的板 ----------
