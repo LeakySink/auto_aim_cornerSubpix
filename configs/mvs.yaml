@@ -1,7 +1,4 @@
-# enemy_color: "red"
 enemy_color: "blue"
-
-
 #####-----神经网络参数-----#####
 yolo_name: yolov5
 classify_model: assets/tiny_resnet.onnx
@@ -11,67 +8,60 @@ yolov5_model_path: assets/yolov5.xml
 device: GPU
 min_confidence: 0.8
 use_traditional: true
-
 #####-----ROI-----#####
-roi: 
+roi:
   x: 420
   y: 50
   width: 600
   height: 600
 
 use_roi: false
-
 #####-----USB相机参数-----#####
 image_width: 640
 image_height: 360
 new_image_width: 1280
 new_image_height: 720
-fov_h: 57.7 #87.7
-fov_v: 56.7 
-new_fov_h: 37 #67
+fov_h: 57.7
+fov_v: 56.7
+new_fov_h: 37
 new_fov_v: 40.9
 usb_frame_rate: 60
-usb_exposure: 305 #1-80000______250
+usb_exposure: 305
 new_usb_exposure: 320
 usb_gamma: 160
-usb_gain: 10 #0-96
-
+usb_gain: 10
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"
 exposure_ms: 2
 gain: 16
 vid_pid: "2bdf:0001"
-
 #####-----传统方法参数-----#####
 threshold: 150
-max_angle_error: 45 # degree
+max_angle_error: 45
 min_lightbar_ratio: 1.5
 max_lightbar_ratio: 20
 min_lightbar_length: 8
 min_armor_ratio: 1
 max_armor_ratio: 5
 max_side_ratio: 1.5
-max_rectangular_error: 25 # degree
+max_rectangular_error: 25
 min_confidence: 0.8
-
 #####-----cboard参数-----#####
 quaternion_canid: 0x01
 bullet_speed_canid: 0x110
 send_canid: 0xff
 can_interface: "can0"
-
 #####-----tracker参数-----#####
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
-
 #####-----EKF参数-----#####
 ekf:
-  q_xyz_acc_var: 100.0   # 位置/速度加速度方差
-  q_yaw_acc_var: 75.0    # 角加速度方差
-  r_yaw: 4.0e-2          # yaw 观测噪声
-  r_pitch: 4.0e-2        # pitch 观测噪声
-  r_dist_base: 1.5e-2    # 距离观测噪声基础值
+  q_xyz_acc_var: 100.0
+  q_yaw_acc_var: 75.0
+  r_yaw: 4.0e-2
+  r_pitch: 4.0e-2
+  r_dist_base: 1.5e-2
 
   outpost:
     radius: 0.2765
@@ -87,36 +77,29 @@ ekf:
     radius: 0.2
     armor_num: 4
     p0: [1, 64, 1, 64, 1, 64, 0.4, 400, 1.0e-5, 1, 1]
-
 #####-----aimer参数-----#####
-yaw_offset: -2.5 # degree -2.5
-pitch_offset: 0  # degree 2
-comming_angle: 70 # degree
-leaving_angle: 30 # degree
-decision_speed: 7 # rad/s
-high_speed_delay_time: 0.066 # s
-low_speed_delay_time: 0.015 # s
-
+yaw_offset: -2.5
+pitch_offset: 0
+comming_angle: 70
+leaving_angle: 30
+decision_speed: 7
+high_speed_delay_time: 0.066
+low_speed_delay_time: 0.015
 #####-----shooter参数-----#####
-first_tolerance: 3 # 近距离射击容差，degree
-second_tolerance: 2 # 远距离射击容差，degree
-judge_distance: 2 #距离判断阈值
-auto_fire: true # 是否由自瞄控制射击
-
+first_tolerance: 3
+second_tolerance: 2
+judge_distance: 2
+auto_fire: true
 #####-----decider参数-----#####
 mode: 1
-
 #####-----工业相机标定参数-----#####
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# 重投影误差: 0.1322px
 camera_matrix: [1776.9477196851155, 0, 756.31235265560952, 0, 1776.0591253569607, 566.16539069551641, 0, 0, 1]
 distort_coeffs: [-0.08382326954462313, 0.097449270330296239, -0.0012558283068959985, 0.0037372210254148081, 0]
 
 R_camera2gimbal: [0, 0, 1, -1, 0, 0, 0, -1, 0]
 t_camera2gimbal: [0.1, 0, 0.05]
-
-
 #####-----remote_logger-----#####
 remote_logger:
   remote_host: "127.0.0.1"

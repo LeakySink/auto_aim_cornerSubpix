@@ -7,7 +7,7 @@
 >   （2026-10 逐行核对版，**行号已过期**，只作参考）
 > - EKF → [`archive/ekf_model.md`](archive/ekf_model.md)；规划器 → [`archive/planner.md`](archive/planner.md)
 > - 检测 → [`archive/detector.md`](archive/detector.md)；坐标系 → [`archive/coordinate_systems.md`](archive/coordinate_systems.md)
-> - 参数速查 → [`archive/CONFIG_PARAMETERS_REFERENCE.md`](archive/CONFIG_PARAMETERS_REFERENCE.md)
+> - 配置参数 → [`config_guide.md`](config_guide.md)
 > - 弹道表怎么生成 → [`../assets/ballistic/README.md`](../assets/ballistic/README.md)
 
 ---
@@ -270,7 +270,7 @@ fire 必须落在窗口内；开火事件数 ≈ 每 90° 一次（`h≠0` 时�
 
 配置都在 `configs/`：`sentry.yaml`（哨兵/默认）、`standard3.yaml`/`standard4.yaml`（步兵）、
 `ascento.yaml`/`demo.yaml`/`mvs.yaml`/`example.yaml`、`camera.yaml`（后视）、`tf_pub.yaml`。
-换机器人只改 yaml，键的语义见 [`archive/CONFIG_PARAMETERS_REFERENCE.md`](archive/CONFIG_PARAMETERS_REFERENCE.md)。
+换机器人只改 yaml；**每个键的语义、单位与陷阱见 [`config_guide.md`](config_guide.md)**。
 
 ---
 

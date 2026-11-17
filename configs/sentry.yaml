@@ -1,7 +1,4 @@
-
-#enemy_color: "red"
 enemy_color: "blue"
-
 #####-----神经网络参数-----#####
 yolo_name: tup
 classify_model: assets/tiny_resnet.onnx
@@ -11,21 +8,12 @@ yolov5_model_path: assets/yolov5.xml
 tup_model_path: assets/opt-1208-001.xml
 device: CPU
 min_confidence: 0.8
-
 #####-----检测结果发布（调试）-----#####
-# 把 tup 的检测结果画到图上、经 RemoteLogger 发布到 host；在另一台机器上跑
-# ./host/start.sh 打开 Watch 页，图像流里就能选到下面两路（话题名可改）：
-#   <publish_image_name>        原图 + 全部候选框(黄，标"分数 类别 拒因") + 保留框(绿，含关键点)
-#   <publish_image_name>_input  416x416 网络输入画布 + 映射后的同一批框（看板在输入里有多少像素）
-# 缺省 false（关）：打开会多编码两张 JPEG，不影响检测本身
 publish_detections: true
 publish_image_name: "tup_detect"
-# 额外把前 N 帧的**全分辨率**标注图存到 imgs/（tup_0000.png / tup_0000_input.png）：
-# UDP 图会被压到 img_width=640 + JPEG，标签/角点细节看不清，存档用于事后逐像素分析。
-# 0 = 不存。每帧两张 PNG 约 1.5~3 MB，按需设置。
+
 save_detection_frames: 10
 use_traditional: true
-
 #####-----ROI-----#####
 roi:
   x: 420
@@ -34,30 +22,27 @@ roi:
   height: 600
 
 use_roi: false
-
 #####-----传统方法参数-----#####
 threshold: 150
-max_angle_error: 45 # degree
+max_angle_error: 45
 min_lightbar_ratio: 1.5
 max_lightbar_ratio: 20
 min_lightbar_length: 8
 min_armor_ratio: 1
 max_armor_ratio: 5
 max_side_ratio: 1.5
-max_rectangular_error: 25 # degree
-
+max_rectangular_error: 25
 #####-----tracker参数-----#####
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
-
 #####-----EKF参数-----#####
 ekf:
-  q_xyz_acc_var: 70.0   # 位置/速度加速度方差
-  q_yaw_acc_var: 100.0    # 角加速度方差
-  r_yaw: 5e-3          # yaw 观测噪声
-  r_pitch: 2e-3        # pitch 观测噪声
-  r_dist_base: 2e-1    # 距离观测噪声基础值
+  q_xyz_acc_var: 70.0
+  q_yaw_acc_var: 100.0
+  r_yaw: 5e-3
+  r_pitch: 2e-3
+  r_dist_base: 2e-1
 
   outpost:
     radius: 0.2765
@@ -73,113 +58,74 @@ ekf:
     radius: 0.2
     armor_num: 4
     p0: [1, 64, 1, 64, 1, 64, 0.4, 400, 1.0e-5, 0.3, 0.3]
-
 #####-----aimer参数-----#####
-yaw_offset: -2 # degree -2.5
-pitch_offset: 1.72 # degree 2
-comming_angle: 55 # degree
-leaving_angle: 20 # degree
-decision_speed: 7 # rad/s
-high_speed_delay_time: 0.065 # s
-low_speed_delay_time: 0.055 # s planner use this value
+yaw_offset: -2
+pitch_offset: 1.72
+comming_angle: 55
+leaving_angle: 20
+decision_speed: 7
+high_speed_delay_time: 0.065
+low_speed_delay_time: 0.055
 #####-----离线回放/评估（默认关）-----#####
-# 额外发布一路"未标注原始帧"(话题 raw)，供 rlog_replay 重跑检测用。
-# 注意：每个图流都会按名限频地 JPEG 编码并写入 .rlog（enable_local 时），
-# 打开它会让 .rlog 体积约翻倍、并多一次编码开销 —— 只在采评估数据时开。
-# 若要全分辨率原始帧（推荐，重训也用），请改用 ./build/eval_record，不要把 img_width 调大。
 publish_raw_frame: false
-
 #####-----装甲板几何（1月中旬换样式只改这里）-----#####
-# 单位 m。缺省值 = 历史硬编码值（改这里会同时影响 PnP、3D marker 与关键点校验）。
-# 参考：小装甲板 135×56、大装甲板 230×56（RM 规则规定）；tilt 为板面俯仰角。
 armor_geometry:
   small_width: 0.135
   big_width: 0.230
   lightbar_length: 0.056
-  tilt_deg: 15.0          # 普通装甲板
-  outpost_tilt_deg: -15.0 # 前哨站
-  thickness: 0.01         # 仅 3D 可视化用
+  tilt_deg: 15.0
+  outpost_tilt_deg: -15.0
+  thickness: 0.01
 
-# 关键点语义校验：false = 只记 WARN（默认，不改变现有行为）；true = 校验失败直接丢弃该框。
-# 换新模型时建议先只看日志，确认关键点顺序/语义正确后再考虑开启拒收。
 reject_bad_keypoints: false
-
 #####-----弹道模型-----#####
-# rk4 = 内置解析解 + RK4（原行为，缺省） | poly = ballistic-main 离线拟合的多项式表
 ballistics_model: poly
-# 相对工程根的 CSV：small = 17mm(Cd 0.47)，big = 42mm(Cd 0.27)
-# 每行给出"某个弹速下 (pitch, time) 各 10 个系数"，运行时按当前弹速在表内线性插值；
-# pitch 列为"度、抬头为正"，程序内转成弧度
+
 ballistics_csv: assets/ballistic/small.csv
-# 拟合网格范围（与 ballistic-main/g.py 的调用参数一致）；超出即回退 RK4
+
 ballistics_x_range: [0.5, 15.0]
 ballistics_y_range: [-2.0, 2.0]
-# 弹速兜底（Aimer / Planner 共用）。缺键时保持旧行为 23|22 / 14|10 / +inf|25。
-# 重装 42mm 改成：bullet_speed_default: 16.5
-#                 bullet_speed_min: 10
-#                 bullet_speed_max: 20
-# 注意 big.csv 现行 V 上限 16.6，已覆盖重装 16.5（见 assets/ballistic/README.md）
-# bullet_speed_default: 22.0
-
 #####-----重装自瞄：瞄中心 + 等板转过来开火-----#####
-# 见 src/heavy_aim.cpp 与 tasks/auto_aim/center_aimer.hpp。
-# 云台始终压在**旋转中心**（不逐板跳），开火判据是"弹丸到达时刻有板压在瞄准线上"。
 center_aim:
-  hit_margin: 0.30        # 只用板面中间 70% 判定命中，吸收 PnP/超前量误差
-  gimbal_tol_deg: 0.5     # 云台到位判据（yaw/pitch 各自）
-  require_settled: true   # 云台没到位就不开火；整定不好时可临时设 false
-  max_iter: 6             # 飞行时间迭代次数
-  launch_delay: 0.0       # 从"判定开火"到"弹丸出膛"的总延迟 [s]（CAN+下位机+摩擦轮）
-                          # 预测时刻 = launch_delay + fly_time；实测标定后填，
-                          # 漏掉它会系统性打早：0.05 s 在 1 rad/s 下就是 2.9°
-                          # 连发节奏（最小开火间隔）由电控处理，这里不做冷却
+  hit_margin: 0.30
+  gimbal_tol_deg: 0.5
+  require_settled: true
+  max_iter: 6
+  launch_delay: 0.0
 
-# 位姿合理性门限（Solver 出参校验）：小于 0.5 m 的"敌人"物理上不存在，
-# 现场出现过 d=0.30 m 的脏解（虚假框被 IPPE 解成贴脸），这里显式写出来便于调整
 min_valid_dist: 0.5
 max_valid_dist: 50.0
-
 #####-----shooter参数-----#####
-first_tolerance: 3 # 近距离射击容差，degree
-second_tolerance: 2 # 远距离射击容差，degree
-judge_distance: 2 #距离判断阈值
-auto_fire: true # 是否由自瞄控制射击
+first_tolerance: 3
+second_tolerance: 2
+judge_distance: 2
+auto_fire: true
 
 camera_name: "hikrobot"
 exposure_ms: 10
 gain: 16
 vid_pid: "2bdf:0001"
-
-#  1  0  0
-#  0  1  0
-#  0  0  1
 #####-----工业相机标定参数-----#####
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
 calibrated_at: "2026-10-01"
-# 重投影误差: 0.4466px
+
 camera_matrix: [1817.806292,0.000000,704.048819,0.000000,1819.072108,545.80138,0.000000,0.000000,1.000000]
 distort_coeffs: [-0.068754,0.162100,-0.001822,-0.001524,0.000000]
 
-# 相机同理想情况的偏角: yaw-1.11 pitch0.01 roll-0.06 degree
-# 标定板到世界坐标系原点的水平距离: 1.20 m
-# 标定板同竖直摆放时的偏角: yaw123.89 pitch14.05 roll-0.86 degree
 R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0]
 t_camera2gimbal: [0.1600, 0.04525, 0.003]
-
 #####-----cboard参数-----#####
 quaternion_canid: 0x100
 bullet_speed_canid: 0x101
 send_canid: 0xff
 can_interface: "can0"
-
 #####-----gimbal参数-----#####
 com_port: "/dev/ttyACM0"
 yaw_kp: 0
 yaw_kd: 0
 pitch_kp: 0
 pitch_kd: 0
-
 #####-----planner-----#####
 fire_thresh: 0.15
 
@@ -190,7 +136,6 @@ R_yaw: [1]
 max_pitch_acc: 100
 Q_pitch: [9e6, 0]
 R_pitch: [1]
-
 #####-----remote_logger-----#####
 remote_logger:
   control_port: 15000
