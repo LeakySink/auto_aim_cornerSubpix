@@ -158,6 +158,17 @@ do_build() {
 do_check() {
   say "U 层自检"
   local fail=0 b
+  # include 自洽性：Windows 上编不了 OpenVINO 的入口，靠静态检查兜住
+  # "用了 io::Gimbal / auto_aim::Planner 却没直接 include"这类在 Linux 上
+  # 要到 55% 才炸的问题（2026-11 移除打符子系统时踩过一次）。
+  if [ -f "$ROOT/scripts/check_includes.py" ]; then
+    if "$PY" "$ROOT/scripts/check_includes.py" >/dev/null 2>&1; then
+      say "  OK   check_includes.py"
+    else
+      printf '%s  FAIL check_includes.py（运行它看具体缺哪行）%s\n' "$RED" "$RST" >&2
+      fail=1
+    fi
+  fi
   for b in ballistics_poly_check limit_rad_check ekf_update_check trajectory_nan_check; do
     if b="$(find_bin "$b")"; then
       if "$b" >/dev/null 2>&1; then say "  OK   $b"; else
