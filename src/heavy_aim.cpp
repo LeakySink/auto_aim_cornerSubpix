@@ -23,6 +23,7 @@
 #include "tasks/auto_aim/center_aimer.hpp"
 #include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/solver.hpp"
+#include "tasks/auto_aim/target.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
@@ -216,7 +217,11 @@ int main(int argc, char * argv[])
     }
 
     // ---- 3D 标记：当前状态（kalman_markers）+ 落点 / 到达时刻的板 ----
-    // host 的 Watch 页只看 `markers` 这一个键，所以额外标记要并进同一个数组。
+    // ⚠️ `kalman_markers()` 和 `MarkerArray::to_json()` 都返回**对象**
+    //    `{"schema":"marker_v1","frame_id":"world","items":[...]}`，不是数组。
+    //    合并时只能往 `"items"` 里追加；对对象直接 push_back 会在运行期抛
+    //    `[json.exception.type_error.308] cannot use push_back() with object`
+    //    （2026-11 第一次写时就是在这里崩的 —— 编译期查不出来）。
     if (!targets.empty() && res.valid) {
       const auto & target = targets.front();
       nlohmann::json markers = tools::viz::kalman_markers(target);
@@ -243,8 +248,15 @@ int main(int argc, char * argv[])
         }
       }
 
-      for (auto & m : extra.to_json()) markers.push_back(m);
-      data["markers"] = markers;
+      // 把 extra 的 items 追加到 markers 的 items 里
+      const auto extra_json = extra.to_json();
+      if (markers.is_object() && markers.contains("items") && markers["items"].is_array()) {
+        const auto & src = extra_json["items"];
+        for (const auto & item : src) markers["items"].push_back(item);
+        data["markers"] = markers;
+      } else {
+        data["markers"] = extra_json;  // 兜底：结构不符时至少别崩
+      }
     }
 
     tools::RemoteLogger::instance().plot(data);
