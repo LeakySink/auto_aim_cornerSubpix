@@ -174,11 +174,31 @@ center_aim:
 
 所以到位误差是 `|反馈 + 指令|`（**相加**，与 `planner` 的 `pitch_err = plan.pitch0 + gs.pitch` 同源），
 写成相减会让稳态误差恒为 `2×瞄准仰角`（5 m 处约 11°），`fire` 永远为 0。
-现在代码里 `in_window && !settled` 会限流打一条 WARN，把 yaw/pitch 误差与容差一起打出来。
+现在代码里 `in_window && !settled` 会限流打一条 WARN，把 yaw/pitch 误差、容差
+和**实际 cmd/fb 角度**一起打出来，并区分两种情况：
+
+- `yaw_err ≈ |yaw_offset|` 且 `pitch_err ≈ 仰角 + |pitch_offset|` → **云台根本没在跟**
+  （没切 `AUTO_AIM`、串口没通、使能没给）；
+- `pitch_err ≈ 2×瞄准仰角` → 才是符号写反。
 
 `heavy_*` 其余调试字段：`heavy_align_err_deg` / `heavy_window_deg`（到达时刻 yaw 偏差 / 板面角宽）、
 `heavy_pitch_err_deg` / `heavy_pitch_window_deg`、`heavy_fly_time` / `heavy_total_time`、
-`heavy_plate_id`、`heavy_t_to_cross`、`heavy_aim_x/y/z`。
+`heavy_plate_id`、`heavy_t_to_cross`、`heavy_aim_x/y/z`、
+`heavy_mode`（0=IDLE 1=AUTO_AIM）、`heavy_take_over`、`heavy_no_gimbal`。
+
+### 云台没上电 / 无力时怎么调
+
+重装车还没装、或只想验证检测+EKF+判据链路时，用 `--no-gimbal`：
+
+```bash
+./build/src/heavy_aim configs/sentry.yaml --no-gimbal
+```
+
+效果：**一条指令都不发**（不抢控制权），不检查 `GimbalMode`，把算出来的指令角
+当反馈喂回去（`settled` 恒成立），于是 `fire` 退化成纯预测的"此刻开火能否命中"。
+HUD 上会标 `[NO-GIMBAL: predict only]`，`plot` 里 `heavy_no_gimbal=1`。
+
+这是台架阶段验证落点判据最有用的模式——没有云台也能看粗框什么时候变绿。
 
 ### 单元测试
 

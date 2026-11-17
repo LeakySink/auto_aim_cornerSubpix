@@ -38,7 +38,8 @@ using namespace std::chrono_literals;
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明 }"
   "{@config-path   | configs/sentry.yaml    | 位置参数：yaml 配置文件路径 }"
-  "{bullet-speed b | 0                      | 弹速 m/s（<=0 时用 yaml 的 bullet_speed_default）}";
+  "{bullet-speed b | 0                      | 弹速 m/s（<=0 时用 yaml 的 bullet_speed_default）}"
+  "{no-gimbal      | false                  | 云台无力调试：不发指令、不要求到位，只算预测并画图 }";
 
 int main(int argc, char * argv[])
 {
@@ -51,6 +52,9 @@ int main(int argc, char * argv[])
     return 0;
   }
   const double cli_speed = cli.get<double>("bullet-speed");
+  // 云台无力/不接云台调试：只算"此刻开火能不能命中"，不发指令、不要求到位。
+  // 用于车还没上电、或只想验证检测+EKF+判据链路的时候。
+  const bool no_gimbal = cli.get<bool>("no-gimbal");
 
   tools::RemoteLogger::instance().init(config_path);
   io::RemoteDebug::install();
@@ -94,7 +98,8 @@ int main(int argc, char * argv[])
     // 云台没进 AUTO_AIM（下位机还没切档）时不要接管：否则我们一直在发指令、
     // 云台不动 → CenterAimer 每 2 s 刷一条"未到位"WARN，看起来像算法坏了。
     // 与 standard_mpc 的做法一致（`mode == io::GimbalMode::AUTO_AIM` 才控制）。
-    const bool take_over = (mode == io::GimbalMode::AUTO_AIM);
+    // `--no-gimbal`：云台无力/没上电时的调试模式，跳过模式检查也不发指令。
+    const bool take_over = no_gimbal || (mode == io::GimbalMode::AUTO_AIM);
 
     const double bullet_speed =
       (speed_fixed > 0.0) ? speed_fixed
@@ -104,10 +109,22 @@ int main(int argc, char * argv[])
 
     auto_aim::CenterAimResult res;
     if (!targets.empty() && take_over) {
-      res = center_aimer.solve(targets.front(), t, gs.yaw, gs.pitch, bullet_speed);
+      if (no_gimbal) {
+        // 云台无力时反馈角没有意义。做法：先算指令角，再把**指令角当反馈**喂回去，
+        // 这样 settled 判据恒成立，fire 退化成纯预测的"此刻开火能否命中"。
+        auto_aim::CenterAimResult cmd;
+        if (center_aimer.aim_center(targets.front(), t, bullet_speed, &cmd)) {
+          res = center_aimer.solve(targets.front(), t, cmd.yaw, -cmd.pitch, bullet_speed);
+        }
+      } else {
+        res = center_aimer.solve(targets.front(), t, gs.yaw, gs.pitch, bullet_speed);
+      }
     }
 
-    if (res.valid) {
+    if (no_gimbal) {
+      // 不接管云台：一条指令都不发（云台无力时发 control=true 没有意义，
+      // 而且会让下位机以为视觉在抢控制权）。
+    } else if (res.valid) {
       gimbal.send(
         true, res.fire, static_cast<float>(res.yaw), 0, 0, static_cast<float>(res.pitch), 0, 0);
     } else {
@@ -168,9 +185,10 @@ int main(int argc, char * argv[])
       // 4) HUD
       char hud[256];
       std::snprintf(
-        hud, sizeof(hud), "fire=%d in_win=%d settled=%d plate=%d | %s", res.fire ? 1 : 0,
+        hud, sizeof(hud), "fire=%d in_win=%d settled=%d plate=%d | %s%s", res.fire ? 1 : 0,
         res.in_window ? 1 : 0, res.settled ? 1 : 0, res.plate_id,
-        res.fire ? "WOULD FIRE" : (res.in_window ? "wait gimbal" : "wait plate"));
+        res.fire ? "WOULD FIRE" : (res.in_window ? "wait gimbal" : "wait plate"),
+        no_gimbal ? "  [NO-GIMBAL: predict only]" : "");
       cv::putText(
         img, hud, {10, 26}, cv::FONT_HERSHEY_SIMPLEX, 0.7,
         res.fire ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 255, 255), 2);
@@ -192,6 +210,7 @@ int main(int argc, char * argv[])
 
     data["heavy_mode"] = static_cast<int>(mode);  // 0=IDLE 1=AUTO_AIM
     data["heavy_take_over"] = take_over ? 1 : 0;
+    data["heavy_no_gimbal"] = no_gimbal ? 1 : 0;  // 1 = 只预测、不发指令
     data["heavy_valid"] = res.valid ? 1 : 0;
     data["fire"] = (res.valid && res.fire) ? 1 : 0;
     // fire 一直是 0 时，先看这两个谁不满足：
