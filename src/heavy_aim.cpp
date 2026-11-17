@@ -12,6 +12,7 @@
 //   ./build/src/heavy_aim configs/sentry.yaml --bullet-speed 16.5
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -20,12 +21,14 @@
 #include "io/gimbal/gimbal.hpp"
 #include "io/remote_debug.hpp"
 #include "tasks/auto_aim/center_aimer.hpp"
+#include "tasks/auto_aim/kalman_markers.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/math_tools.hpp"
+#include "tools/rdbg/markers/viz_markers.hpp"
 #include "tools/remote_logger.hpp"
 #include "tools/yaml.hpp"
 
@@ -104,13 +107,74 @@ int main(int argc, char * argv[])
       gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
     }
 
-    // ---- 调试图 + rdbg 兼容字段 ----
+    // ---- 可视化：落点 + 到达时刻的板 + HUD ----
+    // 不能实弹时，靠这张图回答"如果现在开火，弹丸会打在哪块板上"：
+    //   绿细框 = 当前所有板（EKF 估计）
+    //   红十   = **落点**（瞄准点 = 外推后的旋转中心）
+    //   粗框   = **弹丸到达时刻**预计被命中的板：
+    //            绿 = 会开火 / 黄 = 在窗口内但云台没到位 / 橙 = 那一刻没压线
+    //   左上文字 = 两个半条件 + 角误差/窗口 + 距离/弹速/飞行时间/距穿越时间
     if (res.valid && !targets.empty()) {
       const auto & target = targets.front();
+
+      // 1) 当前所有板
       for (const auto & xyza : target.armor_xyza_list()) {
-        const auto pts = solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
+        const auto pts =
+          solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
         tools::draw_points(img, pts, {0, 255, 0});
       }
+
+      // 2) 落点
+      const std::vector<cv::Point3f> aim_pt{{static_cast<float>(res.aim_xyz.x()),
+                                             static_cast<float>(res.aim_xyz.y()),
+                                             static_cast<float>(res.aim_xyz.z())}};
+      const auto aim_px = solver.world2pixel(aim_pt);
+      if (!aim_px.empty()) {
+        const cv::Point2f px = aim_px.front();
+        if (std::isfinite(px.x) && std::isfinite(px.y) && px.x > 0 && px.y > 0 &&
+            px.x < img.cols && px.y < img.rows) {
+          cv::drawMarker(img, px, {0, 0, 255}, cv::MARKER_CROSS, 26, 2);
+          cv::circle(img, px, 10, {0, 0, 255}, 1);
+        }
+      }
+
+      // 3) 到达时刻预计被命中的板
+      if (res.plate_id >= 0) {
+        auto_aim::Target pred = target;
+        pred.predict(res.total_time);
+        const auto pred_plates = pred.armor_xyza_list();
+        if (res.plate_id < static_cast<int>(pred_plates.size())) {
+          const auto & xyza = pred_plates[res.plate_id];
+          const auto pts =
+            solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
+          if (pts.size() >= 4) {
+            const cv::Scalar color = res.fire ? cv::Scalar(0, 255, 0)
+                                              : (res.in_window ? cv::Scalar(0, 255, 255)
+                                                               : cv::Scalar(0, 165, 255));
+            cv::polylines(
+              img, std::vector<std::vector<cv::Point>>{{pts[0], pts[1], pts[2], pts[3]}}, true,
+              color, 3);
+          }
+        }
+      }
+
+      // 4) HUD
+      char hud[256];
+      std::snprintf(
+        hud, sizeof(hud), "fire=%d in_win=%d settled=%d plate=%d | %s", res.fire ? 1 : 0,
+        res.in_window ? 1 : 0, res.settled ? 1 : 0, res.plate_id,
+        res.fire ? "WOULD FIRE" : (res.in_window ? "wait gimbal" : "wait plate"));
+      cv::putText(
+        img, hud, {10, 26}, cv::FONT_HERSHEY_SIMPLEX, 0.7,
+        res.fire ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 255, 255), 2);
+      std::snprintf(
+        hud, sizeof(hud), "yaw %.2f/%.2f deg  pitch %.2f/%.2f deg", res.align_err_deg,
+        res.hit_window_deg / 2.0, res.pitch_err_deg, res.pitch_window_deg / 2.0);
+      cv::putText(img, hud, {10, 52}, cv::FONT_HERSHEY_SIMPLEX, 0.6, {255, 255, 255}, 1);
+      std::snprintf(
+        hud, sizeof(hud), "d %.2f m  v %.1f m/s  fly %.3f s  cross %.3f s", res.aim_xyz.norm(),
+        bullet_speed, res.fly_time, res.t_to_cross);
+      cv::putText(img, hud, {10, 76}, cv::FONT_HERSHEY_SIMPLEX, 0.6, {255, 255, 255}, 1);
     }
 
     nlohmann::json data;
@@ -149,6 +213,38 @@ int main(int argc, char * argv[])
       data["heavy_aim_x"] = res.aim_xyz.x();
       data["heavy_aim_y"] = res.aim_xyz.y();
       data["heavy_aim_z"] = res.aim_xyz.z();
+    }
+
+    // ---- 3D 标记：当前状态（kalman_markers）+ 落点 / 到达时刻的板 ----
+    // host 的 Watch 页只看 `markers` 这一个键，所以额外标记要并进同一个数组。
+    if (!targets.empty() && res.valid) {
+      const auto & target = targets.front();
+      nlohmann::json markers = tools::viz::kalman_markers(target);
+
+      tools::viz::MarkerArray extra;
+      const float alpha = res.fire ? 1.0f : 0.55f;
+      const Eigen::Vector4d c_aim{1.0, 0.2, 0.2, 1.0};
+      const Eigen::Vector4d c_hit = res.fire ? Eigen::Vector4d{0.1, 1.0, 0.2, alpha}
+                                             : Eigen::Vector4d{1.0, 0.8, 0.1, alpha};
+
+      extra.sphere("heavy.aim", "a", res.aim_xyz, 0.05, c_aim);
+      extra.line_list(
+        "heavy.los", "l", {Eigen::Vector3d::Zero(), res.aim_xyz}, 0.006,
+        {1.0, 0.2, 0.2, 0.6});
+
+      if (res.plate_id >= 0) {
+        auto_aim::Target pred = target;
+        pred.predict(res.total_time);
+        const auto pred_plates = pred.armor_xyza_list();
+        if (res.plate_id < static_cast<int>(pred_plates.size())) {
+          extra.sphere(
+            "heavy.hit", "h", pred_plates[res.plate_id].head(3), 0.05,
+            res.in_window ? c_hit : Eigen::Vector4d{1.0, 0.5, 0.1, alpha});
+        }
+      }
+
+      for (auto & m : extra.to_json()) markers.push_back(m);
+      data["markers"] = markers;
     }
 
     tools::RemoteLogger::instance().plot(data);
