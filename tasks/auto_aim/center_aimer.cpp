@@ -21,6 +21,19 @@ double yaml_or(const YAML::Node & n, const char * key, double fallback)
   return (n[key] && n[key].IsDefined()) ? n[key].as<double>() : fallback;
 }
 
+/// 单个候选板的评估结果（选板与弹道解算共用）
+struct PlateEval
+{
+  int id = -1;
+  double z = 0.0;        ///< 板心高度（世界系，相对云台原点）
+  double horiz = 0.0;    ///< 板心水平距离
+  double elev = 0.0;     ///< 板心仰角（直线）
+  double err_yaw = 0.0;  ///< 相对瞄准线的方位偏差
+  double half_yaw = 0.0; ///< 该距离/朝向下板面的半角宽
+  double cos_face = 0.0; ///< 朝向枪口的程度
+  bool ok = false;
+};
+
 }  // namespace
 
 CenterAimer::CenterAimer(const std::string & config_path)
@@ -46,6 +59,10 @@ CenterAimer::CenterAimer(const std::string & config_path)
     cfg_.min_face_cos = yaml_or(ca, "min_face_cos", cfg_.min_face_cos);
     cfg_.gimbal_tol = yaml_or(ca, "gimbal_tol_deg", cfg_.gimbal_tol);
     cfg_.launch_delay = yaml_or(ca, "launch_delay", cfg_.launch_delay);
+    cfg_.pitch_follow_plate =
+      (ca["pitch_follow_plate"] && ca["pitch_follow_plate"].IsDefined())
+        ? ca["pitch_follow_plate"].as<bool>()
+        : cfg_.pitch_follow_plate;
     cfg_.require_settled = (ca["require_settled"] && ca["require_settled"].IsDefined())
                              ? ca["require_settled"].as<bool>()
                              : cfg_.require_settled;
@@ -174,7 +191,10 @@ CenterAimResult CenterAimer::solve(
     const double phi = std::atan2(p.y(), p.x());
     const double elev = std::atan2(p.z(), horiz);
     const double err_yaw = std::abs(tools::limit_rad(phi - yaw_los));
-    const double err_pitch = std::abs(elev - elev_aim);
+    // pitch 偏差：跟随板高时，瞄准线的高度就是这块板的高度 → 偏差恒为 0；
+    // 只瞄中心时，才需要比较板高与中心高度的差。
+    const double elev_ref = cfg_.pitch_follow_plate ? elev : elev_aim;
+    const double err_pitch = std::abs(elev - elev_ref);
 
     // 侧视时板在视线上被压扁，有效宽度按 cos_face 收缩（正视 1、侧棱 →0）
     const double half_yaw = std::atan2(eff_w * cos_face / 2.0, horiz);
@@ -210,6 +230,23 @@ CenterAimResult CenterAimer::solve(
       }
     }
     return CenterAimResult{};
+  }
+
+  // ---- pitch 跟随选中板的高度 ----
+  // 瞄准点 X/Y 仍然是**旋转中心**（板转过来才压线），只是把 Z 换成这块板的板高。
+  // 这样高度差 h 再大（规范允许到 100mm）也不需要"整块板跳过一个窗口才能打"。
+  if (cfg_.pitch_follow_plate) {
+    const double plate_z = plates[best_id].z();
+    const double horiz = std::hypot(r.aim_xyz.x(), r.aim_xyz.y());
+    const tools::Trajectory traj_h(bullet_speed, horiz, plate_z);
+    if (traj_h.unsolvable) return CenterAimResult{};
+
+    r.aim_xyz.z() = plate_z;
+    r.aim_pitch_abs = traj_h.pitch;
+    r.pitch = -(traj_h.pitch + cfg_.pitch_offset);
+    r.fly_time = traj_h.fly_time;
+    r.total_time = cfg_.launch_delay + traj_h.fly_time;
+    r.pitch_err_deg = 0.0;  // 瞄准线高度就是这块板的高度
   }
 
   r.plate_id = best_id;

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <string>
 
 #include <Eigen/Dense>
@@ -55,32 +56,41 @@ struct RunStats
   int inconsistent = 0;     // fire 但不在窗口内
   int bad_plate_id = 0;     // 选到了不该选的板
   int back_face_hits = 0;   // 选中了背面/侧棱板（cos_face < 0.15）
+  std::set<int> plates_fired;  // 本段里选中过的板号（验证"4 块都能打"）
   double min_fire_cos_face = 1.0;
   double max_err_deg = 0.0;
   double max_dt_err = 0.0;  // |total_time - fly_time - launch_delay|
 };
 
 /// 用"理想跟随"跑一段：云台角直接取上一刻算出的指令角；时间戳按 dt 递增
+/// 用"理想跟随"跑一段：**云台反馈取上一帧的指令角**（模拟真实云台跟指令）。
+///
+/// 之前这里传的是 `aim_center()` 算出的"瞄中心"角，而 `pitch_follow_plate=true` 时
+/// 实际指令 pitch 是跟随板高的 —— 反馈喂错了对象，等于让云台永远瞄中心，
+/// 于是"跟随板高"这条路在测试里走不通。改成跟上一帧指令才是真实语义。
 RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double speed, int steps,
              double dt, bool require_even_plate, double launch_delay = 0.0)
 {
   RunStats st;
   auto tp = std::chrono::steady_clock::now();
   bool prev = false;
+  // 初始云台角：先用一次 aim_center 对齐，避免第一帧"云台凭空在原点"导致 settled 判失败
+  double gs_yaw = 0.0, gs_pitch = 0.0;
+  if (auto_aim::CenterAimResult init; aimer.aim_center(target, tp, speed, &init)) {
+    gs_yaw = init.yaw;
+    gs_pitch = -init.pitch;  // 反馈抬头为正
+  }
   for (int i = 0; i < steps; ++i) {
-    auto_aim::CenterAimResult ref;
-    if (!aimer.aim_center(target, tp, speed, &ref)) {
-      target.predict(dt);
-      tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
-      continue;
-    }
-    const auto res = aimer.solve(target, tp, ref.yaw, -ref.pitch, speed);  // 反馈抬头为正
+    const auto res = aimer.solve(target, tp, gs_yaw, gs_pitch, speed);
     ++st.frames;
     st.max_dt_err = std::max(st.max_dt_err, std::abs(res.total_time - res.fly_time - launch_delay));
     // 可见性：任何时候都不该选中"背面/侧棱"的板（不论是否开火）
     if (res.valid) {
       if (res.cos_face < 0.15) ++st.back_face_hits;
       st.min_fire_cos_face = std::min(st.min_fire_cos_face, res.cos_face);
+      if (res.plate_id >= 0) {
+        st.plates_fired.insert(res.plate_id);
+      }
     }
     if (res.fire) {
       ++st.fire_frames;
@@ -89,6 +99,11 @@ RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double spee
       if (res.pitch_err_deg > res.pitch_window_deg / 2.0 + 1e-6) ++st.inconsistent;
       if (require_even_plate && (res.plate_id % 2 != 0)) ++st.bad_plate_id;
       st.max_err_deg = std::max(st.max_err_deg, res.align_err_deg);
+    }
+    // 云台跟上一帧的指令（理想跟随，零滞后）
+    if (res.valid) {
+      gs_yaw = res.yaw;
+      gs_pitch = -res.pitch;
     }
     prev = res.fire;
     target.predict(dt);
@@ -153,17 +168,47 @@ int main()
     expect(st.min_fire_cos_face >= 0.15, "被选中的板必须朝向我们");
   }
 
-  // ---------- 3) 竖直方向不匹配：只瞄中心就打不到高处的板 ----------
-  std::printf("\n== 3) h=0.3（1/3 号板高 0.3 m）：只能选中 0/2 号板 ==\n");
+  // ---------- 3) 高度不一致：pitch 跟随板高 -> 4 块板都能打 ----------
+  // 规范只限制"任意两块板下边缘高度差 ≤100mm"，不规定排布，所以
+  // "一低一高两中"是合规工况。竖直窗口只有 板高×35% ≈ ±19.6mm，
+  // 因此若 pitch 固定瞄中心，高度差 >39mm 的板**永远**打不到。
+  std::printf("\n== 3) h=0.3（1/3 号板高 0.3 m）：pitch 跟随板高 -> 4 块都能打 ==\n");
   {
+    // 默认配置 pitch_follow_plate = true
+    // 跑满一整圈：w=1 rad/s、dt=0.01 -> 一圈 2π ≈ 6.28s ≈ 628 帧，取 720 帧留余量。
+    // 4 块板压线的相位是 0°/90°/180°/270°，3 秒(300 帧)只转到 172°，会漏掉 270° 那块。
+    const int steps = 720;
     Target target(kDist, 1.0, kRadius, 0.3);
-    const auto st = run(aimer, target, kSpeed, 300, dt, /*require_even_plate=*/true);
-    const double expect_events = 1.0 * 3.0 / M_PI;  // 只剩两块可用 -> 每 180° 一次
+    const auto st = run(aimer, target, kSpeed, steps, dt, /*require_even_plate=*/false);
+    const double expect_events = 1.0 * (steps * dt) / (M_PI / 2.0);  // 每 90° 一次
+    std::printf("  帧=%d fire 帧=%d 事件=%d（期望 ≈%.2f）\n", st.frames, st.fire_frames, st.events,
+                expect_events);
+    std::printf("  选中过的板号: ");
+    for (int id : st.plates_fired) std::printf("%d ", id);
+    std::printf("（共 %zu 块）\n", st.plates_fired.size());
+    expect(st.inconsistent == 0, "fire 时必须落在命中窗口内");
+    expect(st.events >= 1, "应有开火窗口");
+    // 跟随板高后，4 块板都应该被选中过（而不是只有与中心同高的 0/2）
+    expect(st.plates_fired.size() == 4, "pitch 跟随板高时 4 块板都该有开火机会");
+    expect(st.events >= static_cast<int>(expect_events) - 1, "窗口数应接近 h=0 时的水平");
+  }
+
+  // ---------- 3b) 关掉跟随：退回"只有与中心同高的板能打" ----------
+  std::printf("\n== 3b) h=0.3 且 pitch_follow_plate=false：只能打 0/2 号板 ==\n");
+  {
+    auto_aim::CenterAimConfig cfg;
+    cfg.pitch_follow_plate = false;
+    auto_aim::CenterAimer fixed(cfg);
+
+    Target target(kDist, 1.0, kRadius, 0.3);
+    const auto st = run(fixed, target, kSpeed, 720, dt, /*require_even_plate=*/true);
+    const double expect_events = 1.0 * 7.2 / M_PI;  // 只剩两块 -> 每 180° 一次
     std::printf("  帧=%d fire 帧=%d 事件=%d（期望 ≈%.2f）选错板=%d\n", st.frames, st.fire_frames,
                 st.events, expect_events, st.bad_plate_id);
     expect(st.inconsistent == 0, "fire 时必须落在命中窗口内");
-    expect(st.bad_plate_id == 0, "竖直方向超窗口的板不应被选中");
-    expect(st.events >= 1, "低处两块板仍应能打");
+    expect(st.bad_plate_id == 0, "不许开火打在高度不匹配的板上");
+    expect(st.events >= 1, "与中心同高的两块板仍应能打");
+    expect(st.events <= static_cast<int>(expect_events) + 1, "窗口数应约为 h=0 时的一半");
   }
 
   // ---------- 4) 反例：云台不到位不开火 ----------

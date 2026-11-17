@@ -89,6 +89,7 @@ ballistics_y_range: [-2.0, 2.0]
 center_aim:
   hit_margin: 0.30
   min_face_cos: 0.15
+  pitch_follow_plate: true
   gimbal_tol_deg: 0.5
   require_settled: true
   max_iter: 6
