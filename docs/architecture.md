@@ -157,15 +157,39 @@ center_aim:
   仍有一段滞后。实测 >20 ms 时要么在指令角上加超前，要么改回 MPC + 同一判据。
 - **`fire` 是"此刻能命中"的持续信号**，限流由电控负责。
 
+### `fire` 一直是 0 怎么查
+
+`fire = in_window && settled`，两个条件分别发到 `plot(data)` 里，**先看谁不满足**：
+
+| 字段 | =0 说明 | 往哪查 |
+|---|---|---|
+| `heavy_in_window` | 到达时刻没有板压在瞄准线上 | 目标/预测问题：板还没转过来（看 `heavy_t_to_cross`）、`h≠0` 的板被竖直窗口排除、`hit_margin` 太大 |
+| `heavy_settled` | 云台不在指令角上 | 云台没跟上、`gimbal_tol_deg` 太紧，**或 pitch 符号搞反**（见下） |
+| `heavy_valid` | 根本没解算 | 无目标、状态非法、弹道无解 |
+
+⚠️ **pitch 符号陷阱（2026-11 真实踩过，表现为 `fire` 恒 0 且无任何输出）**：
+
+- **反馈** `GimbalState::pitch` **抬头为正**（`gimbal.cpp`：`state_.pitch = rx.pitch`，只在构造四元数时用 `-pitch`）；
+- **指令**（`CenterAimResult::pitch` / `plan.pitch`）**抬头为负**（与 `aimer`/`planner` 一致）。
+
+所以到位误差是 `|反馈 + 指令|`（**相加**，与 `planner` 的 `pitch_err = plan.pitch0 + gs.pitch` 同源），
+写成相减会让稳态误差恒为 `2×瞄准仰角`（5 m 处约 11°），`fire` 永远为 0。
+现在代码里 `in_window && !settled` 会限流打一条 WARN，把 yaw/pitch 误差与容差一起打出来。
+
+`heavy_*` 其余调试字段：`heavy_align_err_deg` / `heavy_window_deg`（到达时刻 yaw 偏差 / 板面角宽）、
+`heavy_pitch_err_deg` / `heavy_pitch_window_deg`、`heavy_fly_time` / `heavy_total_time`、
+`heavy_plate_id`、`heavy_t_to_cross`、`heavy_aim_x/y/z`。
+
 ### 单元测试
 
 ```bash
 ./build/tests/center_aimer_check        # 不需要硬件
 ```
 
-6 节断言：瞄准角严格指向中心；`fly_time` 量级正确（5 m/16.5 m/s ≈0.319 s）；
+7 节断言：瞄准角严格指向中心；`fly_time` 量级正确（5 m/16.5 m/s ≈0.319 s）；
 fire 必须落在窗口内；开火事件数 ≈ 每 90° 一次（`h≠0` 时每 180°）；
-竖直超窗口的板不被选中；云台偏 5° 不开火；`total_time - fly_time` 精确等于 `launch_delay`。
+竖直超窗口的板不被选中；云台偏 5° 不开火；**反馈 pitch 符号搞反时必须判未到位**；
+`total_time - fly_time` 精确等于 `launch_delay`。
 
 ---
 

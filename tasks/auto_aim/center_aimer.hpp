@@ -55,6 +55,10 @@ struct CenterAimResult
   bool valid = false;  ///< false = 无目标/无解/状态非法，本帧不控制
   bool fire = false;
 
+  /// 开火的两半条件，分开给出来：`fire` 一直是 0 时，先看这两个谁不满足。
+  bool in_window = false;  ///< 到达时刻确实有板压在瞄准线上
+  bool settled = false;    ///< 云台已到位（require_settled=false 时恒为 true）
+
   double yaw = 0.0;    ///< 云台指令角 [rad]
   double pitch = 0.0;  ///< 云台指令角 [rad]（向上为负，与 io::Command 一致）
   double aim_pitch_abs = 0.0;  ///< 瞄准点的绝对仰角 [rad]（向上为正，弹道解算结果）

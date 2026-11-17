@@ -7,6 +7,7 @@
 
 #include "tools/ballistics_poly.hpp"
 #include "tools/math_tools.hpp"
+#include "tools/remote_logger.hpp"
 #include "tools/trajectory.hpp"
 
 namespace auto_aim
@@ -184,16 +185,47 @@ CenterAimResult CenterAimer::solve(
   // 到达时刻这块板是否压在瞄准线上（yaw 与 pitch 都要在窗口内）
   const bool in_window = best_err_yaw <= best_win_yaw / 2.0 && best_err_pitch <= best_win_pitch / 2.0;
 
-  // 云台到位判据：预测得再准，枪口没到也是白搭
+  // 云台到位判据：预测得再准，枪口没到也是白搭。
+  //
+  // ⚠️ pitch 的符号是这里唯一的坑：
+  //   - **反馈** `gs.pitch` 抬头为**正**（`gimbal.cpp` 里 `state_.pitch = rx.pitch`，
+  //     构造四元数时才用 `-pitch` 绕 Y）；
+  //   - **指令** `r.pitch` 抬头为**负**（和 `planner`/`aimer` 一样下发 `-traj.pitch`）。
+  //   所以误差是两者**相加**（与 `planner` 的 `pitch_err = plan.pitch0 + gs.pitch` 同源）。
+  //   2026-11 这里写成相减，导致稳态误差恒为 2×pitch（≥3°）→ `fire` 永远为 0。
   bool settled = true;
+  double yaw_err = 0.0, pitch_err = 0.0;
+  const double tol = cfg_.gimbal_tol / kRad2Deg;
   if (cfg_.require_settled) {
-    const double tol = cfg_.gimbal_tol / kRad2Deg;
-    settled = std::abs(tools::limit_rad(gimbal_yaw - r.yaw)) < tol &&
-              std::abs(gimbal_pitch - r.pitch) < tol;
+    yaw_err = std::abs(tools::limit_rad(gimbal_yaw - r.yaw));
+    pitch_err = std::abs(gimbal_pitch + r.pitch);
+    settled = yaw_err < tol && pitch_err < tol;
+  }
+
+  // "预测已命中但枪没到位"是最容易被误判成"算法不工作"的一种状态（2026-11 就踩过：
+  // pitch 符号写反 → 误差恒为 2×pitch → fire 永远 0，且没有任何输出）。
+  // 这里限流打一条 WARN，把误差和容差一起打出来。
+  if (in_window && !settled) {
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last{};
+    static bool logged = false;
+    const auto now = clock::now();
+    if (!logged || std::chrono::duration<double>(now - last).count() > 2.0) {
+      last = now;
+      logged = true;
+      tools::RemoteLogger::instance().log(
+        "WARN",
+        "[CenterAim] 预测已命中但云台未到位：yaw_err={:.2f}° pitch_err={:.2f}° "
+        "（容差 {:.2f}°）。若 pitch_err 恒≈2×瞄准仰角，是符号写反了"
+        "（反馈抬头为正、指令抬头为负，误差应为相加）",
+        yaw_err * kRad2Deg, pitch_err * kRad2Deg, cfg_.gimbal_tol);
+    }
   }
 
   // 连发节奏（最小开火间隔）由电控负责，这里不设冷却：
   // fire 只表示"此刻开火能命中"，剩下交给下位机。
+  r.in_window = in_window;
+  r.settled = settled;
   r.fire = in_window && settled;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据

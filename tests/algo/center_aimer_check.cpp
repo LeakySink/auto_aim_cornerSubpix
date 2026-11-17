@@ -72,7 +72,7 @@ RunStats run(auto_aim::CenterAimer & aimer, auto_aim::Target target, double spee
       tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
       continue;
     }
-    const auto res = aimer.solve(target, tp, ref.yaw, ref.pitch, speed);
+    const auto res = aimer.solve(target, tp, ref.yaw, -ref.pitch, speed);  // 反馈抬头为正
     ++st.frames;
     st.max_dt_err = std::max(st.max_dt_err, std::abs(res.total_time - res.fly_time - launch_delay));
     if (res.fire) {
@@ -162,7 +162,7 @@ int main()
     for (int i = 0; i < 300; ++i) {
       CenterAimResult ref;
       if (aimer.aim_center(target, tp, kSpeed, &ref)) {
-        const auto res = aimer.solve(target, tp, ref.yaw + 5.0 * kDeg2Rad, ref.pitch, kSpeed);
+        const auto res = aimer.solve(target, tp, ref.yaw + 5.0 * kDeg2Rad, -ref.pitch, kSpeed);
         ++checked;
         if (res.fire) ++fire_when_offset;
       }
@@ -180,11 +180,30 @@ int main()
     std::chrono::steady_clock::time_point tp = std::chrono::steady_clock::now();
     CenterAimResult ref;
     expect(aimer.aim_center(target, tp, kSpeed, &ref), "w=0 时应可解算");
-    const auto res = aimer.solve(target, tp, ref.yaw, ref.pitch, kSpeed);
+    const auto res = aimer.solve(target, tp, ref.yaw, -ref.pitch, kSpeed);  // 反馈抬头为正
     std::printf("  fire=%d plate_id=%d 对齐误差=%.3f°\n", res.fire ? 1 : 0, res.plate_id,
                 res.align_err_deg);
     expect(res.valid, "结果应有效");
+    expect(res.in_window, "板正对且不转 -> 到达时刻应压在线上");
+    expect(res.settled, "按正确符号给反馈 -> 应判为到位");
     expect(res.fire, "板正对且不转 -> 应可开火");
+  }
+
+  // ---------- 5b) pitch 符号回归：把指令符号当反馈喂回去 -> 必须判为未到位 ----------
+  // 反馈抬头为正、指令抬头为负，误差是 |反馈 + 指令|。若写成相减，
+  // 稳态误差恒为 2×pitch（5 m 处约 3°），fire 会永远是 0（2026-11 真实踩过）。
+  std::printf("\n== 5b) 反馈符号搞反时不应开火 ==\n");
+  {
+    Target target(kDist, 0.0, kRadius, 0.0);
+    std::chrono::steady_clock::time_point tp = std::chrono::steady_clock::now();
+    CenterAimResult ref;
+    expect(aimer.aim_center(target, tp, kSpeed, &ref), "w=0 时应可解算");
+    const auto res = aimer.solve(target, tp, ref.yaw, ref.pitch, kSpeed);  // 错误符号
+    std::printf("  fire=%d in_window=%d settled=%d |指令 pitch|=%.2f°\n", res.fire ? 1 : 0,
+                res.in_window ? 1 : 0, res.settled ? 1 : 0, -res.pitch * kRad2Deg);
+    expect(res.in_window, "几何上仍在窗口内（错的只是云台反馈）");
+    expect(!res.settled, "符号搞反 -> 应判为未到位");
+    expect(!res.fire, "未到位 -> 不应开火");
   }
 
   // ---------- 6) 出膛延迟补偿：预测时刻必须 = launch_delay + fly_time ----------

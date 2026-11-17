@@ -121,6 +121,11 @@ int main(int argc, char * argv[])
 
     data["heavy_valid"] = res.valid ? 1 : 0;
     data["fire"] = (res.valid && res.fire) ? 1 : 0;
+    // fire 一直是 0 时，先看这两个谁不满足：
+    //   in_window=0 → 目标/预测问题（板没转到线上，或 h≠0 的板被竖直窗口排除）
+    //   settled=0   → 云台没跟上（pitch 反馈抬头为正、指令抬头为负，误差是相加）
+    data["heavy_in_window"] = res.in_window ? 1 : 0;
+    data["heavy_settled"] = res.settled ? 1 : 0;
     data["heavy_plate_id"] = res.plate_id;
     data["heavy_align_err_deg"] = res.align_err_deg;
     data["heavy_window_deg"] = res.hit_window_deg;
