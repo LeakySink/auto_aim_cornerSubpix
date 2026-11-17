@@ -12,6 +12,7 @@
 | [`architecture.md`](architecture.md) | **工程参考**：四层架构、数据流与延迟、9 个入口、重装策略、模块速查、弹道与护栏、调试字段。**约 320 行**，逐模块数学推导已移到 [`archive/pipeline_details.md`](archive/pipeline_details.md) |
 | [`config_guide.md`](config_guide.md) | **配置手册**：`configs/*.yaml` 只留段分隔行，所有键的语义/单位/陷阱集中在这里 |
 | [`physical_assumptions.md`](physical_assumptions.md) | **物理世界假设清单**：35 条假设逐条给代码位置/违反后果/检查方法；标出 4 条与"板高差 10cm"冲突的结构性问题 |
+| [`spec_compliance.md`](spec_compliance.md) | **规范核对**：对照 RMUC 2026 制作规范手册，逐条判定我的假设哪些被规范推翻、哪些规范根本没写（附全部相关条款原文摘录）|
 | [`context_handoff.md`](context_handoff.md) | **当前状态**：走到哪一步、验证强度分级、未闭环风险 R1–R9 |
 | [`build_verification_60f03de.md`](build_verification_60f03de.md) | **构建与验证**：怎么在本机编、门控灵敏度实测、实车 `.rlog` 复核、一键采样脚本 |
 
