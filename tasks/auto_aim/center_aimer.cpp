@@ -202,9 +202,12 @@ CenterAimResult CenterAimer::solve(
     settled = yaw_err < tol && pitch_err < tol;
   }
 
-  // "预测已命中但枪没到位"是最容易被误判成"算法不工作"的一种状态（2026-11 就踩过：
-  // pitch 符号写反 → 误差恒为 2×pitch → fire 永远 0，且没有任何输出）。
-  // 这里限流打一条 WARN，把误差和容差一起打出来。
+  // "预测已命中但枪没到位"是最容易被误判成"算法不工作"的一种状态。
+  // 限流打一条 WARN，把误差、容差和"实际在追的角度"一起打出来：
+  //   - 若 yaw_err 恒≈|yaw_offset|、pitch_err 恒≈仰角+|pitch_offset|，
+  //     说明**云台根本没在跟**（没切 AUTO_AIM、串口没通、使能没给），
+  //     不是我们的解算有问题；
+  //   - 若 pitch_err 恒≈2×瞄准仰角，才是符号写反。
   if (in_window && !settled) {
     using clock = std::chrono::steady_clock;
     static clock::time_point last{};
@@ -215,10 +218,12 @@ CenterAimResult CenterAimer::solve(
       logged = true;
       tools::RemoteLogger::instance().log(
         "WARN",
-        "[CenterAim] 预测已命中但云台未到位：yaw_err={:.2f}° pitch_err={:.2f}° "
-        "（容差 {:.2f}°）。若 pitch_err 恒≈2×瞄准仰角，是符号写反了"
-        "（反馈抬头为正、指令抬头为负，误差应为相加）",
-        yaw_err * kRad2Deg, pitch_err * kRad2Deg, cfg_.gimbal_tol);
+        "[CenterAim] 预测已命中但云台未到位：yaw_err={:.2f}° pitch_err={:.2f}°（容差 {:.2f}°）"
+        " cmd(yaw={:.2f}° pitch={:.2f}°) fb(yaw={:.2f}° pitch={:.2f}°)。"
+        "若 yaw_err≈|yaw_offset|、pitch_err≈仰角+|pitch_offset|，是云台没在跟（查 AUTO_AIM/串口）；"
+        "若 pitch_err≈2×仰角，才是符号写反",
+        yaw_err * kRad2Deg, pitch_err * kRad2Deg, cfg_.gimbal_tol, r.yaw * kRad2Deg,
+        r.pitch * kRad2Deg, gimbal_yaw * kRad2Deg, gimbal_pitch * kRad2Deg);
     }
   }
 

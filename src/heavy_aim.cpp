@@ -90,6 +90,12 @@ int main(int argc, char * argv[])
     auto targets = tracker.track(armors, t);
 
     const auto gs = gimbal.state();
+    const auto mode = gimbal.mode();
+    // 云台没进 AUTO_AIM（下位机还没切档）时不要接管：否则我们一直在发指令、
+    // 云台不动 → CenterAimer 每 2 s 刷一条"未到位"WARN，看起来像算法坏了。
+    // 与 standard_mpc 的做法一致（`mode == io::GimbalMode::AUTO_AIM` 才控制）。
+    const bool take_over = (mode == io::GimbalMode::AUTO_AIM);
+
     const double bullet_speed =
       (speed_fixed > 0.0) ? speed_fixed
                           : ((gs.bullet_speed >= speed_min && gs.bullet_speed <= speed_max)
@@ -97,7 +103,7 @@ int main(int argc, char * argv[])
                                : speed_default);
 
     auto_aim::CenterAimResult res;
-    if (!targets.empty()) {
+    if (!targets.empty() && take_over) {
       res = center_aimer.solve(targets.front(), t, gs.yaw, gs.pitch, bullet_speed);
     }
 
@@ -184,6 +190,8 @@ int main(int argc, char * argv[])
     data["gimbal_pitch"] = gs.pitch;
     data["bullet_speed"] = bullet_speed;
 
+    data["heavy_mode"] = static_cast<int>(mode);  // 0=IDLE 1=AUTO_AIM
+    data["heavy_take_over"] = take_over ? 1 : 0;
     data["heavy_valid"] = res.valid ? 1 : 0;
     data["fire"] = (res.valid && res.fire) ? 1 : 0;
     // fire 一直是 0 时，先看这两个谁不满足：
