@@ -64,6 +64,35 @@ struct CenterAimConfig
   /// 默认 0（行为与未引入该参数时一致），实测后填。
   double launch_delay = 0.0;
 
+  // ---- 射击热量模型（依据 2027 比赛规则 5.1.3）----
+  //
+  // 规则原文要点：
+  //   - 每检测到一发 **42mm** 弹丸，Q1 += **100**（与初速无关）；17mm 是 += 10。
+  //   - 热量按 **10Hz** 结算冷却，每周期冷却 = 每秒冷却值 / 10。
+  //   - **Q1 > Q0** → 发射机构锁定，**直到 Q1 = 0** 才解锁（图传也断）。
+  //   - **Q1 ≥ Q2** → 本局后续全部时间锁定，不再解锁。42mm 的 Q2 = Q0 + 200。
+  //
+  // 重装（42mm，表 5-16）：Q0 = 300，冷却 = 100/秒。
+  //
+  // 所以在"判据命中"之外还要加一道热量闸：**Q1 + cost > Q0 就不许开火**。
+  // 这道闸天然产生正确的连发节奏 —— 不是拍脑袋的固定间隔，而是
+  // "打 3 发（0→300）之后必须按 100/秒 冷却才够下一发"，即稳态约 1 发/秒。
+  struct HeatConfig
+  {
+    bool enabled = true;
+    double limit = 300.0;      ///< Q0：射击热量上限
+    double cool_rate = 100.0;  ///< 每秒冷却值
+    double shot_cost = 100.0;  ///< 每发增量（42mm=100，17mm=10）
+    /// 安全余量：只在 `Q1 + cost <= limit - reserve` 时才允许开火。
+    /// 0 = 允许刚好打到 Q0（规则上 Q1 == Q0 还不算超限）；正数 = 留余量。
+    double reserve = 0.0;
+    /// 裁判系统结算频率 [Hz]。0 = 连续积分（不推荐，会和真实结算有偏差）。
+    double settle_hz = 10.0;
+    /// 一次 fire 上升沿算几发。42mm 拨弹单发为 1；
+    /// 若下位机在 fire 持续期间连发，把这个值调成实际发数。
+    double shots_per_pulse = 1.0;
+  } heat;
+
   int max_iter = 6;            ///< 飞行时间迭代上限
   double fly_time_eps = 1e-3;  ///< s，相邻两次 fly_time 差小于它即认为收敛
 };
@@ -76,6 +105,14 @@ struct CenterAimResult
   /// 开火的两半条件，分开给出来：`fire` 一直是 0 时，先看这两个谁不满足。
   bool in_window = false;  ///< 到达时刻确实有板压在瞄准线上
   bool settled = false;    ///< 云台已到位（require_settled=false 时恒为 true）
+  /// 热量闸是否放行。`in_window && settled` 都真但 `heat_ok=false` 时，
+  /// 说明"这一枪该打但不能打"，等冷却即可 —— 与"瞄不准"是完全不同的问题。
+  bool heat_ok = false;
+
+  // ---- 热量状态（对外暴露，便于 Watch 页看曲线）----
+  double heat_q1 = 0.0;      ///< 当前热量 Q1
+  double heat_limit = 0.0;   ///< 上限 Q0
+  double heat_after = 0.0;   ///< 若此刻开火，开完之后的 Q1
 
   double yaw = 0.0;    ///< 云台指令角 [rad]
   double pitch = 0.0;  ///< 云台指令角 [rad]（向上为负，与 io::Command 一致）
@@ -112,6 +149,16 @@ public:
 
   const CenterAimConfig & config() const { return cfg_; }
 
+  /// 查询当前热量（不推进时间）。调试/单测用。
+  double heat() const { return heat_q1_; }
+  /// 清空热量状态（重开一局、或单测之间隔离用）
+  void reset_heat()
+  {
+    heat_q1_ = 0.0;
+    heat_t_ = {};
+    heat_valid_ = false;
+  }
+
   /// 只算"瞄准中心的指令角"，不判开火。给调试/单测用。
   bool aim_center(
     const Target & target, std::chrono::steady_clock::time_point t, double bullet_speed,
@@ -119,6 +166,14 @@ public:
 
 private:
   CenterAimConfig cfg_;
+
+  /// 按规则 5.1.3 推进热量到时刻 t：10Hz 离散结算，每周期扣 cool_rate/settle_hz。
+  /// solve() 是 const 而热量是有状态的，故用 mutable（单线程每帧调用一次）。
+  void advance_heat(std::chrono::steady_clock::time_point t) const;
+
+  mutable double heat_q1_ = 0.0;
+  mutable std::chrono::steady_clock::time_point heat_t_{};
+  mutable bool heat_valid_ = false;
 };
 
 }  // namespace auto_aim

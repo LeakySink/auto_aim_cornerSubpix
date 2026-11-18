@@ -67,6 +67,19 @@ CenterAimer::CenterAimer(const std::string & config_path)
                              ? ca["require_settled"].as<bool>()
                              : cfg_.require_settled;
     cfg_.max_iter = static_cast<int>(yaml_or(ca, "max_iter", cfg_.max_iter));
+
+    // 热量模型（2027 规则 5.1.3；42mm 参数见比赛规则表 5-16）
+    const auto ht = ca["heat"];
+    if (ht && ht.IsDefined()) {
+      cfg_.heat.enabled =
+        (ht["enabled"] && ht["enabled"].IsDefined()) ? ht["enabled"].as<bool>() : cfg_.heat.enabled;
+      cfg_.heat.limit = yaml_or(ht, "limit", cfg_.heat.limit);
+      cfg_.heat.cool_rate = yaml_or(ht, "cool_rate", cfg_.heat.cool_rate);
+      cfg_.heat.shot_cost = yaml_or(ht, "shot_cost", cfg_.heat.shot_cost);
+      cfg_.heat.reserve = yaml_or(ht, "reserve", cfg_.heat.reserve);
+      cfg_.heat.settle_hz = yaml_or(ht, "settle_hz", cfg_.heat.settle_hz);
+      cfg_.heat.shots_per_pulse = yaml_or(ht, "shots_per_pulse", cfg_.heat.shots_per_pulse);
+    }
   }
 
   // 防御：hit_margin 写错（比如 1.5）会让窗口变成负数，永远不开火
@@ -75,6 +88,53 @@ CenterAimer::CenterAimer(const std::string & config_path)
   if (!(cfg_.min_face_cos > -1.0 && cfg_.min_face_cos < 0.99)) cfg_.min_face_cos = 0.15;
   if (cfg_.max_iter < 1) cfg_.max_iter = 1;
   if (!(cfg_.launch_delay >= 0.0) || cfg_.launch_delay > 1.0) cfg_.launch_delay = 0.0;
+
+  // 热量参数防御：写错会直接导致"永远不开火"或"打爆热量"
+  if (!(cfg_.heat.limit > 0.0)) cfg_.heat.limit = 300.0;
+  if (!(cfg_.heat.cool_rate > 0.0)) cfg_.heat.cool_rate = 100.0;
+  if (!(cfg_.heat.shot_cost > 0.0)) cfg_.heat.shot_cost = 100.0;
+  if (!(cfg_.heat.settle_hz > 0.0)) cfg_.heat.settle_hz = 10.0;
+  if (!(cfg_.heat.shots_per_pulse > 0.0)) cfg_.heat.shots_per_pulse = 1.0;
+  // reserve 必须小于 limit-cost，否则这道闸永远不放行
+  const double min_margin = cfg_.heat.shot_cost * cfg_.heat.shots_per_pulse;
+  if (!(cfg_.heat.reserve >= 0.0) || cfg_.heat.reserve > cfg_.heat.limit - min_margin) {
+    cfg_.heat.reserve = 0.0;
+  }
+}
+
+void CenterAimer::advance_heat(std::chrono::steady_clock::time_point t) const
+{
+  if (!cfg_.heat.enabled) {
+    heat_q1_ = 0.0;
+    heat_t_ = t;
+    heat_valid_ = true;
+    return;
+  }
+
+  if (!heat_valid_) {
+    heat_q1_ = 0.0;
+    heat_t_ = t;
+    heat_valid_ = true;
+    return;
+  }
+
+  const double dt = std::chrono::duration<double>(t - heat_t_).count();
+  if (!(dt > 0.0)) {
+    // 时间没前进（或回退）：不动热量，但把基准拉回来，避免累积出负 dt
+    if (dt < 0.0) heat_t_ = t;
+    return;
+  }
+
+  // 规则是按固定周期结算（10Hz），所以这里也按"完整周期数"扣，余量留到下次。
+  // 直接按 dt 连续积分会在帧率与结算频率不同步时产生系统性偏差。
+  const double period = 1.0 / cfg_.heat.settle_hz;
+  const int n_periods = static_cast<int>(dt / period);
+  if (n_periods > 0) {
+    const double cool_per_period = cfg_.heat.cool_rate * period;
+    heat_q1_ = std::max(0.0, heat_q1_ - cool_per_period * n_periods);
+    heat_t_ += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(period * n_periods));
+  }
 }
 
 bool CenterAimer::aim_center(
@@ -301,11 +361,30 @@ CenterAimResult CenterAimer::solve(
     }
   }
 
-  // 连发节奏（最小开火间隔）由电控负责，这里不设冷却：
-  // fire 只表示"此刻开火能命中"，剩下交给下位机。
+  // 连发节奏由**热量**决定，不再靠拍脑袋的固定间隔：
+  //   规则 5.1.3 —— 每发 42mm 弹丸 Q1 += 100，Q0 = 300，冷却 100/秒，10Hz 结算。
+  //   Q1 > Q0 会被锁发射机构（且图传断开），要等 Q1 = 0 才解锁，
+  //   所以"多打一发"的代价是以秒计的，必须在开火前算清楚。
+  advance_heat(t);
+  const double cost = cfg_.heat.shot_cost * cfg_.heat.shots_per_pulse;
+  const double after = heat_q1_ + cost;
+  const double cap = cfg_.heat.limit - cfg_.heat.reserve;
+  // Q1 == Q0 在规则上仍不算超限（锁的是 Q1 > Q0），所以用 <=。
+  // 浮点：加个极小容差，避免 100+100+100 恰好等于 300 时因舍入被拒。
+  const bool heat_ok = !cfg_.heat.enabled || (after <= cap + 1e-9);
+
+  const bool will_fire = in_window && settled && heat_ok;
+  if (will_fire) {
+    heat_q1_ = after;  // 已开火 -> 立即记账，避免同一周期内反复放行
+  }
+
   r.in_window = in_window;
   r.settled = settled;
-  r.fire = in_window && settled;
+  r.heat_ok = heat_ok;
+  r.heat_q1 = heat_q1_;
+  r.heat_limit = cfg_.heat.limit;
+  r.heat_after = after;
+  r.fire = will_fire;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据
   const double w = target.ekf_x()[7];

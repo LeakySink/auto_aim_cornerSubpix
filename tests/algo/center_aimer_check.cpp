@@ -280,6 +280,70 @@ int main()
     expect(st.events >= 1, "补偿延迟后仍应能在窗口内开火");
   }
 
+  // ---------- 7) 热量闸：按 2027 规则 5.1.3 的 42mm 参数 ----------
+  // Q0=300、每发 +100、冷却 100/s、10Hz 结算、Q1>Q0 锁发射机构直到归零。
+  // 期望：连续打 3 发（0→100→200→300）后必须停，等冷却够了才能再打。
+  std::printf("\n== 7) 热量闸（Q0=300, 每发+100, 冷却100/s）==\n");
+  {
+    auto_aim::CenterAimConfig cfg;
+    cfg.heat.enabled = true;
+    cfg.heat.limit = 300.0;
+    cfg.heat.shot_cost = 100.0;
+    cfg.heat.cool_rate = 100.0;
+    cfg.heat.settle_hz = 10.0;
+    cfg.heat.reserve = 0.0;
+    auto_aim::CenterAimer heated(cfg);
+
+    // 静止靶、云台理想跟随 -> 除了热量以外全满足，fire 完全由热量决定
+    Target target(kDist, 0.0, kRadius, 0.0);
+    auto tp = std::chrono::steady_clock::now();
+    double gs_yaw = 0.0, gs_pitch = 0.0;
+    if (auto_aim::CenterAimResult init; heated.aim_center(target, tp, kSpeed, &init)) {
+      gs_yaw = init.yaw;
+      gs_pitch = -init.pitch;
+    }
+
+    int fires = 0;
+    int blocked_by_heat = 0;
+    double max_q1 = 0.0;
+    const int steps = 500;  // 5.0 s
+    for (int i = 0; i < steps; ++i) {
+      const auto res = heated.solve(target, tp, gs_yaw, gs_pitch, kSpeed);
+      max_q1 = std::max(max_q1, res.heat_q1);
+      if (res.in_window && res.settled && !res.heat_ok) ++blocked_by_heat;
+      if (res.fire) {
+        ++fires;
+        gs_yaw = res.yaw;
+        gs_pitch = -res.pitch;
+      }
+      target.predict(dt);
+      tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
+    }
+
+    // 5 秒内：前 3 发瞬间打满（0/2 帧内），之后每 1 秒（100 冷却）才够 1 发
+    // -> 3 + 约 4 = 约 7 发；上限取决于 5s 内能冷却出多少发
+    const int max_possible = 3 + static_cast<int>((steps * dt - 0.0) * cfg.heat.cool_rate /
+                                                  cfg.heat.shot_cost);
+    std::printf("  fire 次数=%d  被热量挡下=%d 帧  Q1 峰值=%.0f\n", fires, blocked_by_heat, max_q1);
+    std::printf("  理论上限约 %d 发（3 发打满 + 冷却补足）\n", max_possible);
+    expect(fires >= 3, "热量允许时至少要能连打 3 发");
+    expect(fires <= max_possible + 1, "不能超过热量允许的发射数");
+    expect(max_q1 <= cfg.heat.limit + 1e-6, "Q1 绝不能超过 Q0（超过就要锁机构）");
+    expect(blocked_by_heat > 0, "应该有'该打但热量不够'的帧");
+  }
+
+  // ---------- 7b) 热量关掉时应恢复原行为（不做限流） ----------
+  std::printf("\n== 7b) heat.enabled=false 时不限流 ==\n");
+  {
+    auto_aim::CenterAimConfig cfg;
+    cfg.heat.enabled = false;
+    auto_aim::CenterAimer no_heat(cfg);
+    Target target(kDist, 0.0, kRadius, 0.0);
+    const auto st = run(no_heat, target, kSpeed, 300, dt, false);
+    std::printf("  帧=%d fire 帧=%d\n", st.frames, st.fire_frames);
+    expect(st.fire_frames > 100, "关掉热量后 fire 应持续为真（不做限流）");
+  }
+
   std::printf("\n%s（失败项 %d）\n", g_fail == 0 ? "全部通过" : "存在失败", g_fail);
   return g_fail == 0 ? 0 : 1;
 }

@@ -94,6 +94,14 @@ center_aim:
   require_settled: true
   max_iter: 6
   launch_delay: 0.0
+  heat:
+    enabled: true
+    limit: 300
+    cool_rate: 100
+    shot_cost: 100
+    reserve: 0
+    settle_hz: 10
+    shots_per_pulse: 1
 
 min_valid_dist: 0.5
 max_valid_dist: 50.0

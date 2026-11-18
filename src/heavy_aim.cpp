@@ -185,9 +185,11 @@ int main(int argc, char * argv[])
       // 4) HUD
       char hud[256];
       std::snprintf(
-        hud, sizeof(hud), "fire=%d in_win=%d settled=%d plate=%d | %s%s", res.fire ? 1 : 0,
-        res.in_window ? 1 : 0, res.settled ? 1 : 0, res.plate_id,
-        res.fire ? "WOULD FIRE" : (res.in_window ? "wait gimbal" : "wait plate"),
+        hud, sizeof(hud), "fire=%d in_win=%d settled=%d heat=%d plate=%d | %s%s",
+        res.fire ? 1 : 0, res.in_window ? 1 : 0, res.settled ? 1 : 0, res.heat_ok ? 1 : 0,
+        res.plate_id,
+        res.fire ? "WOULD FIRE"
+                 : (res.in_window ? (res.settled ? "wait heat" : "wait gimbal") : "wait plate"),
         no_gimbal ? "  [NO-GIMBAL: predict only]" : "");
       cv::putText(
         img, hud, {10, 26}, cv::FONT_HERSHEY_SIMPLEX, 0.7,
@@ -218,6 +220,12 @@ int main(int argc, char * argv[])
     //   settled=0   → 云台没跟上（pitch 反馈抬头为正、指令抬头为负，误差是相加）
     data["heavy_in_window"] = res.in_window ? 1 : 0;
     data["heavy_settled"] = res.settled ? 1 : 0;
+    // 热量闸：in_window=1 且 settled=1 但 fire=0 时，先看 heat_ok
+    // —— 这是"该打但不能打"，等冷却即可，不是算法问题。
+    data["heavy_heat_ok"] = res.heat_ok ? 1 : 0;
+    data["heavy_heat_q1"] = res.heat_q1;
+    data["heavy_heat_limit"] = res.heat_limit;
+    data["heavy_heat_after"] = res.heat_after;
     data["heavy_plate_id"] = res.plate_id;
     data["heavy_align_err_deg"] = res.align_err_deg;
     data["heavy_window_deg"] = res.hit_window_deg;
