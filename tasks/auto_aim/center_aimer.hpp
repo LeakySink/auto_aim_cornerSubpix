@@ -113,6 +113,7 @@ struct CenterAimResult
   double heat_q1 = 0.0;      ///< 当前热量 Q1
   double heat_limit = 0.0;   ///< 上限 Q0
   double heat_after = 0.0;   ///< 若此刻开火，开完之后的 Q1
+  bool heat_shot = false;    ///< 本帧是否是一个"新的发"（fire 上升沿）
 
   double yaw = 0.0;    ///< 云台指令角 [rad]
   double pitch = 0.0;  ///< 云台指令角 [rad]（向上为负，与 io::Command 一致）
@@ -157,6 +158,7 @@ public:
     heat_q1_ = 0.0;
     heat_t_ = {};
     heat_valid_ = false;
+    last_fire_ = false;
   }
 
   /// 只算"瞄准中心的指令角"，不判开火。给调试/单测用。
@@ -174,6 +176,8 @@ private:
   mutable double heat_q1_ = 0.0;
   mutable std::chrono::steady_clock::time_point heat_t_{};
   mutable bool heat_valid_ = false;
+  /// 上一帧的 want_fire，用来检测上升沿（下位机按上升沿算一发）
+  mutable bool last_fire_ = false;
 };
 
 }  // namespace auto_aim

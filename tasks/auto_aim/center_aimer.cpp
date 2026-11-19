@@ -361,10 +361,15 @@ CenterAimResult CenterAimer::solve(
     }
   }
 
-  // 连发节奏由**热量**决定，不再靠拍脑袋的固定间隔：
-  //   规则 5.1.3 —— 每发 42mm 弹丸 Q1 += 100，Q0 = 300，冷却 100/秒，10Hz 结算。
-  //   Q1 > Q0 会被锁发射机构（且图传断开），要等 Q1 = 0 才解锁，
+  // 连发节奏由**热量**决定，依据规则 5.1.3：
+  //   每发 42mm 弹丸 Q1 += 100，Q0 = 300，冷却 100/秒，10Hz 结算。
+  //   Q1 > Q0 会锁发射机构（且图传断开），要等 Q1 = 0 才解锁，
   //   所以"多打一发"的代价是以秒计的，必须在开火前算清楚。
+  //
+  // ⚠️ **下位机按 fire 的上升沿算一发**（已确认）。
+  //   所以热量必须只在**上升沿**记账，不能按帧累加：
+  //   一个窗口里 fire 可能持续几十帧，那是同一发，只消耗 100 热量。
+  //   按帧累加会在 3 帧内就把 Q1 打到 300，凭空锁死发射机构。
   advance_heat(t);
   const double cost = cfg_.heat.shot_cost * cfg_.heat.shots_per_pulse;
   const double after = heat_q1_ + cost;
@@ -373,10 +378,12 @@ CenterAimResult CenterAimer::solve(
   // 浮点：加个极小容差，避免 100+100+100 恰好等于 300 时因舍入被拒。
   const bool heat_ok = !cfg_.heat.enabled || (after <= cap + 1e-9);
 
-  const bool will_fire = in_window && settled && heat_ok;
-  if (will_fire) {
-    heat_q1_ = after;  // 已开火 -> 立即记账，避免同一周期内反复放行
+  const bool want_fire = in_window && settled && heat_ok;
+  const bool rising = want_fire && !last_fire_;  // 上升沿 = 下位机真正打出的那一发
+  if (rising) {
+    heat_q1_ = after;  // 只在上升沿记账
   }
+  last_fire_ = want_fire;
 
   r.in_window = in_window;
   r.settled = settled;
@@ -384,7 +391,8 @@ CenterAimResult CenterAimer::solve(
   r.heat_q1 = heat_q1_;
   r.heat_limit = cfg_.heat.limit;
   r.heat_after = after;
-  r.fire = will_fire;
+  r.heat_shot = rising;  // 本帧是否是一个新的"发"
+  r.fire = want_fire;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据
   const double w = target.ekf_x()[7];

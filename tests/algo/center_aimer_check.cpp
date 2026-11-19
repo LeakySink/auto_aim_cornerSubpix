@@ -282,8 +282,9 @@ int main()
 
   // ---------- 7) 热量闸：按 2027 规则 5.1.3 的 42mm 参数 ----------
   // Q0=300、每发 +100、冷却 100/s、10Hz 结算、Q1>Q0 锁发射机构直到归零。
-  // 期望：连续打 3 发（0→100→200→300）后必须停，等冷却够了才能再打。
-  std::printf("\n== 7) 热量闸（Q0=300, 每发+100, 冷却100/s）==\n");
+  // **下位机按 fire 上升沿算一发**，所以热量只在上升沿记账：
+  //   一个窗口 fire 持续 N 帧 = 仍然是 1 发。
+  std::printf("\n== 7) 热量闸（Q0=300, 每发+100, 冷却100/s, 按上升沿计发）==\n");
   {
     auto_aim::CenterAimConfig cfg;
     cfg.heat.enabled = true;
@@ -294,8 +295,10 @@ int main()
     cfg.heat.reserve = 0.0;
     auto_aim::CenterAimer heated(cfg);
 
-    // 静止靶、云台理想跟随 -> 除了热量以外全满足，fire 完全由热量决定
-    Target target(kDist, 0.0, kRadius, 0.0);
+    // 静止靶、云台理想跟随 -> 除了热量以外全满足，fire 完全由热量决定。
+    // 注意：静止靶时 fire 会一直为真（只有一个上升沿），所以必须让它
+    // 周期性"断开"才能看清热量节奏 —— 这里改用旋转靶，靠窗口自然断开。
+    Target target(kDist, 1.0, kRadius, 0.0);
     auto tp = std::chrono::steady_clock::now();
     double gs_yaw = 0.0, gs_pitch = 0.0;
     if (auto_aim::CenterAimResult init; heated.aim_center(target, tp, kSpeed, &init)) {
@@ -303,16 +306,18 @@ int main()
       gs_pitch = -init.pitch;
     }
 
-    int fires = 0;
+    int fire_frames = 0;
+    int shots = 0;          // 上升沿次数 = 实际发数
     int blocked_by_heat = 0;
     double max_q1 = 0.0;
-    const int steps = 500;  // 5.0 s
+    const int steps = 720;  // 7.2 s，约 1.15 圈
     for (int i = 0; i < steps; ++i) {
       const auto res = heated.solve(target, tp, gs_yaw, gs_pitch, kSpeed);
       max_q1 = std::max(max_q1, res.heat_q1);
+      if (res.heat_shot) ++shots;
       if (res.in_window && res.settled && !res.heat_ok) ++blocked_by_heat;
-      if (res.fire) {
-        ++fires;
+      if (res.fire) ++fire_frames;
+      if (res.valid) {
         gs_yaw = res.yaw;
         gs_pitch = -res.pitch;
       }
@@ -320,20 +325,47 @@ int main()
       tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
     }
 
-    // 5 秒内：前 3 发瞬间打满（0/2 帧内），之后每 1 秒（100 冷却）才够 1 发
-    // -> 3 + 约 4 = 约 7 发；上限取决于 5s 内能冷却出多少发
-    const int max_possible = 3 + static_cast<int>((steps * dt - 0.0) * cfg.heat.cool_rate /
-                                                  cfg.heat.shot_cost);
-    std::printf("  fire 次数=%d  被热量挡下=%d 帧  Q1 峰值=%.0f\n", fires, blocked_by_heat, max_q1);
-    std::printf("  理论上限约 %d 发（3 发打满 + 冷却补足）\n", max_possible);
-    expect(fires >= 3, "热量允许时至少要能连打 3 发");
-    expect(fires <= max_possible + 1, "不能超过热量允许的发射数");
-    expect(max_q1 <= cfg.heat.limit + 1e-6, "Q1 绝不能超过 Q0（超过就要锁机构）");
-    expect(blocked_by_heat > 0, "应该有'该打但热量不够'的帧");
+    // 按上升沿计发后：Q1 每发 +100、冷却 100/s
+    // -> 7.2 秒内冷出 720 热量，够 7 发；再加初始 300 够 3 发
+    const double cool_total = steps * dt * cfg.heat.cool_rate;
+    const int max_possible = static_cast<int>((cfg.heat.limit + cool_total) / cfg.heat.shot_cost);
+    std::printf("  fire 帧=%d  实际发数(上升沿)=%d  被热量挡下=%d 帧  Q1 峰值=%.0f\n", fire_frames,
+                shots, blocked_by_heat, max_q1);
+    std::printf("  理论上限 %d 发（初始热量 300 够 3 发 + %.0f 冷却补足）\n", max_possible,
+                cool_total);
+    expect(shots >= 3, "至少要能连打 3 发");
+    expect(shots <= max_possible, "不能超过热量允许的发数");
+    expect(max_q1 <= cfg.heat.limit + 1e-6, "Q1 绝不能超过 Q0");
+    expect(fire_frames > shots, "一个窗口 fire 应持续多帧，但只算 1 发");
   }
 
-  // ---------- 7b) 热量关掉时应恢复原行为（不做限流） ----------
-  std::printf("\n== 7b) heat.enabled=false 时不限流 ==\n");
+  // ---------- 7b) 静止靶：fire 持续为真时，热量只记 1 发 ----------
+  std::printf("\n== 7b) 静止靶 fire 持续为真 -> 热量只记 1 发 ==\n");
+  {
+    auto_aim::CenterAimConfig cfg;
+    cfg.heat.enabled = true;
+    auto_aim::CenterAimer held(cfg);
+    Target target(kDist, 0.0, kRadius, 0.0);
+    auto tp = std::chrono::steady_clock::now();
+    double gs_yaw = 0.0, gs_pitch = 0.0;
+    if (auto_aim::CenterAimResult init; held.aim_center(target, tp, kSpeed, &init)) {
+      gs_yaw = init.yaw;
+      gs_pitch = -init.pitch;
+    }
+    int shots = 0;
+    for (int i = 0; i < 300; ++i) {
+      const auto res = held.solve(target, tp, gs_yaw, gs_pitch, kSpeed);
+      if (res.heat_shot) ++shots;
+      target.predict(dt);
+      tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
+    }
+    std::printf("  3 秒静止靶：发数=%d  Q1=%.0f\n", shots, held.heat());
+    expect(shots == 1, "fire 一直为真时只有 1 个上升沿 -> 只记 1 发");
+    expect(held.heat() <= 100.0 + 1e-6, "只消耗 1 发的热量，且应已被冷却吃掉");
+  }
+
+  // ---------- 7c) 热量关掉时应恢复不限流 ----------
+  std::printf("\n== 7c) heat.enabled=false 时不限流 ==\n");
   {
     auto_aim::CenterAimConfig cfg;
     cfg.heat.enabled = false;
@@ -342,6 +374,53 @@ int main()
     const auto st = run(no_heat, target, kSpeed, 300, dt, false);
     std::printf("  帧=%d fire 帧=%d\n", st.frames, st.fire_frames);
     expect(st.fire_frames > 100, "关掉热量后 fire 应持续为真（不做限流）");
+  }
+
+  // ---------- 7d) 高速自转：热量闸必须真正拦人 ----------
+  // w=5 rad/s 时每 90°/5 = 0.314 s 一个窗口 -> 约 3.2 发/秒 = 320 热量/秒，
+  // 而冷却只有 100/秒，净增 220/秒 -> Q1 约 1.4 s 就打满 300，之后必须停。
+  std::printf("\n== 7d) w=5 rad/s：热量闸应真正生效 ==\n");
+  {
+    auto_aim::CenterAimConfig cfg;
+    cfg.heat.enabled = true;  // 用默认 42mm 参数
+    auto_aim::CenterAimer fast(cfg);
+    Target target(kDist, 5.0, kRadius, 0.0);
+    auto tp = std::chrono::steady_clock::now();
+    double gs_yaw = 0.0, gs_pitch = 0.0;
+    if (auto_aim::CenterAimResult init; fast.aim_center(target, tp, kSpeed, &init)) {
+      gs_yaw = init.yaw;
+      gs_pitch = -init.pitch;
+    }
+    int shots = 0, blocked = 0;
+    double max_q1 = 0.0;
+    const int steps = 500;  // 5 s
+    for (int i = 0; i < steps; ++i) {
+      const auto res = fast.solve(target, tp, gs_yaw, gs_pitch, kSpeed);
+      max_q1 = std::max(max_q1, res.heat_q1);
+      if (res.heat_shot) ++shots;
+      if (res.in_window && res.settled && !res.heat_ok) ++blocked;
+      if (res.valid) {
+        gs_yaw = res.yaw;
+        gs_pitch = -res.pitch;
+      }
+      target.predict(dt);
+      tp += std::chrono::microseconds(static_cast<int>(dt * 1e6));
+    }
+    const int max_possible =
+      static_cast<int>((cfg.heat.limit + steps * dt * cfg.heat.cool_rate) / cfg.heat.shot_cost);
+    std::printf("  5 秒：发数=%d  被热量挡下=%d 帧  Q1 峰值=%.0f  理论上限 %d 发\n", shots, blocked,
+                max_q1, max_possible);
+    expect(blocked > 0, "高速自转时热量闸必须真的拦下一些帧");
+    expect(shots <= max_possible, "发数不能超过热量允许的上限");
+    expect(max_q1 <= cfg.heat.limit + 1e-6, "Q1 绝不能超过 Q0");
+    // 不限流时会打多少发？用 heat.enabled=false 对照
+    auto_aim::CenterAimConfig no_cfg;
+    no_cfg.heat.enabled = false;
+    auto_aim::CenterAimer unlimited(no_cfg);
+    Target t2(kDist, 5.0, kRadius, 0.0);
+    const auto st2 = run(unlimited, t2, kSpeed, 500, dt, false);
+    std::printf("  对照（不限流）：事件=%d 次\n", st2.events);
+    expect(shots < st2.events, "限流后的发数必须少于不限流的窗口数");
   }
 
   std::printf("\n%s（失败项 %d）\n", g_fail == 0 ? "全部通过" : "存在失败", g_fail);
