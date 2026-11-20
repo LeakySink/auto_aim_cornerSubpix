@@ -305,6 +305,29 @@ recent_nis_failures 恒 0
 规则 PDF V1.1.1 是单页扫描件、无文字层，本机无 OCR。命中的数值（16.5 m/s、
 装甲 135×56、热量 +100/300）来自可读版本，建议人工对照原件再核一次。
 
+### R10 · 弹道表只覆盖到 15 m，超出会静默用 17mm 的 k（**潜在，当前不触发**）
+
+`ballistics_x_range: [0.5, 15.0]`，超出后 `Trajectory` 回退 RK4，
+而默认阻力系数是 `kDefaultDragCoefficient = kDragCoefficientSmall`（17mm 的 0.01875，
+是 42mm 真实值 0.00513 的 3.65 倍）。
+
+按 42mm 重算的后果（初速 16.5、等高度目标）：
+
+| 距离 | 正确仰角 | 程序算的仰角 | 实际弹着点 |
+|---|---|---|---|
+| 15 m | 17.32° | 20.65° | **高 782 mm** |
+| 16 m | 18.74° | 22.83° | 高 1000 mm |
+| 18 m | 21.81° | 28.20° | 高 1641 mm |
+| 20 m | 25.31° | 38.05° | 高 3114 mm |
+| 21 m+ | — | — | 无解，不开火 |
+
+**当前为什么不触发**：战场 28 m × 15 m（规则 4.1），实际交火距离（含前哨站）
+都在 15 m 内，多项式表始终命中。
+
+**什么时候会变成真问题**：如果将来出现远距离对射场景（或换了更大场地），
+这里会**静默**给出错误的仰角，没有报错。修法与 R4 遗留项相同：
+把 `Trajectory` 的 `k` 从编译期常量改成"按弹种从 yaml 取"。
+
 ---
 
 ## 5. 本机环境与限制
@@ -313,8 +336,19 @@ recent_nis_failures 恒 0
 |---|---|
 | 系统 | Windows + PowerShell（**GBK 控制台**，打印 UTF-8 中文会花屏，但**文件本身没问题**） |
 | 可用 | Python 3.14 + numpy 2.4.3 / pymupdf / pypdf；Git |
-| **不可用** | **OpenCV、Eigen、yaml-cpp、OpenVINO → 无法编译任何 C++** |
-| 因此 | 纯算法测试（如多项式对拍）可以用 Python 复刻验证；涉及库的改动**只能静态检查** |
+| **已具备** | 自建编译环境 `.deps/`：MSYS2 ucrt64 的 g++ 14.2 + OpenCV 4.12 / Eigen 3.4 / fmt / yaml-cpp 头与库 + 最小 Linux 头 shim |
+| 因此 | `tasks/auto_aim/`（含 `center_aimer`/`target`/`tracker`）、`tools/`、`tests/algo/` 的绝大多数 TU **可在本机真编译并跑单测** |
+| 仍不可用 | **OpenVINO**（`standard_mpc`/`yolo*`/`mt_detector` 相关 TU）与相机 SDK → 这些只能 `-fsyntax-only` 或 grep 检查 |
+
+常用验证命令（改完 C++ 必跑）：
+
+```bash
+# 单测（含热点判据）
+g++ -std=c++17 -O2 -I.deps/... tests/algo/center_aimer_check.cpp \
+    tasks/auto_aim/center_aimer.cpp tasks/auto_aim/target.cpp ... -o center_check && ./center_check
+# 头文件自洽性（防止"靠别人的 include 顺带声明"）
+python3 scripts/check_includes.py
+```
 
 **可用的静态检查手段**（每次改完 C++ 都做）：
 括号配对计数、`<cmath>/<algorithm>` 引入检查、grep 关键符号、
