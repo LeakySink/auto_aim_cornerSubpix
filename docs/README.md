@@ -7,7 +7,7 @@
 
 | 文档 | 什么时候看 |
 |---|---|
-| [`heavy_handover.md`](heavy_handover.md) | **计划**：未来 6 个月做什么、验收 gate、故障排查、第一周 checklist |
+| [`heavy_handover.md`](heavy_handover.md) | **计划**：未来 6 个月做什么、验收 gate、故障排查、第一周 checklist；**§6.5 未来方向**记录"已决策但暂不实现"的事 |
 | [`heavy_aim_baseline.md`](heavy_aim_baseline.md) | **目标与预算**：75% 命中率 ⟺ σ≤24 mm 的分解、M0–M8 模块基线、四层检验体系、统计口径 |
 | [`architecture.md`](architecture.md) | **工程参考**：四层架构、数据流与延迟、9 个入口、重装策略、模块速查、弹道与护栏、调试字段。**约 320 行**，逐模块数学推导已移到 [`archive/pipeline_details.md`](archive/pipeline_details.md) |
 | [`config_guide.md`](config_guide.md) | **配置手册**：`configs/*.yaml` 只留段分隔行，所有键的语义/单位/陷阱集中在这里 |
