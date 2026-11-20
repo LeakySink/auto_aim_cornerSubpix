@@ -302,6 +302,106 @@ TU，方法见 [`build_verification_60f03de.md`](build_verification_60f03de.md) 
 （`cos_face` / `align_err_deg` / `hit_window_deg` / `heat_q1` / `t_to_cross`），
 所以这层可以**完全写在 `center_aimer` 之外**，不影响现有判据。
 
+### F2 · 闭环仿真测试台（无硬件验证命中率）
+
+**动机**：现有测试都是**单点**验证——`center_aimer_check` 直接喂一个合成 `Target`，
+跳过了 PnP 和 Tracker。所以下面这些问题的答案目前全靠推：
+
+- h=10cm、板高排布不规则时，4 块板到底能打中几块？
+- 0.5 px 的关键点噪声 → 多大距离误差 → 多少毫米落点误差？
+- 热量闸真的会在高速自转下限制射速吗？限制后命中率掉多少？
+- 云台一阶滞后 20/40/80 ms 各会让命中率掉多少？
+
+闭环仿真能把这些**在无硬件条件下量化**，而且参数可以扫。
+
+**最大的有利条件**：`Solver::reproject_armor()` 就是现成的**虚拟检测器**，
+它与 `Solver::solve()` 用的是**同一套** `armor_geometry()` 与倾角，
+所以「世界 → 像素 → PnP → 世界」可以精确闭环。相机内参直接用 yaml 里的实车参数
+（`fx≈1818, cx≈751`），于是「1 px 噪声 → 多少米距离误差」与实车一致——
+这是仿真最有价值的地方。
+
+```
+真值目标(位置/相位/转速)                    ← 仿真侧
+        │
+        ├─① 虚拟相机：solver.reproject_armor() → 4 像素点
+        │      + 高斯噪声(0.3~1 px) + 按概率丢帧
+        ↓
+    ② Armor{points, color, name, type}
+        ↓
+    ③ tracker.track(armors, t) → Target      ← 真代码
+        ↓
+    ④ center_aimer.solve(...) → 指令角 + fire ← 真代码
+        ↓
+    ⑤ 云台动力学(一阶滞后 K/T + 纯延迟 L) → 反馈角  ← 仿真侧
+        ↓
+    ⑥ 弹道积分 + 击打判定 → 命中/未命中        ← 仿真侧
+        ↓
+   统计：命中率 / 每发代价 / 热量曲线
+```
+
+#### 必须先改一处（否则仿真测的不是生产代码）
+
+`heavy_aim.cpp` 的 `main` 直接依赖 `io::Gimbal` / `io::Camera` / `YOLO`，
+三者分别需要串口、相机 SDK、OpenVINO，**仿真里一个都实例化不了**。两个选择：
+
+| 方案 | 结果 |
+|---|---|
+| A：仿真里再抄一份循环 | 成型快，但仿真测的是"另一套循环"，会与生产代码漂移 |
+| **B：把决策逻辑抽成 `HeavyAimer`（推荐）** | 仿真与生产共用同一套逻辑；顺带让这段逻辑有了单测 |
+
+抽出来的就三件事：`take_over` 判断、`bullet_speed` 兜底、`no_gimbal` 的
+"指令当反馈"处理（约 50~60 行）。**纯搬移、不改行为**，抽完 `center_aimer_check`
+应照样全绿。这三段依赖都不沾硬件（`io/command.hpp` 是纯结构体）。
+
+#### 建议改两处
+
+| 项 | 为什么 |
+|---|---|
+| 新增 `configs/sim.yaml` | 仿真不该写 `.rlog`/发 UDP（`enable_remote/local: false`）；同时给仿真独立参数，改噪声/转速不用动 `sentry.yaml`。**不新建的话每跑一次都会往 `logs/` 写文件** |
+| 在 `tests/algo/` 加仿真入口 | `auto_executables.cmake` 会自动编成同名可执行文件，tests 已链 `tools io auto_aim`，**不用改 CMake** |
+
+#### 不用改的地方
+
+| 依赖 | 状态 |
+|---|---|
+| 虚拟检测器 | `Solver::reproject_armor()` 现成，与 PnP 同源 |
+| PnP / 坐标链 | `Solver::solve()` 直接可用，只需 `set_R_gimbal2world()` 喂仿真姿态 |
+| EKF / 关联 / 状态机 | `Tracker` 直接可用，参数从 yaml 读 |
+| 判据 / 热量 | `CenterAimer` 直接可用（记得 `reset_heat()`） |
+| 弹道 | `tools::Trajectory` 可算；击打判定另写独立 RK4，顺带当交叉验证 |
+
+#### 三个已知的坑（踩过两个）
+
+1. **`Armor` 必须给满 4 个关键点**——构造函数按下标取，空 vector 直接段错误
+2. **`armor.color` 必须等于 yaml 的 `enemy_color`**——否则 `Tracker::track` 首行
+   `remove_if` 把观测全滤掉，表现为"永远无目标"
+3. **`Tracker` 要连续 `min_detect_count` 帧才建目标**（sentry.yaml 是 5），
+   前 5 帧必然无目标，不要误判成丢目标
+
+#### 仿真**测不到**的东西（必须说清楚）
+
+| 测不到 | 原因 |
+|---|---|
+| 检测模型本身 | 虚拟检测器是几何投影，没有 YOLO |
+| 真实 PnP 噪声分布 | 只能假设高斯；真实是厚尾（越远越差） |
+| 相机曝光时序 / 传输延迟 | 仿真时间是理想化的 |
+| 实车云台整定 | 只能给假定的 `(K, T, L)`，而这正是**未标定**的量 |
+| `launch_delay` | 同上，仿真里只能填假设值 |
+
+**所以定位是**：验证**逻辑正确性与参数敏感性**（能不能打到、热量会不会锁机构、
+窗口密度够不够），**不能代替实车标定**。
+
+#### 工作量
+
+| 部分 | 规模 |
+|---|---|
+| 抽 `HeavyAimer`（方案 B） | ~60 行搬移 + 改 `heavy_aim.cpp` 调用 |
+| 闭环仿真 `tests/algo/heavy_sim.cpp` | ~400–500 行 |
+| `configs/sim.yaml` | ~30 行 |
+
+**触发条件**：需要在无硬件时回答上面那四个问题中任意一个；或实车调试成本
+明显高于仿真成本时（例如需要扫云台滞后/噪声的参数空间）。
+
 ---
 
 ## 7. 六个月研发计划
