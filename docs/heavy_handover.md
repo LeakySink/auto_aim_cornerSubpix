@@ -150,7 +150,7 @@ TU，方法见 [`build_verification_60f03de.md`](build_verification_60f03de.md) 
 | 关键点语义校验 | 凸性/对边比/宽高比/退化边；默认只告警不拒收 | `tasks/auto_aim/keypoint_check.hpp` |
 | PnP | IPPE + 相机系 z>0 + 距离门限 + **±π 几何消歧** | `solver.cpp`、`target.cpp` |
 | 装甲几何 | **yaml 可配**（板宽/灯条长/倾角/厚度），单一单例 | `tasks/auto_aim/armor_geometry.hpp` |
-| EKF | 11 维（x vx y vy z vz a w r l h），NIS/NEES + 阈值发布 | `extended_kalman_filter.cpp`、`target.cpp` |
+| EKF | 11 维（x vx y vy z vz a w r l h）；`h` 在 4 板/3 板下语义不同（见 `physical_assumptions.md` A1-1/A2-2b），NIS/NEES + 阈值发布 | `extended_kalman_filter.cpp`、`target.cpp` |
 | 关联 | 空间门控 + 旋转方向门控 + NIS 比例看门狗 | `tracker.cpp` |
 | 弹道 | **多项式表接入运行时**（按弹速插值、补角语义、表外回退 RK4）| `tools/ballistics_poly.*`、`trajectory.*` |
 | 控制 | TinyMPC（yaw/pitch 各一个 QP）+ Aimer（备用）| `planner/`、`aimer.cpp` |
