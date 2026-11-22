@@ -1,4 +1,4 @@
-// 验证 3 板（前哨站）的等间距递增高度模型（z_i = x[4] + i*h）
+// 验证 3 板（前哨站）的线性递降高度模型
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -59,13 +59,13 @@ int main()
     std::printf("  plate%zu  z = %.4f m   yaw = %+7.1f°\n", i, plates[i][2], plates[i][3] * 57.2958);
   }
 
-  // 断言：z 逐块**递增**，步长 = h（z_i = x[4] + i*h）
-  const double dh01 = plates[1][2] - plates[0][2];
-  const double dh12 = plates[2][2] - plates[1][2];
+  // 断言：z 逐块递减，步长 = h
+  const double dh01 = plates[0][2] - plates[1][2];
+  const double dh12 = plates[1][2] - plates[2][2];
   std::printf("  实测相邻差：%.1f mm, %.1f mm\n", dh01 * 1000, dh12 * 1000);
   check(std::abs(dh01 - h_mm) < 1e-6, "plate0-plate1 高度差应等于 h");
   check(std::abs(dh12 - h_mm) < 1e-6, "plate1-plate2 高度差应等于 h");
-  check(plates[0][2] < plates[1][2] && plates[1][2] < plates[2][2], "高度应逐块递增（id 递增向上）");
+  check(plates[0][2] > plates[1][2] && plates[1][2] > plates[2][2], "高度应逐块递降（id0 最高）");
   check(std::abs(plates[0][2] - z_obs) < 1e-6, "id0 高度应等于观测高度（假设观测到 id0）");
 
   // 角度仍应 120° 等分

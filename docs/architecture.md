@@ -228,7 +228,7 @@ fire 必须落在窗口内；开火事件数 ≈ 每 90° 一次（`h≠0` 时�
 | 关键点校验 | `keypoint_check.hpp` | 对边比/夹角异常直接拒，防"几个像素的板"解出离谱位姿 |
 | 解算 | `solver.cpp` | IPPE PnP、±π 朝向消歧、相机系→云台系→世界系；失败返回 `false` |
 | 跟踪 | `tracker.cpp` | 状态机 + 关联空间门控 + Bad Converge 看门狗 |
-| 估计 | `target.cpp` + `tools/extended_kalman_filter.cpp` | 11 维 EKF：`x vx y vy z vz a w r l h`。`h` 语义随板数变：4 板 = 奇偶面高度差；**3 板（前哨站）= 相邻板高度差**（`z_i = z + i·h`，id 递增向上）|
+| 估计 | `target.cpp` + `tools/extended_kalman_filter.cpp` | 11 维 EKF：`x vx y vy z vz a w r l h`。`h` 语义随板数变：4 板 = 奇偶面高度差；**3 板（前哨站）= 相邻板高度差**（`z_i = z - i·h`，id0 最高）|
 | 瞄准（传统） | `aimer.cpp` | 选板 + 提前量不动点迭代 + 弹道 |
 | 规划 | `planner/planner.cpp` | TinyMPC（双积分 + 加速度约束），输出加速度受限的指令 |
 | 开火（传统） | `shooter.cpp` | 角度容差 + 指令突变门控 |
