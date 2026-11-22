@@ -28,6 +28,9 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
   outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
   normal_temp_lost_count_ = max_temp_lost_count_;
+  if (yaml["outpost_lock_frames"] && yaml["outpost_lock_frames"].IsDefined()) {
+    outpost_lock_frames_ = yaml["outpost_lock_frames"].as<int>();
+  }
 
   auto ekf = yaml["ekf"];
   ekf_params_.q_xyz_acc_var = ekf["q_xyz_acc_var"].as<double>();
@@ -100,6 +103,11 @@ std::list<Target> Tracker::track(
   bool found;
   if (state_ == "lost") {
     found = set_target(armors, t);
+  }
+
+  // 前哨站且首板假设尚未锁定 -> 3 假设并行；锁定后与普通目标同路径
+  else if (target_.name == ArmorName::outpost && !outpost_locked_) {
+    found = update_target_outpost(armors, t);
   }
 
   else {
@@ -300,6 +308,27 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   // 重捕时用上次收敛的几何量做初值（省掉重新估 r/h 的十几帧）
   const GeoInit geo = cached_geo(armor.name);
 
+  // ---- 前哨站：首板歧义，3 假设并行初始化 ----
+  // 首帧不知道看到的是 id0/id1/id2。假设错一个 k，x[4] 就差 k·h
+  // （最大 204 mm），EKF 只能用 h<0 吸收 -> 三块板预测高度全错。
+  // 对 k=0/1/2 各建一个候选，由 update_target_outpost 用累积匹配误差选优
+  // （参考 ckyf 的 3 个并行 UKF）。
+  if (armor.name == ArmorName::outpost) {
+    for (int k = 0; k < 3; ++k) {
+      outpost_cand_[k] =
+        Target(armor, t, cfg->radius, cfg->armor_num, cfg->p0, ekf_params_, geo, k);
+      outpost_err_[k] = 0.0;
+      outpost_reject_[k] = 0;
+      outpost_seen_[k].clear();
+      outpost_seen_[k].insert(k);   // 该假设认为首帧看到的是 id=k
+    }
+    outpost_best_ = 0;
+    outpost_frames_ = 0;
+    outpost_locked_ = false;
+    sync_outpost_best();
+    return true;
+  }
+
   target_ = Target(armor, t, cfg->radius, cfg->armor_num, cfg->p0, ekf_params_, geo);
 
   return true;
@@ -345,6 +374,107 @@ void Tracker::update_geo_cache()
   if (target_.convergened()) {
     geo_cache_[key] = target_.geometric_params();
   }
+}
+
+void Tracker::sync_outpost_best() { target_ = outpost_cand_[outpost_best_]; }
+
+bool Tracker::update_target_outpost(
+  std::list<Armor> & armors, std::chrono::steady_clock::time_point t)
+{
+  // 1) 三个候选都先预测
+  for (int k = 0; k < 3; ++k) outpost_cand_[k].predict(t);
+
+  // 2) 本帧是否出现在场的同类板（三者名字/类型相同，取候选 0）
+  int found_count = 0;
+  for (const auto & armor : armors) {
+    if (armor.name != outpost_cand_[0].name || armor.type != outpost_cand_[0].armor_type) continue;
+    ++found_count;
+  }
+  if (found_count == 0) {
+    sync_outpost_best();
+    return false;
+  }
+
+  // 3) 每个候选独立做空间门控 + 更新，并累积"匹配误差"
+  //
+  // 误差用 ckyf 的度量 `pos_err*10 + ang_err`。
+  // 关键是 ang_err —— 三个假设预测的板朝向差 120°，
+  // 只有"假设正确"的那个才能与观测对上。
+  int updated_any = 0;
+  for (int k = 0; k < 3; ++k) {
+    auto & cand = outpost_cand_[k];
+    const auto predicted = cand.armor_xyza_list();
+    if (predicted.empty()) {
+      ++outpost_reject_[k];
+      continue;
+    }
+
+    const double pred_dist = predicted.front().head<2>().norm();
+    const double gate = 1.0 + 0.2 * pred_dist;   // 与单目标路径同一门限
+
+    int updated = 0;
+    for (auto & armor : armors) {
+      if (armor.name != cand.name || armor.type != cand.armor_type) continue;
+      if (!solver_.solve(armor)) continue;
+
+      double min_err = std::numeric_limits<double>::infinity();
+      double d_armor2pred = std::numeric_limits<double>::infinity();
+      int best_pred_id = 0;
+      for (int i = 0; i < static_cast<int>(predicted.size()); ++i) {
+        const double pos_err = (armor.xyz_in_world - predicted[i].head<3>()).norm();
+        const double ang_err = std::abs(tools::limit_rad(armor.ypr_in_world[0] - predicted[i][3]));
+        const double err = pos_err * 10.0 + ang_err;
+        if (err < min_err) {
+          min_err = err;
+          best_pred_id = i;
+        }
+        d_armor2pred = std::min(d_armor2pred, pos_err);
+      }
+
+      if (!(d_armor2pred < gate)) continue;
+
+      outpost_seen_[k].insert(best_pred_id);   // 锁定条件用
+      outpost_err_[k] += min_err;
+
+      cand.update(armor);
+      ++updated;
+    }
+
+    if (updated > 0) {
+      ++updated_any;
+    } else {
+      ++outpost_reject_[k];
+    }
+  }
+
+  if (updated_any == 0) {
+    sync_outpost_best();
+    return false;
+  }
+
+  // 4) 选累积误差最小者
+  int best = 0;
+  for (int k = 1; k < 3; ++k) {
+    if (outpost_err_[k] < outpost_err_[best]) best = k;
+  }
+  outpost_best_ = best;
+
+  // 5) 锁定：最优假设已见过全部板号，或已跑够帧数
+  ++outpost_frames_;
+  if (!outpost_locked_) {
+    // 板数用 armor_xyza_list().size() 取（armor_num_ 是私有成员）
+    const std::size_t plate_num = outpost_cand_[0].armor_xyza_list().size();
+    const bool seen_all = outpost_seen_[outpost_best_].size() >= plate_num;
+    if (seen_all || outpost_frames_ >= outpost_lock_frames_) {
+      outpost_locked_ = true;
+      tools::RemoteLogger::instance().log(
+        "INFO", "[Tracker] 前哨站首板假设已锁定：k={}（误差 {:.3f}/{:.3f}/{:.3f}，{} 帧）", best,
+        outpost_err_[0], outpost_err_[1], outpost_err_[2], outpost_frames_);
+    }
+  }
+
+  sync_outpost_best();
+  return true;
 }
 
 bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock::time_point t)

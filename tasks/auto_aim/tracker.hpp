@@ -5,6 +5,8 @@
 #include <chrono>
 #include <list>
 #include <map>
+#include <set>
+#include <array>
 #include <string>
 
 #include "armor.hpp"
@@ -63,6 +65,37 @@ private:
   /// 失效条件：`diverged()` 时清除；读取时再做一次范围校验
   /// （把脏缓存当先验比不缓存更糟）。
   std::map<int, GeoInit> geo_cache_;
+
+  // ---- 前哨站首板歧义：3 假设并行 ----
+  //
+  // 前哨站只有一块板同时可见，`id` 又由首次观测决定 —— 第一帧根本不知道
+  // 看到的是 id0/id1/id2。而模型里 `z_i = x[4] - i·h`，假设错一个 k，
+  // 中心高度就差 k·h（最大 204 mm = 1.5 个板高差），EKF 只能用 h<0 吸收。
+  //
+  // 仿真（sim_run/tongji_port，S5/S5b）实测：首帧实际是 id1/id2 时，
+  // h 收敛到 −43~−45 mm、z 误差 −148~−152 mm，**三块板预测高度全错、
+  // 俯仰必然打空**，而位置误差只有 10 mm —— 日志上看不出异常，静默失效。
+  //
+  // 做法（参考 ckyf 的 3 个并行 UKF）：对 k=0/1/2 各建一个候选，
+  // 每帧都 predict+update，累积 NIS 作为匹配度，选最小的作为输出；
+  // 观察到 3 个不同板号（或跑够 outpost_lock_frames 帧）后锁定单跑。
+  std::array<Target, 3> outpost_cand_;
+  std::array<double, 3> outpost_err_ = {0.0, 0.0, 0.0};
+  std::array<int, 3> outpost_reject_ = {0, 0, 0};
+  std::array<std::set<int>, 3> outpost_seen_;
+  int outpost_best_ = 0;
+  int outpost_frames_ = 0;
+  bool outpost_locked_ = false;
+
+  /// 3 假设并行最多跑多少帧就强制锁定（默认 90 帧 ≈ 1.5 s @60fps，
+  /// 约 0.6 圈 —— 足够看到 2 块板；若已看到 3 块不同板则提前锁定）。
+  int outpost_lock_frames_ = 90;
+
+  /// 前哨站的 3 假设更新；成功返回 true。
+  bool update_target_outpost(std::list<Armor> & armors, std::chrono::steady_clock::time_point t);
+
+  /// 用当前最优候选覆盖 target_（对外只暴露一个 Target）。
+  void sync_outpost_best();
 
   /// 取缓存的几何初值；无缓存或校验不过时返回默认构造（`valid()==false`）。
   GeoInit cached_geo(ArmorName name) const;

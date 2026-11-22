@@ -26,7 +26,7 @@ constexpr double kOutpostPlateHeight = 0.102;
 
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-  Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo)
+  Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo, int id_hypothesis)
 : name(armor.name),
   armor_type(armor.type),
   jumped(false),
@@ -62,10 +62,17 @@ Target::Target(
   // 这块板不是 id0 时，centre_z 会被高估 (id * h)，由 EKF 在前几帧修正
   // （h 有过程噪声，且观测的 elevation 直接约束它）。
   double h_init = 0.0;
+  double a_init = ypr[0];
   if (armor_num == 3) {
     h_init = (geo.h >= 0.0) ? geo.h : kOutpostPlateHeight;
-    // 假设观测到的是 id0：中心 z 就是这块板的高度
-    center_z = xyz[2];
+    // 假设首帧看到的是 id = k 的板，反解状态：
+    //   z_obs   = x[4] - k·h     ->  x[4] = z_obs + k·h
+    //   obs_yaw = x[6] + k·2π/3  ->  x[6] = obs_yaw - k·2π/3
+    // 假设错一个 k，x[4] 就差 k·h（最大 204 mm），EKF 只能用 h<0 去吸收
+    // —— 这正是仿真 S5 里 h 收敛到 -45 mm、z 误差 -150 mm 的根因。
+    const int k = (id_hypothesis >= 0 && id_hypothesis < 3) ? id_hypothesis : 0;
+    center_z = xyz[2] + k * h_init;
+    a_init = tools::limit_rad(ypr[0] - k * 2.0 * CV_PI / 3.0);
   }
 
   // x vx y vy z vz a w r l h
@@ -81,7 +88,7 @@ Target::Target(
     if (geo.l >= 0.0) l_final = geo.l;
   }
 
-  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, l_final, h_final}};
+  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, a_init, 0, r, l_final, h_final}};
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值

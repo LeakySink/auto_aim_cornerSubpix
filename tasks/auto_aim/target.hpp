@@ -86,9 +86,19 @@ public:
   int last_id;  // debug only
 
   Target() = default;
+  /// @param id_hypothesis 首帧观测到的板是 id 几（仅 3 板/前哨站使用）。
+  ///
+  /// 前哨站只有一块板同时可见，而 `id` 的编号由首次观测决定 ——
+  /// 第一帧根本不知道看到的是第几块。而模型里
+  ///   `z_i = x[4] - i·h`、`angle_i = x[6] + i·2π/3`
+  /// 一旦假设错，`x[4]` 就差 `k·h`（最大 204 mm），EKF 只能用 `h < 0`
+  /// 去吸收这个错位，表现为 h 收敛到负值、三块板预测高度全错。
+  ///
+  /// 解决：对 k = 0/1/2 各建一个候选，并行比较后选优（见 Tracker）。
+  /// 4 板时该参数被忽略（4 板总能同时看到两块，不存在这个歧义）。
   Target(
     const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-    Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo = {});
+    Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo = {}, int id_hypothesis = 0);
   Target(double x, double vyaw, double radius, double h);
 
   void predict(std::chrono::steady_clock::time_point t);
