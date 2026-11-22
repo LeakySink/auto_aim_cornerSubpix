@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <chrono>
 #include <list>
+#include <map>
 #include <string>
 
 #include "armor.hpp"
@@ -51,6 +52,23 @@ private:
 
   EkfParams ekf_params_;
   RobotConfig outpost_cfg_;
+
+  /// 几何量缓存：键是 `ArmorName` 的整数值。
+  ///
+  /// 动机：r/l/h 每帧只有一块板可见，可观测性很弱，**重新捕获时要花十几帧
+  /// 重新收敛**。而同一个前哨站在一局里几何是固定的，没有理由每次重捕都从
+  /// 配置默认值重新学。
+  ///
+  /// 写入条件：目标收敛（`convergened()`）时。
+  /// 失效条件：`diverged()` 时清除；读取时再做一次范围校验
+  /// （把脏缓存当先验比不缓存更糟）。
+  std::map<int, GeoInit> geo_cache_;
+
+  /// 取缓存的几何初值；无缓存或校验不过时返回默认构造（`valid()==false`）。
+  GeoInit cached_geo(ArmorName name) const;
+
+  /// 目标收敛时写缓存、发散时清除。只在 target_ 有效（state_ != "lost"）时调用。
+  void update_geo_cache();
   RobotConfig base_cfg_;
   RobotConfig normal_cfg_;
 

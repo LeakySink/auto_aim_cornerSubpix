@@ -62,6 +62,20 @@ struct EkfParams {
   double max_geo_cov = 1.0;
 };
 
+/// 几何量（r / l / h）的初值。
+///
+/// 用途：重捕目标时用上次收敛的值做初值，省掉十几帧重新估 r/h
+/// （ckyf 的 `geo_cache_` 思路）。任一分量 < 0 表示"没缓存，用配置默认"。
+///
+/// 注意 h 的语义随板数变：4 板 = 奇偶面高度差；3 板 = 相邻板高差。
+struct GeoInit {
+  double r = -1.0;
+  double l = -1.0;
+  double h = -1.0;
+
+  bool valid() const { return r >= 0.0; }
+};
+
 class Target
 {
 public:
@@ -74,7 +88,7 @@ public:
   Target() = default;
   Target(
     const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-    Eigen::VectorXd P0_dig, EkfParams ekf_params);
+    Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo = {});
   Target(double x, double vyaw, double radius, double h);
 
   void predict(std::chrono::steady_clock::time_point t);
@@ -83,6 +97,9 @@ public:
 
   Eigen::VectorXd ekf_x() const;
   const tools::ExtendedKalmanFilter & ekf() const;
+
+  /// 当前几何量估计（r/l/h），供 Tracker 写 geo_cache。
+  GeoInit geometric_params() const;
 
   /// 本帧是否发生了切板（当前观测的板 id 与上一帧不同）。
   /// 用途：①调试/rdbg 观察切板频率；②单测断言 R(3,3) 的放大条件成立。

@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <tuple>
@@ -106,6 +107,11 @@ std::list<Target> Tracker::track(
   }
 
   state_machine(found);
+
+  // 几何缓存维护：发散时清除、收敛时写入。
+  // 放在发散检测之前，保证 target_ 有效（state_ == "lost" 时 target_ 可能是
+  // 默认构造的空对象，其 diverged() 恒为 true，会误清缓存）。
+  if (state_ != "lost") update_geo_cache();
 
   // 发散检测
   if (state_ != "lost" && target_.diverged()) {
@@ -291,9 +297,54 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   else if (armor.name == ArmorName::base) cfg = &base_cfg_;
   else                                     cfg = &normal_cfg_;
 
-  target_ = Target(armor, t, cfg->radius, cfg->armor_num, cfg->p0, ekf_params_);
+  // 重捕时用上次收敛的几何量做初值（省掉重新估 r/h 的十几帧）
+  const GeoInit geo = cached_geo(armor.name);
+
+  target_ = Target(armor, t, cfg->radius, cfg->armor_num, cfg->p0, ekf_params_, geo);
 
   return true;
+}
+
+GeoInit Tracker::cached_geo(ArmorName name) const
+{
+  const auto it = geo_cache_.find(static_cast<int>(name));
+  if (it == geo_cache_.end()) return {};
+
+  const GeoInit & g = it->second;
+  if (!g.valid()) return {};
+
+  // 范围校验：缓存可能是很久以前的、或被脏观测污染过。
+  // 拿一个错的先验比不缓存更糟（P0 很小，后面很难拉回来）。
+  const bool is_outpost = (name == ArmorName::outpost);
+  const double r_lo = is_outpost ? 0.1 : 0.05;
+  const double r_hi = is_outpost ? 0.5 : 0.6;
+  if (!(g.r >= r_lo && g.r <= r_hi)) return {};
+
+  if (is_outpost) {
+    if (!(g.h >= 0.05 && g.h <= 0.2)) return {};
+  } else {
+    if (!(std::abs(g.h) <= 0.5)) return {};
+  }
+
+  return g;
+}
+
+void Tracker::update_geo_cache()
+{
+  const int key = static_cast<int>(target_.name);
+
+  if (target_.diverged()) {
+    // 发散了：脏缓存会持续污染重捕，必须清掉
+    if (geo_cache_.erase(key) > 0) {
+      tools::RemoteLogger::instance().log("DEBUG", "[Tracker] 目标发散，清除几何缓存");
+    }
+    return;
+  }
+
+  // 只有收敛后才值得缓存（未收敛时 r/h 还在漂，存下来是噪声）
+  if (target_.convergened()) {
+    geo_cache_[key] = target_.geometric_params();
+  }
 }
 
 bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock::time_point t)

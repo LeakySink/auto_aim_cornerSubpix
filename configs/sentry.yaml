@@ -68,6 +68,9 @@ leaving_angle: 20
 decision_speed: 7
 high_speed_delay_time: 0.065
 low_speed_delay_time: 0.055
+delay_blend_width: 0.2
+nominal_pipeline_delay: 0.005
+lock_hold_margin: 0.087
 #####-----离线回放/评估（默认关）-----#####
 publish_raw_frame: false
 #####-----装甲板几何（1月中旬换样式只改这里）-----#####

@@ -26,7 +26,7 @@ constexpr double kOutpostPlateHeight = 0.102;
 
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
-  Eigen::VectorXd P0_dig, EkfParams ekf_params)
+  Eigen::VectorXd P0_dig, EkfParams ekf_params, GeoInit geo)
 : name(armor.name),
   armor_type(armor.type),
   jumped(false),
@@ -39,7 +39,8 @@ Target::Target(
   switch_count_(0),
   ekf_params_(ekf_params)
 {
-  auto r = radius;
+  // 有缓存几何量时优先用缓存（重捕省掉重新估 r/h 的十几帧）
+  auto r = (geo.r >= 0.0) ? geo.r : radius;
   priority = armor.priority;
   const Eigen::VectorXd & xyz = armor.xyz_in_world;
   const Eigen::VectorXd & ypr = armor.ypr_in_world;
@@ -62,7 +63,7 @@ Target::Target(
   // （h 有过程噪声，且观测的 elevation 直接约束它）。
   double h_init = 0.0;
   if (armor_num == 3) {
-    h_init = kOutpostPlateHeight;
+    h_init = (geo.h >= 0.0) ? geo.h : kOutpostPlateHeight;
     // 假设观测到的是 id0：中心 z 就是这块板的高度
     center_z = xyz[2];
   }
@@ -72,7 +73,15 @@ Target::Target(
   // w: angular velocity
   // l: r2 - r1        （仅 4 板使用）
   // h: 4 板 = z2 - z1；3 板 = 相邻板高度差（z_i = z - i*h）
-  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, h_init}};
+  // 4 板的 h 是"奇偶面高度差"，同样支持缓存
+  double h_final = h_init;
+  double l_final = 0.0;
+  if (armor_num != 3) {
+    if (geo.h >= 0.0) h_final = geo.h;
+    if (geo.l >= 0.0) l_final = geo.l;
+  }
+
+  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, l_final, h_final}};
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -361,6 +370,16 @@ void Target::update_ypda(const Armor & armor, int id)
 Eigen::VectorXd Target::ekf_x() const { return ekf_.x; }
 
 const tools::ExtendedKalmanFilter & Target::ekf() const { return ekf_; }
+
+GeoInit Target::geometric_params() const
+{
+  if (ekf_.x.size() < 11) return {};
+  GeoInit g;
+  g.r = ekf_.x[8];
+  g.l = ekf_.x[9];
+  g.h = ekf_.x[10];
+  return g;
+}
 
 void Target::set_w(double w) { ekf_.x[7] = w; }
 

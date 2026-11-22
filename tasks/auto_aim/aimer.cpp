@@ -29,6 +29,16 @@ Aimer::Aimer(const std::string & config_path)
   high_speed_delay_time_ = yaml["high_speed_delay_time"].as<double>();
   low_speed_delay_time_ = yaml["low_speed_delay_time"].as<double>();
   decision_speed_ = yaml["decision_speed"].as<double>();
+  // 可选键（旧配置没有）：缺失时保持头文件里的默认值
+  if (yaml["delay_blend_width"] && yaml["delay_blend_width"].IsDefined()) {
+    delay_blend_width_ = yaml["delay_blend_width"].as<double>();
+  }
+  if (yaml["nominal_pipeline_delay"] && yaml["nominal_pipeline_delay"].IsDefined()) {
+    nominal_pipeline_delay_ = yaml["nominal_pipeline_delay"].as<double>();
+  }
+  if (yaml["lock_hold_margin"] && yaml["lock_hold_margin"].IsDefined()) {
+    lock_hold_margin_ = yaml["lock_hold_margin"].as<double>();
+  }
 
   // 兜底弹速：缺键保持旧行为（22 / 10 / 25），换弹种时用 yaml 覆盖。
   // 重装 42mm 应配 bullet_speed_default: 16.5。
@@ -55,8 +65,28 @@ io::Command Aimer::aim(
   auto target = targets.front();
 
   auto ekf = target.ekf();
-  double delay_time =
-    target.ekf_x()[7] > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+
+  // ---- 延迟补偿：两档 -> 连续过渡 ----
+  // 原来 `|w| > decision_speed_ ? 高速档 : 低速档` 在门限处硬跳变。
+  // delay_blend_width_ > 0 时，在 [门限·(1-k), 门限·(1+k)] 内线性插值；
+  // = 0 时退化为原来的硬二值（保持旧行为，便于 A/B）。
+  const double abs_w = std::abs(target.ekf_x()[7]);
+  double delay_time;
+  if (delay_blend_width_ > 1e-6 && decision_speed_ > 1e-6) {
+    const double lo = decision_speed_ * (1.0 - delay_blend_width_);
+    const double hi = decision_speed_ * (1.0 + delay_blend_width_);
+    double ratio;
+    if (abs_w <= lo) {
+      ratio = 0.0;
+    } else if (abs_w >= hi) {
+      ratio = 1.0;
+    } else {
+      ratio = (abs_w - lo) / (hi - lo);   // 线性过渡
+    }
+    delay_time = low_speed_delay_time_ + ratio * (high_speed_delay_time_ - low_speed_delay_time_);
+  } else {
+    delay_time = abs_w > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+  }
 
   // 测速不可用时不要凭空猜一个"够快"的值：按配置的兜底弹速，并与同一套
   // 上下限判据一致（否则 yaml 写了 16.5 又被 <14 的旧判据改写成 23）。
@@ -75,7 +105,7 @@ io::Command Aimer::aim(
     future += std::chrono::microseconds(int(dt * 1e6));
     target.predict(future);
   } else {
-    auto dt = 0.005 + delay_time;  // detector-aimer耗时 + 发弹延时
+    auto dt = nominal_pipeline_delay_ + delay_time;  // 管线耗时 + 发弹延时
     future += std::chrono::microseconds(int(dt * 1e6));
     target.predict(future);
   }
@@ -258,13 +288,30 @@ AimPoint Aimer::choose_aim_point(const Target & target)
     leaving_angle = leaving_angle_;
   }
 
+  // ---- 施密特滞回：先看上一帧锁定的板能不能保持 ----
+  // 原来每次重新扫描 `for` 取"第一个满足条件的"，目标转到两块板都接近
+  // 45° 的过渡角时，会在两块板之间来回切，云台跟着抖。
+  // 现在：只要锁定的板还在 `coming_angle + 裕度` 内，就继续用它；
+  // 离开这个更宽的门限后才重新选板（enter/exit 双门限 = 滞回）。
+  if (lock_id_ >= 0 && lock_id_ < armor_num) {
+    const int locked = static_cast<int>(lock_id_);
+    const double da = delta_angle_list[locked];
+    const bool in_hold_window = std::abs(da) <= coming_angle + lock_hold_margin_;
+    if (in_hold_window) return {true, armor_xyza_list[locked]};
+  }
+
   // 在小陀螺时，一侧的装甲板不断出现，另一侧的装甲板不断消失，显然前者被打中的概率更高
   for (int i = 0; i < armor_num; i++) {
     if (std::abs(delta_angle_list[i]) > coming_angle) continue;
-    if (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) return {true, armor_xyza_list[i]};
-    if (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle) return {true, armor_xyza_list[i]};
+    const bool coming_in = (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) ||
+                           (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle);
+    if (coming_in) {
+      lock_id_ = i;   // 记录锁定，供下一帧滞回
+      return {true, armor_xyza_list[i]};
+    }
   }
 
+  lock_id_ = -1;   // 没有可打的板，解除锁定
   return {false, armor_xyza_list[0]};
 }
 
