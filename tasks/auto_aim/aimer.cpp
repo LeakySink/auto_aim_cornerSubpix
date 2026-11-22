@@ -210,7 +210,16 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   }
 
   // 不考虑小陀螺
-  if (std::abs(target.ekf_x()[8]) <= 2 && target.name != ArmorName::outpost) {
+  //
+  // ⚠️ 索引必须是 [7]（角速度 w），不能是 [8]（半径 r）。
+  // 这里原来写的是 [8]：r 的量级是 0.2~0.3 m，`|r| <= 2` **恒为真**，
+  // 于是这个条件实际退化成 `name != outpost` —— 小陀螺分支对普通车
+  // **从未生效过**（只有前哨站会走到下面的 else）。
+  //
+  // 修正后：普通车 |w| > 2 rad/s 也会走"来板优先"分支（coming/leaving），
+  // 这是本行注释的原意。属行为变更，影响 standard/infantry 等走 Aimer 的
+  // 入口（重装走 CenterAimer，不受影响）。
+  if (std::abs(ekf_x[7]) <= 2 && target.name != ArmorName::outpost) {
     // 选择在可射击范围内的装甲板
     std::vector<int> id_list;
     for (int i = 0; i < armor_num; i++) {
