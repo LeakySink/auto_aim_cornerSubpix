@@ -11,10 +11,17 @@ namespace auto_aim
 namespace
 {
 /// 前哨站三块装甲板的相邻高度差 [m]。
-/// 依据 2027 规则手册 图 4-34：三块板高度 1446 / 1496 / 1554 mm，
-/// 相邻差 50 / 58 mm，取均值 ≈54 mm。参考实现
-/// ckyf_vision/outpost_target.cpp 的默认值 h_init = 0.102 是 2026 赛季的，勿混用。
-constexpr double kOutpostPlateHeight = 0.054;
+///
+/// 语义：h = 相邻板高差，三块板高度为 z, z-h, z-2h（id0 最高）。
+///
+/// 取值 0.102 来自参考实现
+/// ckyf_vision/src/robot_auto_aim/src/outpost_target.cpp:37 的 `h_init = 0.102`，
+/// 其 isDiverged() 给出的合理区间是 [0.05, 0.2]。
+///
+/// 注意：本文件早期版本曾写作 0.054，依据是「2027 规则手册 图 4-34 的三块板
+/// 高度 1446/1496/1554 mm」。该依据**已被推翻** —— 那三条引线指向的是结构顶边、
+/// 内部箱体顶边和绿灯中心，不是装甲板（见 docs/physical_assumptions.md A2-2b）。
+constexpr double kOutpostPlateHeight = 0.102;
 }  // namespace
 
 Target::Target(

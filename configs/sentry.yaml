@@ -40,7 +40,7 @@ outpost_max_temp_lost_count: 75
 ekf:
   q_xyz_acc_var: 70.0
   q_yaw_acc_var: 100.0
-  q_geo: 1.0e-5
+  q_geo: 1.0e-4
   omega_freeze_thresh: 0.5
   r_yaw: 5e-3
   r_pitch: 2e-3

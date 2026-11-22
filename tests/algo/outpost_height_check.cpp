@@ -26,13 +26,14 @@ int main()
 
   const double radius = 0.2765;
   const double dist = 4.5;
-  const double h_mm = 0.054;
+  // 与 target.cpp 的 kOutpostPlateHeight 保持一致（来源：参考实现 h_init = 0.102）
+  const double h_mm = 0.102;
 
   // 构造前哨站观测：位于 (dist - r, 0, z0)，法向 +x
   std::vector<cv::Point2f> kp{{100.f, 100.f}, {140.f, 100.f}, {140.f, 140.f}, {100.f, 140.f}};
   Armor armor(Color::red, ArmorName::outpost, 0.9f, cv::Rect(100, 100, 40, 40), kp);
 
-  const double z_obs = 1.554;  // 假设看到的是最高那块（id0）
+  const double z_obs = 1.554;  // 假设看到的是最高那块（id0）；具体值不影响断言
   armor.xyz_in_world = Eigen::Vector3d(dist - radius, 0.0, z_obs);
   armor.ypr_in_world = Eigen::Vector3d(0.0, 0.0, 0.0);
   armor.ypd_in_world =
