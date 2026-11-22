@@ -34,6 +34,14 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   ekf_params_.r_yaw         = ekf["r_yaw"].as<double>();
   ekf_params_.r_pitch       = ekf["r_pitch"].as<double>();
   ekf_params_.r_dist_base   = ekf["r_dist_base"].as<double>();
+  // 几何状态（r/l/h）的随机游走强度与冻结阈值：**带默认值**，
+  // 老配置里没有这两个键也能正常启动（其余 ekf 键仍是强制读取）。
+  if (ekf["q_geo"] && ekf["q_geo"].IsDefined()) {
+    ekf_params_.q_geo = ekf["q_geo"].as<double>();
+  }
+  if (ekf["omega_freeze_thresh"] && ekf["omega_freeze_thresh"].IsDefined()) {
+    ekf_params_.omega_freeze_thresh = ekf["omega_freeze_thresh"].as<double>();
+  }
 
   auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {
     auto node = ekf[key];

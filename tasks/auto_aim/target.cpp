@@ -80,6 +80,12 @@ Target::Target(
 
 Target::Target(double x, double vyaw, double radius, double h) : armor_num_(4)
 {
+  // 这个构造函数原先**没有给 ekf_params_ 赋值**，而 predict() 会读
+  // ekf_params_.q_xyz_acc_var / q_yaw_acc_var / q_geo / omega_freeze_thresh，
+  // 属于读未初始化内存（UB）。当前只有 3 个 planner 测试用它，
+  // 一旦拿来跑完整流程就会出随机结果。这里显式给默认值。
+  ekf_params_ = EkfParams{};
+
   Eigen::VectorXd x0{{x, 0, 0, 0, 0, 0, 0, vyaw, radius, 0, h}};
   Eigen::VectorXd P0_dig{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
@@ -132,6 +138,17 @@ void Target::predict(double dt)
   auto a = dt * dt * dt * dt / 4;
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
+
+  // 几何状态（r / l / h）的随机游走方差。
+  // 原来这三行恒为 0 —— 相当于断言"几何参数永不改变"，于是 P 只减不增，
+  // 一旦估偏就再也纠正不回来（前哨站只有一块板同时可见，可观测性本来就弱）。
+  // 这里按参考实现（ckyf_vision/outpost_target.cpp）的做法：用 |w| 自适应缩放，
+  // 目标不转时 r/l/h 与中心位置在观测上共线，此时不该让它们随机游走。
+  double omega_scale = 1.0;
+  if (ekf_params_.omega_freeze_thresh > 1e-6) {
+    omega_scale = std::min(1.0, std::abs(ekf_.x[7]) / ekf_params_.omega_freeze_thresh);
+  }
+  const double qg = ekf_params_.q_geo * omega_scale * dt;
   // 预测过程噪声偏差的方差
   // clang-format off
   Eigen::MatrixXd Q{
@@ -143,9 +160,9 @@ void Target::predict(double dt)
     {     0,      0,      0,      0, b * v1, c * v1,      0,      0, 0, 0, 0},
     {     0,      0,      0,      0,      0,      0, a * v2, b * v2, 0, 0, 0},
     {     0,      0,      0,      0,      0,      0, b * v2, c * v2, 0, 0, 0},
+    {     0,      0,      0,      0,      0,      0,      0,      0, qg, 0, 0},
     {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0}
+    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, qg}
   };
   // clang-format on
 
@@ -328,6 +345,8 @@ void Target::update_ypda(const Armor & armor, int id)
 Eigen::VectorXd Target::ekf_x() const { return ekf_.x; }
 
 const tools::ExtendedKalmanFilter & Target::ekf() const { return ekf_; }
+
+void Target::set_w(double w) { ekf_.x[7] = w; }
 
 std::vector<Eigen::Vector4d> Target::armor_xyza_list() const
 {
