@@ -8,6 +8,15 @@
 
 namespace auto_aim
 {
+namespace
+{
+/// 前哨站三块装甲板的相邻高度差 [m]。
+/// 依据 2027 规则手册 图 4-34：三块板高度 1446 / 1496 / 1554 mm，
+/// 相邻差 50 / 58 mm，取均值 ≈54 mm。参考实现
+/// ckyf_vision/outpost_target.cpp 的默认值 h_init = 0.102 是 2026 赛季的，勿混用。
+constexpr double kOutpostPlateHeight = 0.054;
+}  // namespace
+
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t, double radius, int armor_num,
   Eigen::VectorXd P0_dig, EkfParams ekf_params)
@@ -33,12 +42,30 @@ Target::Target(
   auto center_y = xyz[1] + r * std::sin(ypr[0]);
   auto center_z = xyz[2];
 
+  // ---- 3 板（前哨站）的初始高度语义 ----
+  // h_armor_xyz 里 3 板是 `z_i = x[4] - i*h`，所以 x[4] 是 **id0 那块板**的高度，
+  // 不是"三块板的共同高度"。而这里只知道看到了一块板、不知道它是 id 几，
+  // 若直接把它的 z 当 x[4]、并把 h 置 0，就等于断言"看到的就是 id0 且三块同高"，
+  // 一旦看到的是 id1/id2 就整体偏一个/两个 h。
+  //
+  // 最小改动的处理：h 取 kOutpostPlateHeight（3 板线性递降的相邻差），
+  // 并假设当前观测是 **id0（最高板）**；若实际是别的板，Tracker 的多假设
+  // 初始化会给出另外两个候选（见 Tracker::set_target）。
+  // 这块板不是 id0 时，centre_z 会被高估 (id * h)，由 EKF 在前几帧修正
+  // （h 有过程噪声，且观测的 elevation 直接约束它）。
+  double h_init = 0.0;
+  if (armor_num == 3) {
+    h_init = kOutpostPlateHeight;
+    // 假设观测到的是 id0：中心 z 就是这块板的高度
+    center_z = xyz[2];
+  }
+
   // x vx y vy z vz a w r l h
   // a: angle
   // w: angular velocity
-  // l: r2 - r1
-  // h: z2 - z1
-  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0}};  //初始化预测量
+  // l: r2 - r1        （仅 4 板使用）
+  // h: 4 板 = z2 - z1；3 板 = 相邻板高度差（z_i = z - i*h）
+  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, h_init}};
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -367,7 +394,20 @@ Eigen::Vector3d Target::h_armor_xyz(const Eigen::VectorXd & x, int id) const
   auto r = (use_l_h) ? x[8] + x[9] : x[8];
   auto armor_x = x[0] - r * std::cos(angle);
   auto armor_y = x[2] - r * std::sin(angle);
-  auto armor_z = (use_l_h) ? x[4] + x[10] : x[4];
+
+  // 高度：
+  //   4 板 —— 奇偶两档（x[4] 与 x[4]+h）
+  //   3 板 —— 前哨站三块板**线性递降**，相邻差 h，id 0 最高
+  //            依据 2027 规则手册 图 4-34：三块板高度 1446/1496/1554 mm，
+  //            相邻差约 54 mm；参考实现 ckyf_vision/outpost_target.cpp 的
+  //            `az = cz - id*h` 与此一致。
+  //   其它 —— 同高
+  double armor_z;
+  if (armor_num_ == 3) {
+    armor_z = x[4] - id * x[10];
+  } else {
+    armor_z = (use_l_h) ? x[4] + x[10] : x[4];
+  }
 
   return {armor_x, armor_y, armor_z};
 }
@@ -386,7 +426,8 @@ Eigen::MatrixXd Target::h_jacobian(const Eigen::VectorXd & x, int id) const
   auto dx_dl = (use_l_h) ? -std::cos(angle) : 0.0;
   auto dy_dl = (use_l_h) ? -std::sin(angle) : 0.0;
 
-  auto dz_dh = (use_l_h) ? 1.0 : 0.0;
+  // 3 板时 z = x[4] - id*x[10] -> dz/dh = -id；4 板奇偶组 dz/dh = 1
+  auto dz_dh = (armor_num_ == 3) ? -static_cast<double>(id) : ((use_l_h) ? 1.0 : 0.0);
 
   // clang-format off
   Eigen::MatrixXd H_armor_xyza{
