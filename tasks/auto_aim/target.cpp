@@ -290,11 +290,20 @@ void Target::update_ypda(const Armor & armor, int id)
   //   大部分收益（115.5 vs 110.7mm）。取 0.5 是"收益/鲁棒"折中最优。
   const double view_penalty = 1.0 / std::max(cos_view, 0.5);
 
+  // 切板帧：板朝向通道的观测噪声放大。
+  // 换板时 `angle = x[6] + id·2π/armor_num` 整跳一个板间距（4 板 90°/3 板 120°），
+  // 若仍按普通帧采信，新息会以很大权重把 a/w 拽一下，并连带把 h 拉偏。
+  // 必须用 is_switch_：update_ypda 是在 `last_id = id` 之后调用的，
+  // 此时比较 `id != last_id` 恒为假（曾经就是这么写错的）。
+  const double yaw_switch_penalty =
+    is_switch_ ? ekf_params_.r_yaw_adaptive_factor : 1.0;
+
   Eigen::VectorXd R_dig{
       {ekf_params_.r_yaw * view_penalty,             // yaw 方差：侧视时压缩，噪声大
        ekf_params_.r_pitch,                          // pitch 方差：与视角弱相关，保持
        (log(std::abs(delta_angle) + 1) + 1) * view_penalty,   // 距离方差：侧视最病态，重点降权
-       log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base}};
+       (log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base) *
+         yaw_switch_penalty}};   // 板朝向：切板时放大，避免拽动 a/w/h
 
   //测量过程噪声偏差的方差
   Eigen::MatrixXd R = R_dig.asDiagonal();
@@ -385,6 +394,22 @@ bool Target::diverged() const
   if (!std::isfinite(center_dist) || center_dist < 0.5) {
     tools::RemoteLogger::instance().log(
       "DEBUG", "[Target] 旋转中心过近（d={:.3f} m），判为发散", center_dist);
+    return true;
+  }
+
+  // 几何协方差发散（低可观测下的慢漂移）。
+  // 参考 ckyf 的 robot_target_cv.cpp:360：`cov(R) > 1.0 || cov(L) > 1.0 || cov(H) > 1.0`。
+  // 为什么要看协方差而不是只看状态值：r/l/h 每帧只有一块板可见，可观测性天然很弱。
+  // 状态值可能还在合理区间（r=0.3），但协方差已经涨到 σ=1 m 量级——
+  // 这时候的"合理值"只是噪声，继续用会让俯仰持续漂。
+  const double cov_r = ekf_.P(8, 8);
+  const double cov_l = ekf_.P(9, 9);
+  const double cov_h = ekf_.P(10, 10);
+  if (cov_r > ekf_params_.max_geo_cov || cov_l > ekf_params_.max_geo_cov ||
+      cov_h > ekf_params_.max_geo_cov) {
+    tools::RemoteLogger::instance().log(
+      "DEBUG", "[Target] 几何协方差发散：P(r)={:.3f} P(l)={:.3f} P(h)={:.3f}", cov_r, cov_l,
+      cov_h);
     return true;
   }
 

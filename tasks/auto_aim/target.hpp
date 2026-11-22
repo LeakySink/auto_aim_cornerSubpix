@@ -43,6 +43,23 @@ struct EkfParams {
   /// 物理依据：目标不转时，r/l/h 与旋转中心位置在观测上共线（不可观测），
   /// 此时让几何参数随机游走只会把误差灌进位置状态。
   double omega_freeze_thresh = 0.5;
+
+  /// 切板帧的板朝向观测噪声放大倍数。
+  ///
+  /// 动机：换一块板时，`angle = x[6] + id·2π/armor_num` 会**整跳一个板间距**
+  /// （4 板 90°、3 板 120°）。若仍按普通帧的 r_yaw 采信这次观测，
+  /// 新息会以很大权重把 `a`/`w` 拽一下，连带把 `h` 拉偏。
+  ///
+  /// 做法（参考 ckyf 的 `r_yaw_adaptive_factor`）：检测到切板时，
+  /// 把**板朝向通道**（R 的第 4 个对角元）放大这个倍数，让它"少信一点"。
+  /// 注意必须用 `is_switch_`（在 `last_id` 更新前算好的），
+  /// 不能在 `update_ypda` 里比 `id != last_id` —— 那时 last_id 已经是新值了。
+  double r_yaw_adaptive_factor = 50.0;
+
+  /// 几何协方差发散阈值 [m²]：P(r)/P(l)/P(h) 任一超过它即判为发散。
+  /// 对应 σ = 1 m，而 r≈0.28 m、h≈0.10 m —— 到这个量级说明几何参数
+  /// 已经彻底失去约束（低可观测下的慢漂移），继续用只会越错越远。
+  double max_geo_cov = 1.0;
 };
 
 class Target
@@ -66,6 +83,10 @@ public:
 
   Eigen::VectorXd ekf_x() const;
   const tools::ExtendedKalmanFilter & ekf() const;
+
+  /// 本帧是否发生了切板（当前观测的板 id 与上一帧不同）。
+  /// 用途：①调试/rdbg 观察切板频率；②单测断言 R(3,3) 的放大条件成立。
+  bool is_switching() const { return is_switch_; }
 
   /// 设置角速度状态（索引 7）。
   /// 主要给单元测试用：几何过程噪声按 |w| 缩放，测试必须能把 w 摆到指定值。
