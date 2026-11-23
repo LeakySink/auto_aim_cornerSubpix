@@ -63,8 +63,27 @@ Target::Target(
   // （h 有过程噪声，且观测的 elevation 直接约束它）。
   double h_init = 0.0;
   double a_init = ypr[0];
+  // 3 板的分支同时被 **前哨站** 和 **基地** 命中（两者 armor_num 都是 3），
+  // 但它们的板高排布完全不同：
+  //   前哨站：三块等间距递降，相邻差 h = 0.102 m（官方场地道具，几何固定）
+  //   基地  ：**两层** 3 块板，不是等间距三层递降
+  //
+  // 原来这里不看 name、一律给 kOutpostPlateHeight，等于让基地套用前哨站的
+  // 高度模型。而竖直命中窗口只有 ±19.6 mm，h=102mm 已是窗口的 5.2 倍 ——
+  // 另外两块板的高度会全错。
+  //
+  // 用户决定"基地先不改"（只打其中 3 块），所以这里的最小安全修法是：
+  //   - 前哨站：保持 h = 0.102（有实测/参考依据）
+  //   - 基地  ：h 初值给 0（"暂时按同高处理"），让 EKF 自己从观测里学。
+  //             h 有 P0=1e-3 且 dz/dh≠0 时可观测，不会卡死；只是收敛慢。
+  //   将来若要精确建模基地的两层结构，改这里即可。
+  const bool is_outpost = (armor.name == ArmorName::outpost);
   if (armor_num == 3) {
-    h_init = (geo.h >= 0.0) ? geo.h : kOutpostPlateHeight;
+    if (geo.h >= 0.0) {
+      h_init = geo.h;                 // 缓存/显式指定优先
+    } else {
+      h_init = is_outpost ? kOutpostPlateHeight : 0.0;
+    }
     // 假设首帧看到的是 id = k 的板，反解状态：
     //   z_obs   = x[4] - k·h     ->  x[4] = z_obs + k·h
     //   obs_yaw = x[6] + k·2π/3  ->  x[6] = obs_yaw - k·2π/3
