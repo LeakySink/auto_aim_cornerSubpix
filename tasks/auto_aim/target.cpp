@@ -196,9 +196,32 @@ void Target::predict(double dt)
     return x_prior;
   };
 
-  // 前哨站转速特判
-  if (this->convergened() && this->name == ArmorName::outpost && std::abs(this->ekf_.x[7]) > 2)
-    this->ekf_.x[7] = this->ekf_.x[7] > 0 ? 2.51 : -2.51;
+  // ---- 前哨站转速约束：只拦"物理上不可能"的值，不做硬钳位 ----
+  //
+  // 原实现（同济祖先继承，无注释说明动机）：
+  //     if (convergened() && outpost && |w| > 2)  w = ±2.51;
+  // 这是**无条件钳死**，后果是目标停转后 w 被永久钉在 2.51。
+  //
+  // 实测（.deps/diag_noclamp.cpp，10s 停转）：
+  //     有钳位：停转后 2s w=2.4260，跑到 120s 仍是 2.4260（永不归零）
+  //     无钳位：停转后 2s w=0.0036，结束时 w=0.0000（2 秒内归零）
+  //   -> 钳位是唯一根因。EKF 自己完全能收敛，不需要任何"停转检测"。
+  //
+  // 但也不能完全不管：规则给出前哨站稳态转速 0.8π = 2.5133 rad/s（5 秒内
+  // 加速达到），所以 |w| 超过它一大截就是脏观测/关联错误。这里放宽到
+  // 0.8π 的 1.5 倍（3.77 rad/s）：
+  //   - 正常转速 2.513 不被干预
+  //   - 允许滤波器自由收敛到 0（停转场景）
+  //   - 只把明显离谱的值（>3.77）拉回 0.8π，避免脏数据把 w 推飞
+  constexpr double kOutpostSpinNominal = 0.8 * CV_PI;        // 2.5133
+  constexpr double kOutpostSpinLimit = 1.5 * kOutpostSpinNominal;   // 3.77
+  if (this->name == ArmorName::outpost && std::abs(this->ekf_.x[7]) > kOutpostSpinLimit) {
+    const double clamped = this->ekf_.x[7] > 0 ? kOutpostSpinNominal : -kOutpostSpinNominal;
+    tools::RemoteLogger::instance().log(
+      "DEBUG", "[Target] 前哨站转速异常 w={:.3f} 超出 ±{:.2f}，拉回 ±{:.3f}", this->ekf_.x[7],
+      kOutpostSpinLimit, kOutpostSpinNominal);
+    this->ekf_.x[7] = clamped;
+  }
 
   ekf_.predict(F, Q, f);
 }
