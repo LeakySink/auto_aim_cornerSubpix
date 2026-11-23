@@ -57,6 +57,7 @@ CenterAimer::CenterAimer(const std::string & config_path)
   if (ca && ca.IsDefined()) {
     cfg_.hit_margin = yaml_or(ca, "hit_margin", cfg_.hit_margin);
     cfg_.min_face_cos = yaml_or(ca, "min_face_cos", cfg_.min_face_cos);
+  cfg_.static_w_thresh = yaml_or(ca, "static_w_thresh", cfg_.static_w_thresh);
     cfg_.gimbal_tol = yaml_or(ca, "gimbal_tol_deg", cfg_.gimbal_tol);
     cfg_.launch_delay = yaml_or(ca, "launch_delay", cfg_.launch_delay);
     cfg_.pitch_follow_plate =
@@ -175,7 +176,44 @@ bool CenterAimer::aim_center(
   const Eigen::VectorXd xp = pred.ekf_x();
   if (xp.size() < 11 || !xp.allFinite()) return false;
 
-  const Eigen::Vector3d aim{xp[0], xp[2], xp[4]};
+  Eigen::Vector3d aim{xp[0], xp[2], xp[4]};
+
+  // ---- 静止目标：直接瞄可见的那块板 ----
+  //
+  // "瞄中心等板"依赖板会转过来。目标静止时板永远不动，而横向窗口只有
+  // ±atan(板宽·0.7/2 / d)（4.5 m 处 ≈ ±0.60°），三块板 120° 分布，
+  // 可打姿态占比约 1%（实测见 .deps/diag_static.cpp）。
+  //
+  // 这里改成瞄"最正对相机的那块板"，然后 yaw/pitch 都由这块板所在的位置
+  // 重新解算（下方 traj 用的是 aim.z()，所以必须先把 aim 换掉）。
+  //
+  // 注意用 `xp[7]`（预测后的 w）而不是原始 target，保证与 total_time 一致。
+  const double w_abs = std::abs(xp[7]);
+  if (w_abs < cfg_.static_w_thresh) {
+    const auto plates_now = pred.armor_xyza_list();
+    if (plates_now.empty()) return false;
+
+    int best = -1;
+    double best_cos = -2.0;
+    for (std::size_t i = 0; i < plates_now.size(); ++i) {
+      const Eigen::Vector3d pi = plates_now[i].head<3>();
+      if (!pi.allFinite()) continue;
+      const double horiz_i = std::hypot(pi.x(), pi.y());
+      if (!(horiz_i > 0.1)) continue;
+      // n̂·p̂：正视 +1、侧棱 0、背面 −1
+      const double ny = plates_now[i][3];
+      const double cos_face = (std::cos(ny) * pi.x() + std::sin(ny) * pi.y()) / horiz_i;
+      if (cos_face > best_cos) {
+        best_cos = cos_face;
+        best = static_cast<int>(i);
+      }
+    }
+    // 没有正对相机的板（全在背面）-> 无解，交给上层判"不可打"
+    if (best < 0 || best_cos < cfg_.min_face_cos) return false;
+
+    aim = plates_now[best].head<3>();
+  }
+
   const double d = std::hypot(aim.x(), aim.y());
   if (!(d > 0.2)) return false;
 
