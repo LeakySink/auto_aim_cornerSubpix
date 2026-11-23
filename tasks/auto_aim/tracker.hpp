@@ -87,9 +87,15 @@ private:
   int outpost_frames_ = 0;
   bool outpost_locked_ = false;
 
-  /// 3 假设并行最多跑多少帧就强制锁定（默认 90 帧 ≈ 1.5 s @60fps，
-  /// 约 0.6 圈 —— 足够看到 2 块板；若已看到 3 块不同板则提前锁定）。
-  int outpost_lock_frames_ = 90;
+  /// 超时兜底帧数：跑这么久还没等到「区分度足够」就强制锁定并告警。
+  /// 只在目标长期不转（永远看不到第 3 块板）时才会命中。
+  /// 默认 300 帧 ≈ 5 s @60fps。
+  int outpost_give_up_frames_ = 300;
+
+  /// 区分度阈值：最优假设的累积误差必须小于次优者这个比例才算"分得开"。
+  /// 实测（diag_lock）：第 3 块板转到位后比值落在 0.29~0.39，
+  /// 未到位时是 1.00（编号平移等价解，误差完全相同）。取 0.5 留余量。
+  double outpost_discriminate_ratio_ = 0.5;
 
   /// 前哨站的 3 假设更新；成功返回 true。
   bool update_target_outpost(std::list<Armor> & armors, std::chrono::steady_clock::time_point t);

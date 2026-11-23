@@ -36,7 +36,8 @@ max_rectangular_error: 25
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
-outpost_lock_frames: 90
+outpost_give_up_frames: 300
+outpost_discriminate_ratio: 0.5
 #####-----EKF参数-----#####
 ekf:
   q_xyz_acc_var: 70.0

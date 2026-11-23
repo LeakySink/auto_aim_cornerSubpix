@@ -28,8 +28,11 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
   outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
   normal_temp_lost_count_ = max_temp_lost_count_;
-  if (yaml["outpost_lock_frames"] && yaml["outpost_lock_frames"].IsDefined()) {
-    outpost_lock_frames_ = yaml["outpost_lock_frames"].as<int>();
+  if (yaml["outpost_give_up_frames"] && yaml["outpost_give_up_frames"].IsDefined()) {
+    outpost_give_up_frames_ = yaml["outpost_give_up_frames"].as<int>();
+  }
+  if (yaml["outpost_discriminate_ratio"] && yaml["outpost_discriminate_ratio"].IsDefined()) {
+    outpost_discriminate_ratio_ = yaml["outpost_discriminate_ratio"].as<double>();
   }
 
   auto ekf = yaml["ekf"];
@@ -459,17 +462,51 @@ bool Tracker::update_target_outpost(
   }
   outpost_best_ = best;
 
-  // 5) 锁定：最优假设已见过全部板号，或已跑够帧数
+  // 5) 锁定判据：必须是「区分度足够 + 已见全板」。
+  //
+  // 为什么不能按帧数兜底（原实现的 bug）：
+  //   模型的编号平移 `(x[4], x[6]) -> (x[4]-k·h, x[6]+k·120°)` 是**精确等价解**，
+  //   物理预测完全相同 -> 两个假设的累积误差**一模一样**。
+  //   只有第 3 块板转到有信息量的位置，平移解才会与真解分离。
+  //
+  //   实测（tests/algo/diag_lock，w=0.8π 噪声 5mm，首帧实为 id1）：
+  //     60 帧（见 2 板）：比值 1.00 -> 无法区分
+  //     90 帧（见 2 板）：比值 1.00 -> 无法区分  ← 原 90 帧兜底正好锁错
+  //    120 帧（第 3 板刚露头）：比值 1.00 -> 仍不够
+  //    150 帧：比值 0.33 -> 可以区分
+  //    168 帧：比值 0.29 -> 稳定
+  //
+  // 所以锁定改用「最优误差 < 次优的一半」自适应判据，而不是数帧。
   ++outpost_frames_;
   if (!outpost_locked_) {
-    // 板数用 armor_xyza_list().size() 取（armor_num_ 是私有成员）
     const std::size_t plate_num = outpost_cand_[0].armor_xyza_list().size();
     const bool seen_all = outpost_seen_[outpost_best_].size() >= plate_num;
-    if (seen_all || outpost_frames_ >= outpost_lock_frames_) {
+
+    double err_second = std::numeric_limits<double>::infinity();
+    for (int k = 0; k < 3; ++k) {
+      if (k != outpost_best_) err_second = std::min(err_second, outpost_err_[k]);
+    }
+    const bool discriminative =
+      outpost_err_[outpost_best_] < outpost_discriminate_ratio_ * err_second;
+
+    if (seen_all && discriminative) {
       outpost_locked_ = true;
       tools::RemoteLogger::instance().log(
-        "INFO", "[Tracker] 前哨站首板假设已锁定：k={}（误差 {:.3f}/{:.3f}/{:.3f}，{} 帧）", best,
-        outpost_err_[0], outpost_err_[1], outpost_err_[2], outpost_frames_);
+        "INFO", "[Tracker] 前哨站首板假设已锁定：k={}（误差 {:.3f}/{:.3f}/{:.3f}，比值 {:.2f}，"
+                "{} 帧）",
+        best, outpost_err_[0], outpost_err_[1], outpost_err_[2],
+        outpost_err_[best] / std::max(1e-9, err_second), outpost_frames_);
+    } else if (outpost_frames_ >= outpost_give_up_frames_) {
+      // 超时兜底：目标长时间不转时永远等不到区分度，此时按当前最优锁定。
+      // 不转的情况下只有一块板可见，选错编号不影响那块板的预测（它总被拟合），
+      // 所以这里降级是安全的，但要留一条 WARN 便于现场判断。
+      outpost_locked_ = true;
+      tools::RemoteLogger::instance().log(
+        "WARN",
+        "[Tracker] 前哨站首板假设超时锁定：k={}（比值 {:.2f}，{} 帧，seen_all={}）——"
+        "目标可能长期不转，编号可能不对，但只影响不可见板",
+        best, outpost_err_[best] / std::max(1e-9, err_second), outpost_frames_,
+        seen_all ? "yes" : "no");
     }
   }
 

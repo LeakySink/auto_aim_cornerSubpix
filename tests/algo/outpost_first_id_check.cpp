@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,13 @@ struct TriResult {
   double err[3] = {0.0, 0.0, 0.0};
   double h_final = 0.0;
   double cz_final = 0.0;
+
+  // ---- 锁定过程复刻（与 Tracker::update_target_outpost 的判据一致）----
+  bool locked = false;
+  int lock_frame = -1;          // 第几帧锁定（-1 表示没锁）
+  int lock_best_k = -1;         // 锁定时选中的 k
+  bool locked_at_90 = false;    // 90 帧时是否已经锁定（应为 false）
+  int seen_plates = 0;          // 真值上累计出现过的不同板号数
 };
 
 /// 复刻 Tracker::update_target_outpost 的判据（累积 pos*10 + ang，每帧选优）
@@ -168,6 +176,99 @@ TriResult run_tri(int first_id, int frames, double noise, unsigned seed)
   res.best_k = best;
   res.h_final = cand[best].ekf_x()[10];
   res.cz_final = cand[best].ekf_x()[4];
+  return res;
+}
+
+/// 复刻 Tracker 的锁定判据，返回"第几帧锁定、锁定时选了谁"。
+///
+/// 判据：`seen_all && (err[best] < kDiscriminate * err[second])`
+/// 与 tracker.cpp 完全一致。90 帧时若区分度不足（比值≈1.00）就不该锁定 ——
+/// 这正是原实现 `frames >= 90` 兜底会锁错的场景。
+constexpr double kDiscriminate = 0.5;
+
+TriResult run_with_locking(int first_id, int max_frames, double noise, unsigned seed)
+{
+  using namespace auto_aim;
+  std::mt19937 rng(seed);
+  const double phase = -first_id * 2.0 * kPi / 3.0;
+
+  const auto obs0 = make_truth_obs(0.0, phase, rng, noise);
+  Target cand[3] = {make_cand(obs0, 0), make_cand(obs0, 1), make_cand(obs0, 2)};
+
+  // 每个假设"见过"哪些模型 id（与 Tracker 的 outpost_seen_ 同义）
+  std::set<int> seen[3];
+  for (int k = 0; k < 3; ++k) seen[k].insert(k);
+
+  TriResult res;
+  double err[3] = {0.0, 0.0, 0.0};
+  std::set<int> seen_truth;
+  double t = 0.0;
+
+  for (int f = 0; f < max_frames; ++f) {
+    t += kDt;
+    for (int k = 0; k < 3; ++k) cand[k].predict(kDt);
+
+    const auto obs = make_truth_obs(t, phase, rng, noise);
+
+    // 真值上本帧有哪些板可见
+    for (int i = 0; i < 3; ++i) {
+      Eigen::Vector3d p;
+      double yaw;
+      truth_plate(t, i, phase, &p, &yaw);
+      if (std::cos(yaw) * p.x() + std::sin(yaw) * p.y() > 0.0) seen_truth.insert(i);
+    }
+
+    for (int k = 0; k < 3; ++k) {
+      const auto pred = cand[k].armor_xyza_list();
+      double min_err = 1e18, d_min = 1e18;
+      int best_pred_id = 0;
+      for (int i = 0; i < static_cast<int>(pred.size()); ++i) {
+        const double pos_err = (obs.xyz_in_world - pred[i].head<3>()).norm();
+        const double ang_err = std::abs(std::atan2(
+          std::sin(obs.ypr_in_world[0] - pred[i][3]), std::cos(obs.ypr_in_world[0] - pred[i][3])));
+        const double e = pos_err * 10.0 + ang_err;
+        if (e < min_err) {
+          min_err = e;
+          best_pred_id = i;
+        }
+        d_min = std::min(d_min, pos_err);
+      }
+      const double d_ref = pred.empty() ? 0.0 : pred.front().head<2>().norm();
+      if (d_min < 1.0 + 0.2 * d_ref) {
+        err[k] += min_err;
+        seen[k].insert(best_pred_id);
+        cand[k].update(obs);
+      }
+    }
+
+    if (res.lock_frame < 0) {
+      int best = 0;
+      for (int k = 1; k < 3; ++k)
+        if (err[k] < err[best]) best = k;
+
+      double second = 1e18;
+      for (int k = 0; k < 3; ++k)
+        if (k != best) second = std::min(second, err[k]);
+
+      const bool seen_all = seen[best].size() >= 3;
+      const bool discriminative = err[best] < kDiscriminate * second;
+      if (seen_all && discriminative) {
+        res.lock_frame = f;
+        res.lock_best_k = best;
+      }
+      if (f == 89) res.locked_at_90 = (res.lock_frame >= 0);
+    }
+  }
+
+  int best = 0;
+  for (int k = 1; k < 3; ++k)
+    if (err[k] < err[best]) best = k;
+  res.best_k = best;
+  for (int k = 0; k < 3; ++k) res.err[k] = err[k];
+  res.h_final = cand[best].ekf_x()[10];
+  res.cz_final = cand[best].ekf_x()[4];
+  res.seen_plates = static_cast<int>(seen_truth.size());
+  res.locked = (res.lock_frame >= 0);
   return res;
 }
 }  // namespace
@@ -220,6 +321,23 @@ int main()
     }
     const double ratio = r.err[r.best_k] / std::max(1e-9, err_second);
     check(ratio < 0.5, "正确假设的误差应不到次优者的一半（锁定才有余量）");
+  }
+
+  // ---------- 3) 锁定时机：90 帧内不得锁定（编号平移等价解无法区分）----------
+  //
+  // 这条防的是原实现的 bug：`seen_all || frames >= 90` 会在只看到 2 块板时
+  // 就强制锁定，而此时三个假设的误差完全相同（比值 1.00），锁在谁身上是随机的。
+  std::printf("\n3) 锁定时机（区分度判据，阈值 %.1f）\n", kDiscriminate);
+  for (int first_id = 0; first_id < 3; ++first_id) {
+    const auto r = run_with_locking(first_id, 300, 0.005, 100 + first_id);
+    std::printf(
+      "   首帧 id%d：锁定帧=%d 选中 k=%d（真值 %d）%s  90帧时已锁=%s\n", first_id, r.lock_frame,
+      r.lock_best_k, first_id, (r.lock_best_k == first_id ? "OK" : "WRONG"),
+      r.locked_at_90 ? "是" : "否");
+
+    check(!r.locked_at_90, "90 帧内不应锁定（此时区分度不足，会锁错）");
+    check(r.locked, "300 帧内应完成锁定");
+    check(r.lock_best_k == first_id, "锁定时应选中正确的首板假设");
   }
 
   std::printf("\n%s（失败项 %d）\n", fail == 0 ? "全部通过" : "存在失败", fail);
