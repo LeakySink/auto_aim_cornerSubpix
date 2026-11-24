@@ -147,17 +147,17 @@ int main(int argc, char * argv[])
 
       // 观测器内部数据
       Eigen::VectorXd x = target.ekf_x();
-      data["x"] = x[0];
-      data["vx"] = x[1];
-      data["y"] = x[2];
-      data["vy"] = x[3];
-      data["z"] = x[4];
-      data["vz"] = x[5];
-      data["a"] = x[6] * 57.3;
-      data["w"] = x[7];
-      data["r"] = x[8];
-      data["l"] = x[9];
-      data["h"] = x[10];
+      data["x"] = x[auto_aim::idx::X];
+      data["vx"] = x[auto_aim::idx::VX];
+      data["y"] = x[auto_aim::idx::Y];
+      data["vy"] = x[auto_aim::idx::VY];
+      data["z"] = x[auto_aim::idx::Z];
+      data["vz"] = x[auto_aim::idx::VZ];
+      data["a"] = x[auto_aim::idx::A] * 57.3;
+      data["w"] = x[auto_aim::idx::W];
+      data["r"] = x[auto_aim::idx::R];
+      data["l"] = x[auto_aim::idx::L];
+      data["h"] = x[auto_aim::idx::H];
       data["last_id"] = target.last_id;
 
       // 卡方检验数据：把 EKF 的诊断量一次并入（含 nis/nees 与两个阈值 nis_threshold /

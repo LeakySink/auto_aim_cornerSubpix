@@ -144,7 +144,7 @@ bool CenterAimer::aim_center(
 {
   const Eigen::VectorXd x0 = target.ekf_x();
   // 11 维是最低要求：短状态（默认构造的 Target）取 [0]/[2]/[4] 会越界
-  if (x0.size() < 11 || !x0.allFinite()) return false;
+  if (x0.size() < idx::DIM || !x0.allFinite()) return false;
   if (!std::isfinite(bullet_speed) || bullet_speed <= 0.0) return false;
 
   // 预测时刻 = launch_delay + fly_time：既要算弹丸飞行，也要算"判定→出膛"的延迟。
@@ -155,12 +155,12 @@ bool CenterAimer::aim_center(
     Target pred = target;  // 值拷贝：predict() 会改状态，不能动调用方的 target
     pred.predict(total);
     const Eigen::VectorXd xp = pred.ekf_x();
-    if (xp.size() < 11 || !xp.allFinite()) return false;
+    if (xp.size() < idx::DIM || !xp.allFinite()) return false;
 
-    const double d = std::hypot(xp[0], xp[2]);
+    const double d = std::hypot(xp[idx::X], xp[idx::Y]);
     if (!(d > 0.2) || !std::isfinite(d)) return false;  // 贴脸/脏解，物理上不存在
 
-    const tools::Trajectory traj(bullet_speed, d, xp[4]);
+    const tools::Trajectory traj(bullet_speed, d, xp[idx::Z]);
     if (traj.unsolvable) return false;
 
     const double new_fly = traj.fly_time;
@@ -174,9 +174,9 @@ bool CenterAimer::aim_center(
   Target pred = target;
   pred.predict(total);
   const Eigen::VectorXd xp = pred.ekf_x();
-  if (xp.size() < 11 || !xp.allFinite()) return false;
+  if (xp.size() < idx::DIM || !xp.allFinite()) return false;
 
-  Eigen::Vector3d aim{xp[0], xp[2], xp[4]};
+  Eigen::Vector3d aim{xp[idx::X], xp[idx::Y], xp[idx::Z]};
 
   // ---- 静止目标：直接瞄可见的那块板 ----
   //
@@ -187,8 +187,8 @@ bool CenterAimer::aim_center(
   // 这里改成瞄"最正对相机的那块板"，然后 yaw/pitch 都由这块板所在的位置
   // 重新解算（下方 traj 用的是 aim.z()，所以必须先把 aim 换掉）。
   //
-  // 注意用 `xp[7]`（预测后的 w）而不是原始 target，保证与 total_time 一致。
-  const double w_abs = std::abs(xp[7]);
+  // 注意用 `xp[idx::W]`（预测后的 w）而不是原始 target，保证与 total_time 一致。
+  const double w_abs = std::abs(xp[idx::W]);
   if (w_abs < cfg_.static_w_thresh) {
     const auto plates_now = pred.armor_xyza_list();
     if (plates_now.empty()) return false;
@@ -433,7 +433,7 @@ CenterAimResult CenterAimer::solve(
   r.fire = want_fire;
 
   // 距穿越还有多久：给调试看"是不是快到了"，不参与判据
-  const double w = target.ekf_x()[7];
+  const double w = target.ekf_x()[idx::W];
   r.t_to_cross = (std::abs(w) > 1e-3) ? (best_err_yaw / std::abs(w)) : 0.0;
 
   return r;

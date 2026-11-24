@@ -132,10 +132,10 @@ int main()
         tgt.predict(0.01);
         auto obs = make_visible_obs(tgt, nullptr);
         obs.ypr_in_world[0] += kBiasRad;   // 制造新息
-        const double a_before = tgt.ekf_x()[6];
+        const double a_before = tgt.ekf_x()[auto_aim::idx::A];
         tgt.update(obs);
         if (tgt.is_switching()) {
-          sum_da += std::abs(tgt.ekf_x()[6] - a_before);
+          sum_da += std::abs(tgt.ekf_x()[auto_aim::idx::A] - a_before);
           ++n_switch;
         }
       }
@@ -154,9 +154,9 @@ int main()
     auto params = default_params();
     params.q_geo = 1.0;   // 调大到 1.0，只 predict 不 update -> P(h) 单调涨
     auto tgt = make_target(3.0, params);
-    const double p_before = tgt.ekf().P(10, 10);
+    const double p_before = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     for (int i = 0; i < 200; ++i) tgt.predict(0.01);
-    const double p_after = tgt.ekf().P(10, 10);
+    const double p_after = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     std::printf("3) 200 帧后 P(h)：%.4f -> %.4f，diverged = %d（应 1）\n", p_before, p_after,
                 tgt.diverged());
     check(p_after > params.max_geo_cov, "P(h) 应涨过阈值");
@@ -167,7 +167,7 @@ int main()
   {
     auto tgt = make_target(3.0, default_params());
     for (int i = 0; i < 100; ++i) tgt.predict(0.01);
-    const double p = tgt.ekf().P(10, 10);
+    const double p = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     std::printf("4) 默认 q_geo 跑 100 帧：P(h) = %.6f（远离 1.0），diverged = %d（应 0）\n", p,
                 tgt.diverged());
     check(p < 0.01, "默认参数下 P(h) 应远小于阈值");

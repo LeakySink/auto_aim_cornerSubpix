@@ -168,9 +168,9 @@ int main(int argc, char * argv[])
       data["vz"] = x[5];
       data["a"] = x[6] * 57.3;
       data["w"] = x[7];
-      data["r"] = x[8];
+      data["r"] = x[auto_aim::idx::R];
       data["l"] = x[9];
-      data["h"] = x[10];
+      data["h"] = x[auto_aim::idx::H];
       data["last_id"] = target.last_id;
 
       // 卡方检验数据：把 EKF 的诊断量一次并入（含 nis/nees 与两个阈值 nis_threshold /

@@ -59,7 +59,7 @@ auto_aim::Target make_target(double w, double q_geo, double thresh)
 double run_predict(auto_aim::Target & tgt, int n = 100, double dt = 0.01)
 {
   for (int i = 0; i < n; ++i) tgt.predict(dt);
-  return tgt.ekf().P(10, 10);
+  return tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
 }
 }  // namespace
 
@@ -70,7 +70,7 @@ int main()
   // 1) q_geo = 0：旧行为，P(h) 不应增长
   {
     auto tgt = make_target(3.0, 0.0, 0.5);
-    const double p0 = tgt.ekf().P(10, 10);
+    const double p0 = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     const double p1 = run_predict(tgt);
     std::printf("1) q_geo=0  |w|=3.0 : P(h) %.3e -> %.3e\n", p0, p1);
     check(std::abs(p1 - p0) < 1e-12, "q_geo=0 时 P(h) 不应变化");
@@ -79,7 +79,7 @@ int main()
   // 2) q_geo > 0 且 |w| > 阈值：P(h) 应增长
   {
     auto tgt = make_target(3.0, 1.0e-4, 0.5);
-    const double p0 = tgt.ekf().P(10, 10);
+    const double p0 = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     const double p1 = run_predict(tgt);
     std::printf("2) q_geo=1e-4 |w|=3.0 : P(h) %.3e -> %.3e\n", p0, p1);
     check(p1 > p0 * 1.001, "|w|>阈值时 P(h) 应增长");
@@ -89,7 +89,7 @@ int main()
   {
     auto hi = make_target(3.0, 1.0e-4, 0.5);
     auto lo = make_target(0.1, 1.0e-4, 0.5);
-    const double hi0 = hi.ekf().P(10, 10), lo0 = lo.ekf().P(10, 10);
+    const double hi0 = hi.ekf().P(auto_aim::idx::H, auto_aim::idx::H), lo0 = lo.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     const double hi1 = run_predict(hi), lo1 = run_predict(lo);
     const double hi_gain = hi1 - hi0, lo_gain = lo1 - lo0;
     const double ratio = (hi_gain > 0) ? lo_gain / hi_gain : -1.0;
@@ -103,7 +103,7 @@ int main()
   // 4) |w| = 0：完全冻结（不可观测，不该随机游走）
   {
     auto tgt = make_target(0.0, 1.0e-4, 0.5);
-    const double p0 = tgt.ekf().P(10, 10);
+    const double p0 = tgt.ekf().P(auto_aim::idx::H, auto_aim::idx::H);
     const double p1 = run_predict(tgt);
     std::printf("4) |w|=0 : P(h) %.3e -> %.3e\n", p0, p1);
     check(std::abs(p1 - p0) < 1e-12, "|w|=0 时几何参数应完全冻结");
@@ -112,9 +112,9 @@ int main()
   // 5) r 也应有噪声（不只是 h）
   {
     auto tgt = make_target(3.0, 1.0e-4, 0.5);
-    const double r0 = tgt.ekf().P(8, 8);
+    const double r0 = tgt.ekf().P(auto_aim::idx::R, auto_aim::idx::R);
     run_predict(tgt);
-    const double r1 = tgt.ekf().P(8, 8);
+    const double r1 = tgt.ekf().P(auto_aim::idx::R, auto_aim::idx::R);
     std::printf("5) r 的 P : %.3e -> %.3e\n", r0, r1);
     check(r1 > r0 * 1.001, "r 的 P 也应增长");
   }
@@ -122,9 +122,9 @@ int main()
   // 6) l（索引 9）保持 0：3 板不用它，4 板的 l 也不该被噪声推动
   {
     auto tgt = make_target(3.0, 1.0e-4, 0.5);
-    const double l0 = tgt.ekf().P(9, 9);
+    const double l0 = tgt.ekf().P(auto_aim::idx::L, auto_aim::idx::L);
     run_predict(tgt);
-    const double l1 = tgt.ekf().P(9, 9);
+    const double l1 = tgt.ekf().P(auto_aim::idx::L, auto_aim::idx::L);
     std::printf("6) l 的 P : %.3e -> %.3e（保持不动）\n", l0, l1);
     check(std::abs(l1 - l0) < 1e-12, "l 不应获得过程噪声");
   }

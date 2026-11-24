@@ -75,7 +75,7 @@ int main()
   {
     auto tgt = make(auto_aim::ArmorName::outpost, 0.2765);
     const auto plates = tgt.armor_xyza_list();
-    const double h = tgt.ekf_x()[10];
+    const double h = tgt.ekf_x()[auto_aim::idx::H];
     std::printf("1) 前哨站：h=%.4f m\n", h);
     for (std::size_t i = 0; i < plates.size(); ++i) {
       std::printf("     plate%zu z=%.4f\n", i, plates[i][2]);
@@ -89,7 +89,7 @@ int main()
   {
     auto tgt = make(auto_aim::ArmorName::base, 0.3205);
     const auto plates = tgt.armor_xyza_list();
-    const double h = tgt.ekf_x()[10];
+    const double h = tgt.ekf_x()[auto_aim::idx::H];
     std::printf("\n2) 基地：h=%.4f m\n", h);
     for (std::size_t i = 0; i < plates.size(); ++i) {
       std::printf("     plate%zu z=%.4f\n", i, plates[i][2]);
@@ -120,8 +120,8 @@ int main()
     geo.h = 0.05;   // 显式指定（模拟 geo_cache 给了值）
     Target tgt(ar, std::chrono::steady_clock::now(), 0.3205, 3, p0, default_params(), geo, 0);
 
-    std::printf("\n3) 基地 + 显式 GeoInit(h=0.05)：h=%.4f\n", tgt.ekf_x()[10]);
-    check(std::abs(tgt.ekf_x()[10] - 0.05) < 1e-9, "显式 GeoInit 应覆盖默认值");
+    std::printf("\n3) 基地 + 显式 GeoInit(h=0.05)：h=%.4f\n", tgt.ekf_x()[auto_aim::idx::H]);
+    check(std::abs(tgt.ekf_x()[auto_aim::idx::H] - 0.05) < 1e-9, "显式 GeoInit 应覆盖默认值");
   }
 
   std::printf("\n%s（失败项 %d）\n", fail == 0 ? "全部通过" : "存在失败", fail);

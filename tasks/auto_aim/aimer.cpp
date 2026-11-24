@@ -70,7 +70,7 @@ io::Command Aimer::aim(
   // 原来 `|w| > decision_speed_ ? 高速档 : 低速档` 在门限处硬跳变。
   // delay_blend_width_ > 0 时，在 [门限·(1-k), 门限·(1+k)] 内线性插值；
   // = 0 时退化为原来的硬二值（保持旧行为，便于 A/B）。
-  const double abs_w = std::abs(target.ekf_x()[7]);
+  const double abs_w = std::abs(target.ekf_x()[idx::W]);
   double delay_time;
   if (delay_blend_width_ > 1e-6 && decision_speed_ > 1e-6) {
     const double lo = decision_speed_ * (1.0 - delay_blend_width_);
@@ -230,7 +230,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   if (!target.jumped) return {true, armor_xyza_list[0]};
 
   // 整车旋转中心的球坐标yaw
-  auto center_yaw = std::atan2(ekf_x[2], ekf_x[0]);
+  auto center_yaw = std::atan2(ekf_x[idx::Y], ekf_x[idx::X]);
 
   // 如果delta_angle为0，则该装甲板中心和整车中心的连线在世界坐标系的xy平面过原点
   std::vector<double> delta_angle_list;
@@ -249,7 +249,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   // 修正后：普通车 |w| > 2 rad/s 也会走"来板优先"分支（coming/leaving），
   // 这是本行注释的原意。属行为变更，影响 standard/infantry 等走 Aimer 的
   // 入口（重装走 CenterAimer，不受影响）。
-  if (std::abs(ekf_x[7]) <= 2 && target.name != ArmorName::outpost) {
+  if (std::abs(ekf_x[idx::W]) <= 2 && target.name != ArmorName::outpost) {
     // 选择在可射击范围内的装甲板
     std::vector<int> id_list;
     for (int i = 0; i < armor_num; i++) {
@@ -303,8 +303,8 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   // 在小陀螺时，一侧的装甲板不断出现，另一侧的装甲板不断消失，显然前者被打中的概率更高
   for (int i = 0; i < armor_num; i++) {
     if (std::abs(delta_angle_list[i]) > coming_angle) continue;
-    const bool coming_in = (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) ||
-                           (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle);
+    const bool coming_in = (ekf_x[idx::W] > 0 && delta_angle_list[i] < leaving_angle) ||
+                           (ekf_x[idx::W] < 0 && delta_angle_list[i] > -leaving_angle);
     if (coming_in) {
       lock_id_ = i;   // 记录锁定，供下一帧滞回
       return {true, armor_xyza_list[i]};

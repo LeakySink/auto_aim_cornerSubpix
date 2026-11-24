@@ -127,13 +127,13 @@ int main(int argc, char * argv[])
 
       if (target.has_value()) {
         const auto & e = target->ekf();
-        data["target_x"] = target->ekf_x()[0];   //z
-        data["target_vx"] = target->ekf_x()[1];
-        data["target_y"] = target->ekf_x()[2];   //z
-        data["target_vy"] = target->ekf_x()[3];
-        data["target_z"] = target->ekf_x()[4];   //z
-        data["target_vz"] = target->ekf_x()[5];  //vz
-        data["target_yaw"] = target->ekf_x()[6];
+        data["target_x"] = target->ekf_x()[auto_aim::idx::X];   //z
+        data["target_vx"] = target->ekf_x()[auto_aim::idx::VX];
+        data["target_y"] = target->ekf_x()[auto_aim::idx::Y];   //z
+        data["target_vy"] = target->ekf_x()[auto_aim::idx::VY];
+        data["target_z"] = target->ekf_x()[auto_aim::idx::Z];   //z
+        data["target_vz"] = target->ekf_x()[auto_aim::idx::VZ];  //vz
+        data["target_yaw"] = target->ekf_x()[auto_aim::idx::A];
         data["armor_id"] = target->last_id;      // last_id 是 public
         // 卡方检验数据（含 nis/nees 与两个阈值），Watch 页可与参考线对照
         for (const auto & kv : e.data) data[kv.first] = kv.second;
@@ -154,7 +154,7 @@ int main(int argc, char * argv[])
         }
       }
       if (target.has_value()) {
-        data["w"] = target->ekf_x()[7];
+        data["w"] = target->ekf_x()[auto_aim::idx::W];
         data["markers"] = tools::viz::kalman_markers(*target);
       } else {
         data["w"] = 0.0;

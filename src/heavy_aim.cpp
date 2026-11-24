@@ -237,14 +237,17 @@ int main(int argc, char * argv[])
 
     if (!targets.empty()) {
       const auto x = targets.front().ekf_x();
-      data["target_x"] = x[0];
-      data["target_vx"] = x[1];
-      data["target_y"] = x[2];
-      data["target_vy"] = x[3];
-      data["target_z"] = x[4];
-      data["target_vz"] = x[5];
-      data["target_yaw"] = x[6];
-      data["w"] = x[7];
+      data["target_x"] = x[auto_aim::idx::X];
+      data["target_vx"] = x[auto_aim::idx::VX];
+      data["target_y"] = x[auto_aim::idx::Y];
+      data["target_vy"] = x[auto_aim::idx::VY];
+      data["target_z"] = x[auto_aim::idx::Z];
+      data["target_vz"] = x[auto_aim::idx::VZ];
+      data["target_yaw"] = x[auto_aim::idx::A];
+      data["w"] = x[auto_aim::idx::W];
+      data["target_ax"] = x[auto_aim::idx::AX];
+      data["target_ay"] = x[auto_aim::idx::AY];
+      data["target_az"] = x[auto_aim::idx::AZ];
       data["armor_id"] = targets.front().last_id;
       data["heavy_aim_x"] = res.aim_xyz.x();
       data["heavy_aim_y"] = res.aim_xyz.y();

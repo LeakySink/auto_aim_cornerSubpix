@@ -174,8 +174,8 @@ TriResult run_tri(int first_id, int frames, double noise, unsigned seed)
     if (res.err[k] < res.err[best]) best = k;
   }
   res.best_k = best;
-  res.h_final = cand[best].ekf_x()[10];
-  res.cz_final = cand[best].ekf_x()[4];
+  res.h_final = cand[best].ekf_x()[auto_aim::idx::H];
+  res.cz_final = cand[best].ekf_x()[auto_aim::idx::Z];
   return res;
 }
 
@@ -265,8 +265,8 @@ TriResult run_with_locking(int first_id, int max_frames, double noise, unsigned 
     if (err[k] < err[best]) best = k;
   res.best_k = best;
   for (int k = 0; k < 3; ++k) res.err[k] = err[k];
-  res.h_final = cand[best].ekf_x()[10];
-  res.cz_final = cand[best].ekf_x()[4];
+  res.h_final = cand[best].ekf_x()[auto_aim::idx::H];
+  res.cz_final = cand[best].ekf_x()[auto_aim::idx::Z];
   res.seen_plates = static_cast<int>(seen_truth.size());
   res.locked = (res.lock_frame >= 0);
   return res;
@@ -283,13 +283,18 @@ int main()
     const auto obs = make_truth_obs(0.0, 0.0, rng, 0.0);
     auto tgt = make_cand(obs, 0);
     const auto x = tgt.ekf_x();
-    std::printf("1) k=0 等价性：x[4]=%.6f（应 %.6f）  x[6]=%.6f（应 %.6f）\n", x[4],
-                obs.xyz_in_world.z(), x[6], obs.ypr_in_world[0]);
-    check(std::abs(x[4] - obs.xyz_in_world.z()) < 1e-9, "k=0 时 center_z 应等于观测 z");
-    check(std::abs(std::atan2(std::sin(x[6] - obs.ypr_in_world[0]),
-                              std::cos(x[6] - obs.ypr_in_world[0]))) < 1e-9,
-          "k=0 时 a 应等于观测 yaw");
-    check(std::abs(x[10] - kH) < 1e-9, "h 初值应为 0.102");
+    std::printf(
+      "1) k=0 等价性：x[Z]=%.6f（应 %.6f）  x[A]=%.6f（应 %.6f）\n", x[auto_aim::idx::Z],
+      obs.xyz_in_world.z(), x[auto_aim::idx::A], obs.ypr_in_world[0]);
+    check(
+      std::abs(x[auto_aim::idx::Z] - obs.xyz_in_world.z()) < 1e-9,
+      "k=0 时 center_z 应等于观测 z");
+    check(
+      std::abs(std::atan2(
+        std::sin(x[auto_aim::idx::A] - obs.ypr_in_world[0]),
+        std::cos(x[auto_aim::idx::A] - obs.ypr_in_world[0]))) < 1e-9,
+      "k=0 时 a 应等于观测 yaw");
+    check(std::abs(x[auto_aim::idx::H] - kH) < 1e-9, "h 初值应为 0.102");
   }
 
   // ---------- 2) 三种首帧都能选中正确的 k，且 h 不落负值 ----------

@@ -127,7 +127,7 @@ int main(int argc, char * argv[])
         Eigen::VectorXd x = targets.front().ekf_x();
         {
           std::lock_guard<std::mutex> lock(data_mutex);
-          data["yaw"] = x[6];
+          data["yaw"] = x[auto_aim::idx::A];
         }
       }
       else

@@ -106,7 +106,7 @@ Stat run(double q_geo, double p0_h, double h_true, double noise, double T = 120.
     auto obs = make_obs(t, best, rng, noise, h_true);
     tgt.predict(dt);
     tgt.update(obs);
-    if (t > 20.0) err.push_back((tgt.ekf_x()[10] - h_true) * 1000.0);
+    if (t > 20.0) err.push_back((tgt.ekf_x()[auto_aim::idx::H] - h_true) * 1000.0);
   }
 
   double mn = 1e9, mx = -1e9;

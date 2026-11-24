@@ -111,11 +111,11 @@ Stats run(double t_stop, double t_end)
     }
     tgt.update(make_obs(t, t_stop, best));
 
-    if (std::abs(t - (t_stop - 1.0)) < kDt * 0.5) st.w_before_stop = tgt.ekf_x()[7];
-    if (std::abs(t - (t_stop + 2.0)) < kDt * 0.5) st.w_at_stop_plus_2s = tgt.ekf_x()[7];
+    if (std::abs(t - (t_stop - 1.0)) < kDt * 0.5) st.w_before_stop = tgt.ekf_x()[auto_aim::idx::W];
+    if (std::abs(t - (t_stop + 2.0)) < kDt * 0.5) st.w_at_stop_plus_2s = tgt.ekf_x()[auto_aim::idx::W];
   }
-  st.w_end = tgt.ekf_x()[7];
-  st.center_err_end = std::hypot(tgt.ekf_x()[0] - kCx, tgt.ekf_x()[2] - kCy) * 1000.0;
+  st.w_end = tgt.ekf_x()[auto_aim::idx::W];
+  st.center_err_end = std::hypot(tgt.ekf_x()[auto_aim::idx::X] - kCx, tgt.ekf_x()[auto_aim::idx::Y] - kCy) * 1000.0;
   return st;
 }
 }  // namespace

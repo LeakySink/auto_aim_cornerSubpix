@@ -34,6 +34,7 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 #####-----EKF参数-----#####
 ekf:
+  # CA 模型下为 jerk 方差 [m²/s⁶]，含义已变（原为加速度方差 [m²/s⁴]）
   q_xyz_acc_var: 100.0
   q_yaw_acc_var: 75.0
   r_yaw: 4.0e-2
