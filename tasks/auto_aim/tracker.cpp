@@ -49,6 +49,12 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (ekf["omega_freeze_thresh"] && ekf["omega_freeze_thresh"].IsDefined()) {
     ekf_params_.omega_freeze_thresh = ekf["omega_freeze_thresh"].as<double>();
   }
+  // 距离通道方差：**可选键**。不写就沿用旧的 `(log|Δangle|+1)·penalty` 公式，
+  // 保证未标定的老配置行为零变化（那一格实算 1.4~3.5 m²，比实测大 10~25 倍，
+  // 新息门控因此恒不触发 —— 详见 EkfParams::r_dist 的说明）。
+  if (ekf["r_dist"] && ekf["r_dist"].IsDefined()) {
+    ekf_params_.r_dist = ekf["r_dist"].as<double>();
+  }
 
   auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {
     auto node = ekf[key];
@@ -423,9 +429,16 @@ bool Tracker::update_target_outpost(
       double min_err = std::numeric_limits<double>::infinity();
       double d_armor2pred = std::numeric_limits<double>::infinity();
       int best_pred_id = 0;
+      // 平面二义性：两个候选朝向都参与打分，取更贴合的那个。
+      // （真正进 EKF 的择一由 Target::update 在选定板号内完成，
+      //  这里只用于"哪个 k 假设更可信"的累积误差，不能被单帧的随机翻转带偏。）
+      const double yaw_p = armor.ypr_in_world[0];
+      const double yaw_a = armor.has_alt ? armor.ypr_in_world_alt[0] : yaw_p;
       for (int i = 0; i < static_cast<int>(predicted.size()); ++i) {
         const double pos_err = (armor.xyz_in_world - predicted[i].head<3>()).norm();
-        const double ang_err = std::abs(tools::limit_rad(armor.ypr_in_world[0] - predicted[i][3]));
+        const double ang_err = std::min(
+          std::abs(tools::limit_rad(yaw_p - predicted[i][3])),
+          std::abs(tools::limit_rad(yaw_a - predicted[i][3])));
         const double err = pos_err * 10.0 + ang_err;
         if (err < min_err) {
           min_err = err;

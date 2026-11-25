@@ -67,6 +67,9 @@ bool Solver::solve(Armor & armor) const
     armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
     armor.ypr_in_world = Eigen::Vector3d::Zero();
     armor.ypd_in_world = Eigen::Vector3d::Zero();
+    armor.has_alt = false;
+    armor.xyz_in_world_alt = Eigen::Vector3d::Zero();
+    armor.ypr_in_world_alt = Eigen::Vector3d::Zero();
   };
 
   // 关键点语义校验：换模型时第一时间发现"顺序/语义接错"（默认只记日志、不拒收）
@@ -89,10 +92,32 @@ bool Solver::solve(Armor & armor) const
 
   const auto object_points = armor_geometry().points(armor.type);
 
-  cv::Vec3d rvec, tvec;
-  cv::solvePnP(
-    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
+  // ---- 取 IPPE 的**全部**解（通常是 2 个），不只 OpenCV 挑的那个 ----
+  //
+  // 平面靶天然二义：两个位姿关于视线镜像，单帧重投影误差几乎相同，
+  // 噪声一大"挑哪个"就近似掷硬币。旧实现用 cv::solvePnP（只回一个），
+  // 实机实测 27% 的帧在两解间跳变，是 w 估计被污染的主因。
+  //
+  // 这里两个都留下：主解走原有逻辑；备用解经同样的坐标变换与合理性校验后
+  // 存进 armor 的 `_alt` 字段，由 Target::update 在选定板号内按"与预测更贴合"
+  // 逐帧择一（板号本身仍只由主解决定，理由见 target.cpp 的说明）。
+  std::vector<cv::Mat> rvecs, tvecs;
+  cv::solvePnPGeneric(
+    object_points, armor.points, camera_matrix_, distort_coeffs_, rvecs, tvecs, false,
     cv::SOLVEPNP_IPPE);
+  if (rvecs.empty() || tvecs.empty()) {
+    tools::RemoteLogger::instance().log("WARN", "[Solver] IPPE 无解，丢弃该装甲板");
+    zero_pose();
+    return false;
+  }
+
+  // rvec/tvec 是 3x1（或 1x3）的 CV_64F，按连续内存取前 3 个 double
+  auto mat2vec = [](const cv::Mat & m) {
+    const double * p = m.ptr<double>(0);
+    return cv::Vec3d(p[0], p[1], p[2]);
+  };
+  const cv::Vec3d rvec = mat2vec(rvecs[0]);
+  const cv::Vec3d tvec = mat2vec(tvecs[0]);
 
   Eigen::Vector3d xyz_in_camera;
   cv::cv2eigen(tvec, xyz_in_camera);
@@ -141,6 +166,34 @@ bool Solver::solve(Armor & armor) const
       min_valid_dist_, max_valid_dist_, armor.confidence);
     zero_pose();
     return false;
+  }
+
+  // ---- 备用解：与主解**同样的**坐标变换与合理性校验 ----
+  // 校验不过就干脆不给（has_alt=false），宁可退回旧行为也不要塞脏数据。
+  armor.has_alt = false;
+  if (rvecs.size() >= 2) {
+    const cv::Vec3d rvec_a = mat2vec(rvecs[1]);
+    const cv::Vec3d tvec_a = mat2vec(tvecs[1]);
+    Eigen::Vector3d xyz_c_a;
+    cv::cv2eigen(tvec_a, xyz_c_a);
+    if (xyz_c_a.allFinite() && xyz_c_a[2] > 0.0) {
+      cv::Mat rmat_a;
+      cv::Rodrigues(rvec_a, rmat_a);
+      Eigen::Matrix3d R_a2c_a;
+      cv::cv2eigen(rmat_a, R_a2c_a);
+      const Eigen::Matrix3d R_a2w_a = R_gimbal2world_ * (R_camera2gimbal_ * R_a2c_a);
+      const Eigen::Vector3d xyz_w_a =
+        R_gimbal2world_ * (R_camera2gimbal_ * xyz_c_a + t_camera2gimbal_);
+      const Eigen::Vector3d ypr_w_a = tools::eulers(R_a2w_a, 2, 1, 0);
+      const double d_a = xyz_w_a.norm();
+      if (
+        xyz_w_a.allFinite() && ypr_w_a.allFinite() && d_a >= min_valid_dist_ &&
+        d_a <= max_valid_dist_) {
+        armor.xyz_in_world_alt = xyz_w_a;
+        armor.ypr_in_world_alt = ypr_w_a;
+        armor.has_alt = true;
+      }
+    }
   }
 
   // 平衡不做yaw优化，因为pitch假设不成立

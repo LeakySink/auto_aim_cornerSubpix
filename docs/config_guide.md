@@ -95,23 +95,32 @@ vim configs/heavy.yaml                        # 只改下面 §1 列出的键
 
 | 键 | 单位 | 哨兵现值 | 说明 |
 |---|---|---|---|
-| `q_xyz_acc_var` | m²/s⁴ | 70.0 | 位置/速度通道的过程噪声（大 = 更信观测） |
+| `q_xyz_acc_var` | m²/s⁶ | 70.0 | ⚠️ 14 维 CA 模型下是 **jerk 方差**（旧 CV 时代是加速度方差，m²/s⁴，量纲不同不可直接搬） |
 | `q_yaw_acc_var` | rad²/s⁴ | 100.0 | 角度/角速度通道的过程噪声 |
 | `r_yaw` | rad² | 5e-3 | 视线 yaw 观测方差（σ≈4.0°） |
 | `r_pitch` | rad² | 2e-3 | 视线 pitch 观测方差（σ≈2.6°） |
 | `r_dist_base` | rad² | 2e-1 | ⚠️ **名字有歧义**：它加在**板朝向**那个通道上（`R[3] = log(dist+1)/200 + r_dist_base`），不是距离通道 |
+| `r_dist` | m² | 5e-3（仅 sentry.yaml） | 距离通道方差。**可选键**：不写则沿用旧公式（见下） |
 
 实际使用的 `R`（`target.cpp`，`view_penalty = 1/max(|cos(板法向与视线夹角)|, 0.5)`）：
 
 ```
 R[0] 视线 yaw   = r_yaw × view_penalty
 R[1] 视线 pitch = r_pitch
-R[2] 距离       = (log(|Δangle| + 1) + 1) × view_penalty      ← 与配置无关，恒 1.0~2.42 m²
+R[2] 距离       = r_dist × view_penalty                        （配了 r_dist）
+                = (log(|Δangle| + 1) + 1) × view_penalty      （没配，旧行为）
 R[3] 板朝向     = log(dist + 1)/200 + r_dist_base
 ```
 
-**陷阱**：`R[2]` 的 σ 是 **1.0~1.6 m**（写死的公式），实测只有 0.05~0.09 m。
-这让新息门控（χ² 检验）几乎不可能触发，Bad Converge 看门狗也永不响应。
+**`R[2]` 的来历与陷阱**：旧公式写死，实算 **1.4~3.5 m²（σ = 1.2~1.9 m）**，
+而实机 rlog 实测 `σ_d ≈ 51~56 mm`（同板相邻帧差分，三份 log 一致），
+即旧值大了 10~25 倍。后果是新息门控（χ²=18.47）恒不触发，1 m 以上的
+距离离群观测照单全收。
+
+配了 `r_dist: 5e-3`（σ≈71 mm）之后，门控才真正开始工作。
+**判据**：`nis` 均值应向 4 收敛（4 维观测的理论期望）；改之前实测 1.1，
+说明 R 整体过保守约 3.5 倍。别填得过紧（σ 取 16 mm 会让门控持续触发、帧丢光）。
+
 细节与实测数据见 [`context_handoff.md`](context_handoff.md) 的 R2。
 
 每机器人初值（`outpost` / `base` / `normal`）：

@@ -301,33 +301,88 @@ void Target::update(const Armor & armor)
                          std::sin(obs_yaw_raw) * armor.xyz_in_world[1];
   const double obs_yaw = (n_dot_p < 0.0) ? tools::limit_rad(obs_yaw_raw + CV_PI) : obs_yaw_raw;
 
+  // ---- PnP 平面二义性的第二个候选（见 armor.hpp 的 `has_alt`）----
+  // 备用解同样要做 ±π 可见性消歧，且用它自己的位置（两解距离差 32~35 mm）。
+  const bool have_alt = armor.has_alt && armor.xyz_in_world_alt.allFinite() &&
+                        armor.ypr_in_world_alt.allFinite();
+  double obs_yaw_alt = obs_yaw;
+  if (have_alt) {
+    const double yaw_a = armor.ypr_in_world_alt[0];
+    const double ndp_a = std::cos(yaw_a) * armor.xyz_in_world_alt[0] +
+                         std::sin(yaw_a) * armor.xyz_in_world_alt[1];
+    obs_yaw_alt = (ndp_a < 0.0) ? tools::limit_rad(yaw_a + CV_PI) : yaw_a;
+  }
+
   const double obs_los = armor.ypd_in_world[0];
   const double obs_dist = armor.ypd_in_world[2];
 
+  // 板号用主解选；朝向在选定板号内再挑候选（见下面的说明）
+  double best_gap = 0.0;      // 该板号上两候选的代价差（判"是否并列"用）
+  bool best_alt_wins = false; // 该板号上备用解是否更贴合
   for (int i = 0; i < armor_num_; ++i) {
     const auto & xyza = xyza_list[i];
     const Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head<3>());
 
     // 观测 yaw 已按几何消歧成"绝对朝向"，直接与预测的绝对朝向比较
-    const double yaw_cost = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
+    const double yaw_cost_p = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
+    const double yaw_cost_a =
+      have_alt ? std::abs(tools::limit_rad(obs_yaw_alt - xyza[3])) : yaw_cost_p;
 
     const double los_cost = std::abs(tools::limit_rad(obs_los - ypd[0]));
     const double dist_cost = std::abs(obs_dist - ypd[2]);
 
-    double cost = yaw_cost + 0.5 * los_cost + 0.2 * dist_cost;
+    double cost_p = yaw_cost_p + 0.5 * los_cost + 0.2 * dist_cost;
+    double cost_a = yaw_cost_a + kAltPriorRad + 0.5 * los_cost + 0.2 * dist_cost;
 
     // 低速时优先保持上一帧 id，抑制抖动
     if (update_count_ > 0 && i != last_id && std::abs(ekf_.x[idx::W]) < 4.0) {
-      cost += 0.35;  // 约 20° 的切换惩罚
+      cost_p += 0.35;  // 约 20° 的切换惩罚
+      cost_a += 0.35;
     }
+
+    // ⚠️ **板号只由主解决定**，备用解不参与。
+    //
+    // 这是本改动最容易踩的坑：两个解关于视线镜像，而镜像在板转到 ±60° 附近
+    // **会与相邻板的预测角度完全重合**（θ 与 θ−120° 关于视线对称）。
+    // 一旦让备用解也参与"改板号"的竞争，换板时旧板就能借备用解读懂新板的
+    // 观测，于是关联永远不换板；而"保持上一帧 id"的惩罚又恰好帮着错的一方。
+    // 实测（本仓库单测 pnp_double_solution_check）：t≈0.6 s 的第一次换板即触发，
+    // `w` 立刻翻符号、模型反向旋转，之后再也回不来。
+    //
+    // 所以分工是：**板号用主解（局部连续，可信）；朝向在选定板号内再挑候选。**
+    const double cost = cost_p;
 
     if (cost < min_cost) {
       min_cost = cost;
       id = i;
+      best_gap = std::abs(cost_a - cost_p);
+      best_alt_wins = cost_a < cost_p;
     }
   }
 
-  if (id < 0) id = 0;
+  if (id < 0) {
+    id = 0;
+    best_gap = 0.0;
+    best_alt_wins = false;
+  }
+
+  // ---- 双解择一：在**已选定的板号内**决定用哪个朝向 ----
+  //
+  // 每帧取与预测更贴合的那个，而不是"锁住一个分支"：OpenCV 挑哪个解近似
+  // 掷硬币（实测约 27% 的帧翻转），真值却只有一个 —— 锁分支等于在翻转帧上
+  // 主动喂镜像解。
+  //
+  // 只有"两解几乎重合"时才沿用上一帧的选择（板接近正视时二义性自然消失，
+  // 分离角 → 0，按代价分不出高下）。
+  if (!have_alt) {
+    use_alt_ = false;
+  } else if (best_gap >= kAltTieMargin) {
+    use_alt_ = best_alt_wins;
+  }
+  // else: best_gap < kAltTieMargin -> 保留上一帧的 use_alt_
+
+  const bool take_alt = have_alt && use_alt_;
+  const double obs_yaw_used = take_alt ? obs_yaw_alt : obs_yaw;
 
   if (id != 0) jumped = true;
 
@@ -337,9 +392,15 @@ void Target::update(const Armor & armor)
   last_id = id;
   update_count_++;
 
-  // 统一把"消歧后的绝对朝向"送进 EKF
+  // 统一把"消歧后的绝对朝向"送进 EKF；采用备用解时位置也要一并换过去，
+  // 否则 yaw 与 xyz 来自两个不同的解，`delta_angle` / 新息门控会自相矛盾。
   Armor corrected = armor;
-  corrected.ypr_in_world[0] = obs_yaw;
+  if (take_alt) {
+    corrected.xyz_in_world = armor.xyz_in_world_alt;
+    corrected.ypr_in_world = armor.ypr_in_world_alt;
+    corrected.ypd_in_world = tools::xyz2ypd(corrected.xyz_in_world);
+  }
+  corrected.ypr_in_world[0] = obs_yaw_used;
 
   update_ypda(corrected, id);
 }
@@ -369,9 +430,16 @@ void Target::update_ypda(const Armor & armor, int id)
   const double yaw_switch_penalty = is_switch_ ? ekf_params_.r_yaw_adaptive_factor : 1.0;
 
   Eigen::VectorXd R_dig{
-    {ekf_params_.r_yaw * view_penalty,           // yaw 方差：侧视时压缩，噪声大
-     ekf_params_.r_pitch,                        // pitch 方差：与视角弱相关，保持
-     (log(std::abs(delta_angle) + 1) + 1) * view_penalty,  // 距离方差：侧视最病态
+    {ekf_params_.r_yaw * view_penalty,   // yaw 方差：侧视时压缩，噪声大
+     ekf_params_.r_pitch,                // pitch 方差：与视角弱相关，保持
+     // 距离方差。
+     //   r_dist > 0：**实测标定值**（见 EkfParams::r_dist 的推导）；
+     //   r_dist < 0：沿用旧公式，保证未标定的配置行为零变化。
+     // 旧公式实算 1.4~3.5 m²（σ=1.2~1.9 m），比实测 σ_d≈55 mm 大 10~25 倍，
+     // 新息门控（χ²=18.47）因此恒不触发、距离通道形同虚设。
+     (ekf_params_.r_dist > 0.0 ? ekf_params_.r_dist
+                               : (std::log(std::abs(delta_angle) + 1.0) + 1.0)) *
+       view_penalty,
      (log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base) *
        yaw_switch_penalty}};  // 板朝向：切板时放大，避免拽动 a/w/h
 
