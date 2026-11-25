@@ -16,6 +16,7 @@
 | [`spec_compliance.md`](spec_compliance.md) | **规范核对**：对照 RMUC 2026 制作规范手册，逐条判定我的假设哪些被规范推翻、哪些规范根本没写（附全部相关条款原文摘录）|
 | [`context_handoff.md`](context_handoff.md) | **当前状态**：走到哪一步、验证强度分级、未闭环风险 R1–R9 |
 | [`build_verification_60f03de.md`](build_verification_60f03de.md) | **构建与验证**：怎么在本机编、门控灵敏度实测、实车 `.rlog` 复核、一键采样脚本 |
+| [line_endings.md](line_endings.md) | **约定**：源文件统一 LF；记录 2026-11 的 CRLF 污染及其原因 |
 
 另有资源目录里的说明（不在 `docs/`，但同样要读）：
 
