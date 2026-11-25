@@ -13,9 +13,10 @@
 //   1) 静止时（w=0）扫描板相位 0~120°，绝大多数相位都应能开火
 //   2) 转靶时（w=2.5 rad/s）行为不变（仍走瞄中心等板）
 //
-// 注意：测 fire 必须推进时间戳并关闭热量闸。否则循环调用 solve 时
-// 时间戳不变 -> 热量不冷却 -> Q1 冲到 300 后永久封锁，会误判成"打不中"。
-// 这一点在开发时踩过（第一版诊断因此得出错误结论）。
+// 注意：测 fire 必须处理热量闸。这里的做法是**每个相位新建一个 aimer**
+// （热量从 0 开始），否则复用实例时前几个相位各打一发就把 Q1 顶到 300，
+// 后面的相位会被热量挡住，得到 8/13 的假失败。开发时第一版就是这么错的。
+// 热量闸本身由 `center_aimer_check.cpp` §7 独立覆盖，本测试不重复测它。
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -79,8 +80,16 @@ auto_aim::Target make_target(double a, double w)
 }
 
 /// 用"完美跟随云台"迭代若干帧，返回是否最终能 fire
-bool can_fire(const auto_aim::Target & tgt, const auto_aim::CenterAimer & aimer, int iter = 50)
+///
+/// 注意：**每个相位必须用一个全新的 aimer**。
+/// 本测试问的是"这个板相位能不能被瞄上"，属于瞄准分支的问题；
+/// 而热量是跨相位累积的独立约束（42mm 每发 100、上限 300、冷却 100/s
+/// -> 稳态只有 1 发/秒）。复用同一个 aimer 时，前几个相位各打一发就把
+/// Q1 顶到上限，后面的相位会因为 **热量耗尽** 而非"瞄不上"返回 fire=false，
+/// 得到 8/13 的假失败。热量闸本身由 `center_aimer_check.cpp` §7 单独覆盖。
+bool can_fire(const std::string & cfg_path, const auto_aim::Target & tgt, int iter = 50)
 {
+  auto_aim::CenterAimer aimer(cfg_path);   // 每相位新建 -> 热量从 0 开始
   auto tp = std::chrono::steady_clock::now();
   auto res = aimer.solve(tgt, tp, 0.0, 0.0, 16.5);
   for (int i = 0; i < iter; ++i) {
@@ -106,7 +115,7 @@ int main(int argc, char ** argv)
   for (int deg = 0; deg <= 120; deg += 10) {
     const double a = deg * kPi / 180.0;
     const auto tgt = make_target(a, 0.0);
-    const bool ok = can_fire(tgt, aimer);
+    const bool ok = can_fire(cfg_path, tgt);
     ++n_all;
     if (ok) ++n_ok;
     std::printf("  静止 相位%4d°  fire=%d\n", deg, ok ? 1 : 0);
