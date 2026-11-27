@@ -55,6 +55,14 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (ekf["r_dist"] && ekf["r_dist"].IsDefined()) {
     ekf_params_.r_dist = ekf["r_dist"].as<double>();
   }
+  // 固定道具：把已知常数钉死（默认关）。见 EkfParams::freeze_geo / freeze_z
+  // 的说明 —— **两者必须一起开**，只开 freeze_geo 会把误关联的伤害挤到 Z 上。
+  if (ekf["freeze_geo"] && ekf["freeze_geo"].IsDefined()) {
+    ekf_params_.freeze_geo = ekf["freeze_geo"].as<bool>();
+  }
+  if (ekf["freeze_z"] && ekf["freeze_z"].IsDefined()) {
+    ekf_params_.freeze_z = ekf["freeze_z"].as<bool>();
+  }
 
   auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {
     auto node = ekf[key];
