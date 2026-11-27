@@ -429,16 +429,9 @@ bool Tracker::update_target_outpost(
       double min_err = std::numeric_limits<double>::infinity();
       double d_armor2pred = std::numeric_limits<double>::infinity();
       int best_pred_id = 0;
-      // 平面二义性：两个候选朝向都参与打分，取更贴合的那个。
-      // （真正进 EKF 的择一由 Target::update 在选定板号内完成，
-      //  这里只用于"哪个 k 假设更可信"的累积误差，不能被单帧的随机翻转带偏。）
-      const double yaw_p = armor.ypr_in_world[0];
-      const double yaw_a = armor.has_alt ? armor.ypr_in_world_alt[0] : yaw_p;
       for (int i = 0; i < static_cast<int>(predicted.size()); ++i) {
         const double pos_err = (armor.xyz_in_world - predicted[i].head<3>()).norm();
-        const double ang_err = std::min(
-          std::abs(tools::limit_rad(yaw_p - predicted[i][3])),
-          std::abs(tools::limit_rad(yaw_a - predicted[i][3])));
+        const double ang_err = std::abs(tools::limit_rad(armor.ypr_in_world[0] - predicted[i][3]));
         const double err = pos_err * 10.0 + ang_err;
         if (err < min_err) {
           min_err = err;

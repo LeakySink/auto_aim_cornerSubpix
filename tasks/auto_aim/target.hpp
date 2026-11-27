@@ -200,33 +200,6 @@ private:
   std::chrono::steady_clock::time_point t_;
   EkfParams ekf_params_;
 
-  // ---- PnP 双解择一的状态（见 armor.hpp 的 `has_alt` 说明）----
-  //
-  // 择一策略：**每帧取"与预测更贴合"的那个候选**，而不是锁住某个分支。
-  // 因为 OpenCV 挑哪个解近似掷硬币（实测约 27% 的帧翻转），而真值只有
-  // 一个 —— 锁分支等于在那 27% 的帧上主动喂镜像解。
-  //
-  // 只有一种情形需要"记住上一帧"：两解几乎重合（板接近正视时二义性消失），
-  // 代价分不出高下，这时保留上次选择以避免无意义抖动。
-  bool use_alt_ = false; ///< 本帧采用备用解；两解并列时沿用上一帧的值
-
-  /// 备用解的先验惩罚 [rad]，约 8.6°。
-  ///
-  /// 主解是 OpenCV 按重投影误差挑出来的，本身有先验优势；备用解只是"另一解"。
-  /// 加这个惩罚后，备用解必须**明确更贴合**才翻盘，避免在两解自然收敛
-  /// （板接近正视、分离角 → 0）的区域来回横跳。
-  ///
-  /// 取 0.15 rad：远小于两解的典型分离（72° = 1.26 rad），真正的翻转帧
-  /// 仍然翻得动。
-  ///
-  /// ⚠️ 注意它**不是**用来防"关联被 hijack 到相邻板"的 —— 那个靠
-  /// "板号只由主解决定"来防（见 target.cpp）。两者别混。
-  static constexpr double kAltPriorRad = 0.15;
-
-  /// 并列判据 [rad]：该板号上两候选代价差小于它就算并列。约 1.7°，远小于
-  /// 两解的典型分离（72°），不会误吞真正的切换。
-  static constexpr double kAltTieMargin = 0.03;
-
   void update_ypda(const Armor & armor, int id);  // yaw pitch distance angle
 
   Eigen::Vector3d h_armor_xyz(const Eigen::VectorXd & x, int id) const;

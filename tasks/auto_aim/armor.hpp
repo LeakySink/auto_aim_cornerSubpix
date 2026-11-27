@@ -114,27 +114,6 @@ struct Armor
 
   double yaw_raw = 0.0;  // rad；只在 Solver::solve() 里赋值，调试输出可能早于它
 
-  // ---- 平面靶 PnP 二义性的**备用解**（由 Solver::solve 填写）----
-  //
-  // 4 点平面靶用 IPPE 求解时天然有**两个**近似等价的位姿：二者关于视线方向
-  // 镜像。单帧重投影误差几乎相同，OpenCV 只返回其中一个 —— 而这个"挑哪个"
-  // 在实机上近似掷硬币。
-  //
-  // 实测（2026-11 实机 rlog，前哨站小装甲 @4.4 m，三份 log 一致）：
-  //   · 两解相差约 72°（71.7° / 71.5° / 72.1°）
-  //   · 约 27% 的帧在两解之间跳变
-  //   · 两解的**距离只差 32~35 mm**（远小于距离噪声 55 mm）、
-  //     `obs_pitch` 相同 —— 即两个解只差朝向、不差位置
-  //   · 两簇精确对称分布在"圆心方位"两侧各 36°
-  //
-  // 因为只差朝向，`n̂·p > 0` 的可见性判据**无法**消歧（两解都朝向相机）。
-  // 唯一可用的是**时序一致性**：所以这里把第二个解也存下来，交给
-  // Target::update 在选定板号内择一（板号本身仍只由主解决定 —— 镜像解在
-  // ±60° 附近会与相邻板重合，让它参与改板号会把关联带飞）。
-  bool has_alt = false;
-  Eigen::Vector3d xyz_in_world_alt = Eigen::Vector3d::Zero();
-  Eigen::Vector3d ypr_in_world_alt = Eigen::Vector3d::Zero();
-
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(
     int class_id, float confidence, const cv::Rect & box, std::vector<cv::Point2f> armor_keypoints);
