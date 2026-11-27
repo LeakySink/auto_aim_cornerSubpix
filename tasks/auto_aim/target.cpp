@@ -355,10 +355,19 @@ void Target::update(const Armor & armor)
     // 观测 yaw 已按几何消歧成"绝对朝向"，直接与预测的绝对朝向比较
     const double yaw_cost = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
 
-    const double los_cost = std::abs(tools::limit_rad(obs_los - ypd[0]));
-    const double dist_cost = std::abs(obs_dist - ypd[2]);
-
-    double cost = yaw_cost + 0.5 * los_cost + 0.2 * dist_cost;
+    double cost;
+    if (ekf_params_.assoc_pos_weight > 0.0) {
+      // ---- 参考实现（ckyf_vision）的认板代价：三维位置差 × w + 朝向差 ----
+      // `armor_i` 的三块板 (x,y) 相同、只有 z 不同，所以**三维**位置差能把
+      // 板高差变成判据；标量距离差各板几乎一样，做不到这一点。
+      const double pos_cost = (armor.xyz_in_world - xyza.head<3>()).norm();
+      cost = pos_cost * ekf_params_.assoc_pos_weight + yaw_cost;
+    } else {
+      // 旧公式（默认）：数值上被朝向支配
+      const double los_cost = std::abs(tools::limit_rad(obs_los - ypd[0]));
+      const double dist_cost = std::abs(obs_dist - ypd[2]);
+      cost = yaw_cost + 0.5 * los_cost + 0.2 * dist_cost;
+    }
 
     // 低速时优先保持上一帧 id，抑制抖动
     if (update_count_ > 0 && i != last_id && std::abs(ekf_.x[idx::W]) < 4.0) {

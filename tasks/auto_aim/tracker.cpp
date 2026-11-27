@@ -63,6 +63,10 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (ekf["freeze_z"] && ekf["freeze_z"].IsDefined()) {
     ekf_params_.freeze_z = ekf["freeze_z"].as<bool>();
   }
+  // 认板代价里三维位置误差的权重（参考实现用 100 / 10）。不写 = 沿用旧公式。
+  if (ekf["assoc_pos_weight"] && ekf["assoc_pos_weight"].IsDefined()) {
+    ekf_params_.assoc_pos_weight = ekf["assoc_pos_weight"].as<double>();
+  }
 
   auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {
     auto node = ekf[key];
