@@ -423,17 +423,26 @@ void Target::update_ypda(const Armor & armor, int id)
   // 此时比较 `id != last_id` 恒为假。
   const double yaw_switch_penalty = is_switch_ ? ekf_params_.r_yaw_adaptive_factor : 1.0;
 
+  // ---- 距离通道方差 ----
+  //
+  // σ_d ≈ d²·σ_px/(f·W) ⇒ **方差 ∝ d⁴**（平面靶标 PnP 的几何性质，不是调参空间）。
+  // 用常数会在标定距离之外系统性地过度信任距离观测：实测 8 m 处真实
+  // σ_d ≈ 276 mm，而常数按 71 mm 给 ⇒ 滤波器发散（err 8.1e6 mm）。
+  const double obs_d = std::abs(armor.ypd_in_world[2]);
+  double r_dist_var = 0.0;
+  if (ekf_params_.r_dist_k > 0.0) {
+    const double d2 = obs_d * obs_d;
+    r_dist_var = std::max(ekf_params_.r_dist_k * d2 * d2, 1e-6) * view_penalty;
+  } else {
+    // 旧公式：实算 1.4~3.5 m²（σ = 1.2~1.9 m），比实测大 10~25 倍 ——
+    // 新息门控因此恒不触发、距离通道形同虚设，但**在大距离上是安全的**。
+    r_dist_var = (std::log(std::abs(delta_angle) + 1.0) + 1.0) * view_penalty;
+  }
+
   Eigen::VectorXd R_dig{
     {ekf_params_.r_yaw * view_penalty,   // yaw 方差：侧视时压缩，噪声大
      ekf_params_.r_pitch,                // pitch 方差：与视角弱相关，保持
-     // 距离方差。
-     //   r_dist > 0：**实测标定值**（见 EkfParams::r_dist 的推导）；
-     //   r_dist < 0：沿用旧公式，保证未标定的配置行为零变化。
-     // 旧公式实算 1.4~3.5 m²（σ=1.2~1.9 m），比实测 σ_d≈55 mm 大 10~25 倍，
-     // 新息门控（χ²=18.47）因此恒不触发、距离通道形同虚设。
-     (ekf_params_.r_dist > 0.0 ? ekf_params_.r_dist
-                               : (std::log(std::abs(delta_angle) + 1.0) + 1.0)) *
-       view_penalty,
+     r_dist_var,                         // 距离方差：见上（∝ d⁴ 或旧公式）
      (log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + ekf_params_.r_dist_base) *
        yaw_switch_penalty}};  // 板朝向：切板时放大，避免拽动 a/w/h
 

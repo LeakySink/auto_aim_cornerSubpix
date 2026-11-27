@@ -51,9 +51,12 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   }
   // 距离通道方差：**可选键**。不写就沿用旧的 `(log|Δangle|+1)·penalty` 公式，
   // 保证未标定的老配置行为零变化（那一格实算 1.4~3.5 m²，比实测大 10~25 倍，
-  // 新息门控因此恒不触发 —— 详见 EkfParams::r_dist 的说明）。
-  if (ekf["r_dist"] && ekf["r_dist"].IsDefined()) {
-    ekf_params_.r_dist = ekf["r_dist"].as<double>();
+  // 新息门控因此恒不触发 —— 详见 EkfParams::r_dist_k 的说明）。
+  //
+  // ⚠️ 只接受 `r_dist_k`（∝ d⁴ 的系数），**不再接受常数 `r_dist`**：
+  // 常数会在标定距离之外系统性过度信任距离观测，实测 8 m 直接发散。
+  if (ekf["r_dist_k"] && ekf["r_dist_k"].IsDefined()) {
+    ekf_params_.r_dist_k = ekf["r_dist_k"].as<double>();
   }
   // 认板代价改用角度通道（仰角+方位角，按噪声归一化）。不写 = 沿用旧公式。
   if (ekf["assoc_angle"] && ekf["assoc_angle"].IsDefined()) {
