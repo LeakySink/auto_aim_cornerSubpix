@@ -131,20 +131,6 @@ Target::Target(
   // 兼容旧的 11 维 p0（各 yaml 里普遍还是 11 个元素）
   Eigen::VectorXd p0_dig = (P0_dig.size() == idx::DIM) ? P0_dig : expand_p0_11_to_14(P0_dig);
 
-  // ---- 固定道具：把已知常数钉死（P0=0 + Q=0 -> 增益恒 0，状态永不移动）----
-  // 注意必须连同**加速度状态**一起清零：`expand_p0_11_to_14` 把三个加速度方差
-  // 硬编码成 1.0，只清 P(p,p) 的话，加速度的不确定性会经 F 的 ½dt² 耦合漏回位置。
-  if (ekf_params_.freeze_geo) {
-    p0_dig[idx::R] = 0.0;
-    p0_dig[idx::L] = 0.0;
-    p0_dig[idx::H] = 0.0;
-  }
-  if (ekf_params_.freeze_z) {
-    p0_dig[idx::Z] = 0.0;
-    p0_dig[idx::VZ] = 0.0;
-    p0_dig[idx::AZ] = 0.0;
-  }
-
   Eigen::MatrixXd P0 = p0_dig.asDiagonal();
 
   ekf_ = tools::ExtendedKalmanFilter(x0, P0, x_add_impl);
@@ -219,8 +205,6 @@ void Target::predict(double dt)
   const double q33 = v1 * dt;         // (a,a)
 
   for (int axis = 0; axis < 3; ++axis) {
-    // Z 轴冻结时不给任何过程噪声：P=0 且 Q=0，状态才会真正停在初值上
-    if (axis == 2 && ekf_params_.freeze_z) continue;
     const int p = 3 * axis;
     const int v = p + 1;
     const int a = p + 2;
@@ -319,36 +303,9 @@ void Target::update(const Armor & armor)
   const double obs_yaw = (n_dot_p < 0.0) ? tools::limit_rad(obs_yaw_raw + CV_PI) : obs_yaw_raw;
 
   const double obs_los = armor.ypd_in_world[0];
-  const double obs_pitch = armor.ypd_in_world[1];
   const double obs_dist = armor.ypd_in_world[2];
 
-  // ---- 用「板高」认板（仅当 Z 与 h 都被钉成常数时才可用）----
-  //
-  // 模型里 armor_i = (X − r·cos θ, Y − r·sin θ, **Z − i·h**)：
-  // 三块板的 (x, y) 完全相同、只有 z 不同。所以只要 Z 与 h 可信，
-  // "这是第几块板"就是**闭式可解**的：i = round((Z − z_obs) / h)。
-  //
-  // 为什么不能用朝向认板：IPPE 的镜像解 θ' = 2·los − θ 只改朝向、不改位置，
-  // 于是它落在**同一高度**上；而 θ>30° 时镜像解离相邻板的朝向更近，模型就会
-  // 把"上面那块板"认成"下面那块"→ 看到"板比预测低 h"→ 把 Z/h 往下压。
-  // 实测（outpost_port）：这会让误关联稳定在 7.5%、h 从 102 漂到 38。
-  //
-  // 前置条件是 Z 与 h 必须**冻住**：Z 一旦漂过 h/2，高度判据就失去锚点，
-  // 会形成"误关联 → Z 漂 → 判据失效 → 更多误关联"的正反馈。
-  int id_by_height = -1;
-  if (ekf_params_.freeze_z && ekf_params_.freeze_geo && armor_num_ >= 2) {
-    const double h = ekf_.x[idx::H];
-    if (std::abs(h) > 1e-3) {
-      const double z_obs = obs_dist * std::sin(obs_pitch);
-      const long k = std::lround((ekf_.x[idx::Z] - z_obs) / h);
-      if (k >= 0 && k < armor_num_) id_by_height = static_cast<int>(k);
-    }
-  }
-
   for (int i = 0; i < armor_num_; ++i) {
-    // 高度已定板号时只评那一个候选（朝向仍参与，但只用于消歧后的取值）
-    if (id_by_height >= 0 && i != id_by_height) continue;
-
     const auto & xyza = xyza_list[i];
     const Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head<3>());
 
@@ -380,7 +337,7 @@ void Target::update(const Armor & armor)
     }
   }
 
-  if (id < 0) id = (id_by_height >= 0) ? id_by_height : 0;
+  if (id < 0) id = 0;
 
   if (id != 0) jumped = true;
 
