@@ -55,9 +55,9 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (ekf["r_dist"] && ekf["r_dist"].IsDefined()) {
     ekf_params_.r_dist = ekf["r_dist"].as<double>();
   }
-  // 认板代价里三维位置误差的权重（参考实现用 100 / 10）。不写 = 沿用旧公式。
-  if (ekf["assoc_pos_weight"] && ekf["assoc_pos_weight"].IsDefined()) {
-    ekf_params_.assoc_pos_weight = ekf["assoc_pos_weight"].as<double>();
+  // 认板代价改用角度通道（仰角+方位角，按噪声归一化）。不写 = 沿用旧公式。
+  if (ekf["assoc_angle"] && ekf["assoc_angle"].IsDefined()) {
+    ekf_params_.assoc_angle = ekf["assoc_angle"].as<bool>();
   }
 
   auto load_robot_cfg = [&](const std::string & key) -> RobotConfig {

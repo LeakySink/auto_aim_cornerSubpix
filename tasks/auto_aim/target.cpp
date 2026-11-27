@@ -302,25 +302,56 @@ void Target::update(const Armor & armor)
                          std::sin(obs_yaw_raw) * armor.xyz_in_world[1];
   const double obs_yaw = (n_dot_p < 0.0) ? tools::limit_rad(obs_yaw_raw + CV_PI) : obs_yaw_raw;
 
+  // 备用解（PnP 镜像解）同样做 ±π 消歧
+  double obs_yaw_alt = obs_yaw;
+  if (armor.has_alt && armor.xyz_in_world_alt.allFinite()) {
+    const double a_raw = armor.ypr_in_world_alt[0];
+    const double n_dot_p_alt = std::cos(a_raw) * armor.xyz_in_world_alt[0] +
+                               std::sin(a_raw) * armor.xyz_in_world_alt[1];
+    obs_yaw_alt = (n_dot_p_alt < 0.0) ? tools::limit_rad(a_raw + CV_PI) : a_raw;
+  }
+
   const double obs_los = armor.ypd_in_world[0];
   const double obs_dist = armor.ypd_in_world[2];
 
+  // ---- 认板与朝向解耦 ----
+  //
+  // 分工必须是这样，顺序不能反：
+  //   ① **板号由位置定** —— 镜像解只改朝向、不改位置，位置是这条链上唯一
+  //      不受二义性污染的通道；
+  //   ② 板号定下之后，再在两解里挑朝向。
+  //
+  // `f4c734f` 之所以失败，就是把顺序做反了：用朝向认板、再挑朝向。翻转帧上
+  // 主解本身就是镜像解，板号在备用解介入之前就已经错了，备用解没有机会。
+  //
+  // 三块板 (x,y) 相同、只有 z 不同 —— 所以**三维**位置差（不是标量距离差）
+  // 才能把板高差变成认板判据，这也正是参考实现 ckyf_vision 的做法。
   for (int i = 0; i < armor_num_; ++i) {
     const auto & xyza = xyza_list[i];
     const Eigen::Vector3d ypd = tools::xyz2ypd(xyza.head<3>());
 
-    // 观测 yaw 已按几何消歧成"绝对朝向"，直接与预测的绝对朝向比较
-    const double yaw_cost = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
-
     double cost;
-    if (ekf_params_.assoc_pos_weight > 0.0) {
-      // ---- 参考实现（ckyf_vision）的认板代价：三维位置差 × w + 朝向差 ----
-      // `armor_i` 的三块板 (x,y) 相同、只有 z 不同，所以**三维**位置差能把
-      // 板高差变成判据；标量距离差各板几乎一样，做不到这一点。
-      const double pos_cost = (armor.xyz_in_world - xyza.head<3>()).norm();
-      cost = pos_cost * ekf_params_.assoc_pos_weight + yaw_cost;
+    if (ekf_params_.assoc_angle) {
+      // 认板只用**角度**通道，并按噪声归一化（单位：σ²）。
+      //
+      // 为什么不用笛卡尔位置差：单板 PnP 的误差主要**沿视线方向**（距离 σ_d≈55 mm，
+      // 而方位/仰角只有 0.01~0.05°）。笛卡尔差把这段距离噪声全带上，而三块板
+      // 之间真正用来区分的是高度 —— 信号被距离噪声淹没。
+      // 实测（outpost_port）：三维位置×10 在 4.4 m 是 0.1%，到 6 m 恶化到 31.8%
+      // （板高差 102 mm < 6 m 处的距离噪声 ~150 mm）。
+      //
+      // 角度通道同时满足三件事：
+      //   ① 不受镜像影响（镜像只改 yaw，不改位置/方位/仰角）；
+      //   ② 噪声与距离无关（像素级），而板高差在仰角上 = h/d 只按 1/d 衰减；
+      //   ③ 归一化后量级远大于"保持上一帧 id"的 0.35 惩罚（~500σ²），
+      //      所以不需要再调权重。
+      const double sigma_ang = 1e-3;  // rad，保守取（实机实测 0.0003~0.0006）
+      const double e = (armor.ypd_in_world[1] - ypd[1]) / sigma_ang;
+      const double a = tools::limit_rad(armor.ypd_in_world[0] - ypd[0]) / sigma_ang;
+      cost = e * e + a * a;
     } else {
       // 旧公式（默认）：数值上被朝向支配
+      const double yaw_cost = std::abs(tools::limit_rad(obs_yaw - xyza[3]));
       const double los_cost = std::abs(tools::limit_rad(obs_los - ypd[0]));
       const double dist_cost = std::abs(obs_dist - ypd[2]);
       cost = yaw_cost + 0.5 * los_cost + 0.2 * dist_cost;
@@ -339,6 +370,12 @@ void Target::update(const Armor & armor)
 
   if (id < 0) id = 0;
 
+  // ---- ② 板号已定：在两解里挑朝向 ----
+  const double yaw_fit_p = std::abs(tools::limit_rad(obs_yaw - xyza_list[id][3]));
+  const double yaw_fit_a =
+    std::abs(tools::limit_rad(obs_yaw_alt - xyza_list[id][3])) + EkfParams::kAltPriorRad;
+  const bool take_alt = armor.has_alt && yaw_fit_a < yaw_fit_p;
+
   if (id != 0) jumped = true;
 
   is_switch_ = (update_count_ > 0 && id != last_id);
@@ -347,9 +384,17 @@ void Target::update(const Armor & armor)
   last_id = id;
   update_count_++;
 
-  // 统一把"消歧后的绝对朝向"送进 EKF
+  // 统一把"消歧后的绝对朝向"送进 EKF。板号已定，这里只是两解择一：
+  // 两解位置差 32~35 mm（< 距离噪声 55 mm）、仰角差 14~16 mm，所以换解
+  // 实际只换朝向。`kAltPriorRad` 让备用解必须明确更贴合才翻盘，避免在两解
+  // 自然收敛（板接近正视）的区域来回横跳。
   Armor corrected = armor;
   corrected.ypr_in_world[0] = obs_yaw;
+  if (take_alt) {
+    corrected.xyz_in_world = armor.xyz_in_world_alt;
+    corrected.ypd_in_world = armor.ypd_in_world_alt;
+    corrected.ypr_in_world[0] = obs_yaw_alt;
+  }
 
   update_ypda(corrected, id);
 }

@@ -114,6 +114,24 @@ struct Armor
 
   double yaw_raw = 0.0;  // rad；只在 Solver::solve() 里赋值，调试输出可能早于它
 
+  // ---- PnP 平面二义性的第二个解（"镜像解"）----
+  //
+  // 平面靶标（一块矩形装甲板）的 PnP 数学上恒有两个解，二者关于**视线**镜像：
+  //     yaw_alt = 2·los − yaw      （los = 该板相对相机的方位角）
+  //
+  // 实测（实机 rlog，前哨站 @4.4 m，三份 log 一致）：
+  //   · 两解分离 **72.0° ± 0.3**，对称分布在视线两侧（各 ∓36°）
+  //   · 逐帧翻转率 **17.7%**（OpenCV 挑哪个近似掷硬币）
+  //   · 两解的**位置几乎相同**（距离只差 32~35 mm，小于 55 mm 的距离噪声），
+  //     仰角只差 14~16 mm —— 即**只有朝向不同**
+  //
+  // 因为只有朝向不同，所以：**认板必须用位置（不受镜像影响），朝向才在两解里挑**。
+  // 反过来（用朝向认板、再挑朝向）必然在翻转帧上认错板 —— 这是 `f4c734f` 失败的原因。
+  bool has_alt = false;
+  Eigen::Vector3d xyz_in_world_alt = Eigen::Vector3d::Zero();
+  Eigen::Vector3d ypr_in_world_alt = Eigen::Vector3d::Zero();
+  Eigen::Vector3d ypd_in_world_alt = Eigen::Vector3d::Zero();
+
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(
     int class_id, float confidence, const cv::Rect & box, std::vector<cv::Point2f> armor_keypoints);

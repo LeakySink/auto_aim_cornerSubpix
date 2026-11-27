@@ -67,6 +67,7 @@ bool Solver::solve(Armor & armor) const
     armor.ypr_in_gimbal = Eigen::Vector3d::Zero();
     armor.ypr_in_world = Eigen::Vector3d::Zero();
     armor.ypd_in_world = Eigen::Vector3d::Zero();
+    armor.has_alt = false;
   };
 
   // 关键点语义校验：换模型时第一时间发现"顺序/语义接错"（默认只记日志、不拒收）
@@ -89,10 +90,20 @@ bool Solver::solve(Armor & armor) const
 
   const auto object_points = armor_geometry().points(armor.type);
 
-  cv::Vec3d rvec, tvec;
-  cv::solvePnP(
-    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
+  // IPPE 的平面二义性：一块矩形板数学上恒有两个解（关于视线镜像），
+  // `solvePnP` 只给其中一个、`solvePnPGeneric` 给全部。这里取 [0] 当主解
+  // （与原来的行为一致），把 [1] 存成备用解供 Target 在"已定板号"之后择优。
+  std::vector<cv::Vec3d> rvecs, tvecs;
+  cv::solvePnPGeneric(
+    object_points, armor.points, camera_matrix_, distort_coeffs_, rvecs, tvecs, false,
     cv::SOLVEPNP_IPPE);
+  if (rvecs.empty()) {
+    zero_pose();
+    return false;
+  }
+
+  const cv::Vec3d rvec = rvecs[0];
+  const cv::Vec3d tvec = tvecs[0];
 
   Eigen::Vector3d xyz_in_camera;
   cv::cv2eigen(tvec, xyz_in_camera);
@@ -141,6 +152,35 @@ bool Solver::solve(Armor & armor) const
       min_valid_dist_, max_valid_dist_, armor.confidence);
     zero_pose();
     return false;
+  }
+
+  // ---- 备用解（镜像解 yaw_alt = 2·los − yaw）----
+  //
+  // 实测两解**只差朝向、位置几乎相同**（距离差 32~35 mm < 噪声 55 mm），
+  // 所以它只对"朝向"有用：板号必须由位置定（见 Target::update 的 assoc_pos_weight）。
+  armor.has_alt = false;
+  if (rvecs.size() > 1) {
+    Eigen::Vector3d xyz_alt_cam;
+    cv::cv2eigen(tvecs[1], xyz_alt_cam);
+    if (xyz_alt_cam.allFinite() && xyz_alt_cam[2] > 0.0) {
+      const Eigen::Vector3d xyz_alt =
+        R_gimbal2world_ * (R_camera2gimbal_ * xyz_alt_cam + t_camera2gimbal_);
+      cv::Mat rmat_alt;
+      cv::Rodrigues(rvecs[1], rmat_alt);
+      Eigen::Matrix3d R_alt;
+      cv::cv2eigen(rmat_alt, R_alt);
+      const Eigen::Vector3d ypr_alt = tools::eulers(R_gimbal2world_ * R_camera2gimbal_ * R_alt, 2, 1, 0);
+      const Eigen::Vector3d ypd_alt = tools::xyz2ypd(xyz_alt);
+      const double d_alt = xyz_alt.norm();
+      if (
+        xyz_alt.allFinite() && ypr_alt.allFinite() && ypd_alt.allFinite() &&
+        d_alt >= min_valid_dist_ && d_alt <= max_valid_dist_) {
+        armor.xyz_in_world_alt = xyz_alt;
+        armor.ypr_in_world_alt = ypr_alt;
+        armor.ypd_in_world_alt = ypd_alt;
+        armor.has_alt = true;
+      }
+    }
   }
 
   // 平衡不做yaw优化，因为pitch假设不成立
